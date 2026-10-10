@@ -3,17 +3,25 @@
 // (core/UI boundary, ADR-004).
 import { getDocument, GlobalWorkerOptions } from 'pdfjs-dist'
 import workerUrl from 'pdfjs-dist/build/pdf.worker.min.mjs?url'
+import type { Textbox } from '../model'
 import { exportPdf } from './exportPdf'
 
 GlobalWorkerOptions.workerSrc = workerUrl
+
+export interface PageSize {
+  width: number
+  height: number
+}
 
 export interface PdfHandle {
   readonly fileName: string
   readonly pageCount: number
   /** Renders a page (1-based) into the canvas; renders per canvas are serialized internally. */
   renderPage(pageNumber: number, canvas: HTMLCanvasElement, zoom: number): Promise<void>
-  /** Exports the document unchanged (T1: pure roundtrip). */
-  exportBytes(): Promise<Uint8Array>
+  /** Page size in PDF points (1-based page number), cached after first call. */
+  getPageSize(pageNumber: number): Promise<PageSize>
+  /** Exports the document with the given overlays baked in as real text. */
+  exportBytes(overlays?: Textbox[]): Promise<Uint8Array>
   /** Releases worker resources; call when switching or closing documents. */
   destroy(): Promise<void>
 }
@@ -29,6 +37,7 @@ export async function loadPdf(fileName: string, bytes: Uint8Array): Promise<PdfH
   // getPage await (triggered e.g. by StrictMode double effects). Registering
   // the chain synchronously serializes all renders on the same canvas.
   const renderQueues = new Map<HTMLCanvasElement, Promise<void>>()
+  const sizeCache = new Map<number, PageSize>()
 
   return {
     fileName,
@@ -50,7 +59,17 @@ export async function loadPdf(fileName: string, bytes: Uint8Array): Promise<PdfH
       return run
     },
 
-    exportBytes: () => exportPdf(bytes),
+    async getPageSize(pageNumber) {
+      const cached = sizeCache.get(pageNumber)
+      if (cached) return cached
+      const page = await pdfDocument.getPage(pageNumber)
+      const viewport = page.getViewport({ scale: 1 })
+      const size = { width: viewport.width, height: viewport.height }
+      sizeCache.set(pageNumber, size)
+      return size
+    },
+
+    exportBytes: (overlays) => exportPdf(bytes, overlays),
     destroy: () => loadingTask.destroy(),
   }
 }

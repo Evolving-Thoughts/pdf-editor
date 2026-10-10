@@ -85,3 +85,200 @@
   outline: 2px solid var(--accent);
   outline-offset: 2px;
 }
+
+.separator {
+  width: 1px;
+  height: 20px;
+  background: var(--border);
+}
+
+.toolbar button:disabled {
+  opacity: 0.4;
+  cursor: default;
+}
+
+
+.page {
+  position: relative;
+  background: #fff;
+  box-shadow: var(--shadow);
+}
+
+.page canvas {
+  display: block;
+}
+
+.textbox {
+  position: absolute;
+  color: #111;
+}
+
+.textbox textarea {
+  font: inherit;
+  line-height: 1.2;
+  color: inherit;
+  background: transparent;
+  border: 1px dashed transparent;
+  border-radius: 3px;
+  padding: 2px 4px;
+  resize: none;
+  overflow: hidden;
+  white-space: pre;
+  min-width: 40px;
+  cursor: text;
+}
+
+.textbox.selected textarea {
+  border-color: var(--accent-border);
+  background: rgba(255, 255, 255, 0.65);
+}
+
+
+.page.text-tool {
+  cursor: text;
+}
+
+.toolbar button.tool[aria-pressed="true"] {
+  border-color: var(--accent);
+  background: var(--accent-bg);
+}
+
+.minibar {
+  position: absolute;
+  bottom: calc(100% + 4px);
+  left: 0;
+  display: flex;
+  gap: 4px;
+  padding: 3px;
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  box-shadow: var(--shadow);
+  z-index: 5;
+}
+
+.minibar select,
+.minibar input,
+.minibar button {
+  font: inherit;
+  font-size: 13px;
+  padding: 2px 8px;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  background: var(--bg);
+  color: var(--text-h);
+  cursor: pointer;
+}
+
+.minibar .style-toggle {
+  min-width: 26px;
+  padding: 2px 6px;
+  text-align: center;
+}
+
+.minibar .style-toggle[aria-pressed='true'] {
+  border-color: var(--accent);
+  background: var(--accent-bg);
+}
+
+.font-size-picker {
+  position: relative;
+  display: inline-flex;
+}
+
+.font-size-popover {
+  position: absolute;
+  top: calc(100% + 4px);
+  left: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: 4px;
+  min-width: 76px;
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  box-shadow: var(--shadow);
+  z-index: 10;
+}
+
+.font-size-popover input {
+  font: inherit;
+  font-size: 13px;
+  width: 100%;
+  box-sizing: border-box;
+  margin-bottom: 2px;
+  padding: 2px 6px;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  background: var(--bg);
+  color: var(--text-h);
+  cursor: text;
+}
+
+.font-size-popover button {
+  font: inherit;
+  font-size: 13px;
+  text-align: left;
+  padding: 2px 6px;
+  border: none;
+  border-radius: 4px;
+  background: transparent;
+  color: var(--text-h);
+  cursor: pointer;
+}
+
+.font-size-popover button:hover {
+  background: var(--accent-bg);
+}
+
+.font-size-popover button.current {
+  font-weight: bold;
+}
+
+.symbol-picker {
+  position: relative;
+  display: inline-flex;
+}
+
+.symbol-popover {
+  position: absolute;
+  top: calc(100% + 4px);
+  left: 0;
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 2px;
+  padding: 4px;
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  box-shadow: var(--shadow);
+  z-index: 10;
+}
+
+.symbol-popover button {
+  font: inherit;
+  font-size: 15px;
+  width: 28px;
+  height: 26px;
+  border: none;
+  border-radius: 4px;
+  background: transparent;
+  color: var(--text-h);
+  cursor: pointer;
+}
+
+.symbol-popover button:hover {
+  background: var(--accent-bg);
+}
+
+.textbox .drag-surface {
+  position: absolute;
+  inset: 0;
+  cursor: grab;
+  touch-action: none;
+}
+
+.textbox.selected .drag-surface:active {
+  cursor: grabbing;
+}
