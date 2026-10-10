@@ -33,9 +33,25 @@ const FONT_VARIANTS: Record<OverlayFont, { plain: StandardFonts; bold: StandardF
   },
 }
 
-// WinAnsi (the standard text fonts' encoding) covers Latin-1 plus these
-// extras; anything else (e.g. a symbol pasted into a text font) becomes '?'.
-const NOT_WINANSI = /[^\u0020-\u007E\u00A0-\u00FF\u0152\u0153\u0160\u0161\u0178\u017D\u017E\u0192\u02C6\u02DC\u2013\u2014\u2018-\u201A\u201C-\u201E\u2020\u2021\u2022\u2026\u2030\u2039\u203A\u20AC\u2122\n\t]/g
+/**
+ * Keeps only characters the embedded font can encode, so one bad box can
+ * never abort the whole export: unencodable characters become '?' in text
+ * fonts (WinAnsi) and are dropped in ZapfDingbats (e.g. a letter typed into
+ * a symbol box). Checked per character against the font itself.
+ */
+function sanitizeFor(font: PDFFont, text: string, fontKey: OverlayFont): string {
+  const fallback = fontKey === 'zapfdingbats' ? '' : '?'
+  let out = ''
+  for (const char of text) {
+    try {
+      font.encodeText(char)
+      out += char
+    } catch {
+      out += fallback
+    }
+  }
+  return out
+}
 
 function variantFor(overlay: Textbox): StandardFonts {
   const variants = FONT_VARIANTS[overlay.font]
@@ -57,9 +73,8 @@ export async function exportPdf(bytes: Uint8Array, overlays: Textbox[] = []): Pr
         font = await doc.embedFont(variant)
         fonts.set(variant, font)
       }
-      // ZapfDingbats takes the Unicode symbol directly; text fonts are
-      // WinAnsi-encoded, so unencodable characters are replaced.
-      const text = overlay.font === 'zapfdingbats' ? overlay.text : overlay.text.replace(NOT_WINANSI, '?')
+      const text = sanitizeFor(font, overlay.text, overlay.font)
+      if (text.length === 0) continue
       const page = doc.getPage(overlay.pageIndex)
       page.drawText(text, {
         x: overlay.x,

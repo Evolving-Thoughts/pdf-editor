@@ -85,6 +85,20 @@ test('zapfdingbats symbols export as vector glyphs', async () => {
   expect((await PDFDocument.load(bytes)).getPageCount()).toBe(1)
 })
 
+test('plain text typed into a symbol box cannot crash the export', async () => {
+  const doc = await PDFDocument.create()
+  doc.addPage([595, 842])
+  // '✓abc': the letters have no ZapfDingbats glyph and must be dropped,
+  // the checkmark stays; a box that ends up empty is skipped entirely.
+  const bytes = await exportPdf(await doc.save(), [
+    box({ text: '✓abc', font: 'zapfdingbats', fontSize: 20 }),
+    box({ text: 'abc', font: 'zapfdingbats', fontSize: 20, y: 650 }),
+    box({ text: 'Überlebt', y: 600 }),
+  ])
+  const items = await extractItems(bytes, 1)
+  expect(items.map((item) => item.str).join('')).toContain('Überlebt')
+})
+
 test('unencodable characters in text fonts become question marks', async () => {
   const doc = await PDFDocument.create()
   doc.addPage([595, 842])
