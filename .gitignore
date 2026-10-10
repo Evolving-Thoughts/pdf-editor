@@ -22,3 +22,6 @@ dist-ssr
 *.njsproj
 *.sln
 *.sw?
+
+# Generierte Test-Fixtures (scripts/make-fixtures.mjs)
+tests/fixtures/
