@@ -1,11 +1,10 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
-import { loadPdf, renderPage, type LoadedPdf } from '../core/pdf/loadPdf'
-import { exportPdf } from '../core/pdf/exportPdf'
+import { loadPdf, type PdfHandle } from '../core/pdf/loadPdf'
 import { zoomIn, zoomOut } from '../core/viewerState'
 import './app.css'
 
 export default function App() {
-  const [pdf, setPdf] = useState<LoadedPdf | null>(null)
+  const [pdf, setPdf] = useState<PdfHandle | null>(null)
   const [zoom, setZoom] = useState(1)
   const [error, setError] = useState<string | null>(null)
   const pagesRef = useRef<HTMLDivElement>(null)
@@ -14,10 +13,13 @@ export default function App() {
     setError(null)
     try {
       const bytes = new Uint8Array(await file.arrayBuffer())
-      setPdf(await loadPdf(file.name, bytes))
+      const next = await loadPdf(file.name, bytes)
+      setPdf((previous) => {
+        void previous?.destroy()
+        return next
+      })
     } catch {
-      setPdf(null)
-      setError(`„${file.name}" konnte nicht geöffnet werden (beschädigt oder passwortgeschützt?).`)
+      setError(`„${file.name}“ konnte nicht geöffnet werden (beschädigt oder passwortgeschützt?).`)
     }
   }, [])
 
@@ -25,13 +27,13 @@ export default function App() {
     if (!pdf || !pagesRef.current) return
     const canvases = pagesRef.current.querySelectorAll('canvas')
     canvases.forEach((canvas, index) => {
-      void renderPage(pdf.document, index + 1, canvas, zoom)
+      void pdf.renderPage(index + 1, canvas, zoom)
     })
   }, [pdf, zoom])
 
   const onExport = useCallback(async () => {
     if (!pdf) return
-    const bytes = await exportPdf(pdf.bytes)
+    const bytes = await pdf.exportBytes()
     const url = URL.createObjectURL(new Blob([new Uint8Array(bytes)], { type: 'application/pdf' }))
     const link = document.createElement('a')
     link.href = url
