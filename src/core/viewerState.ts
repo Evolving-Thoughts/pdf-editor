@@ -1,4 +1,4 @@
-// Reine Zoom-Logik des Viewers — kein React, keine PDF-Bibliotheken.
+// Pure viewer zoom logic — no React, no PDF libraries.
 export const MIN_ZOOM = 0.5
 export const MAX_ZOOM = 3
 export const ZOOM_STEP = 0.25

@@ -1,5 +1,6 @@
-// Kern-Modul: PDF laden, rendern und freigeben (PDF.js).
-// Die UI kennt nur das PdfHandle, niemals pdfjs-dist direkt (Kern/UI-Grenze, ADR-004).
+// Core module: load, render and release PDFs (PDF.js).
+// The UI only ever talks to the PdfHandle, never to pdfjs-dist directly
+// (core/UI boundary, ADR-004).
 import {
   getDocument,
   GlobalWorkerOptions,
@@ -14,17 +15,17 @@ GlobalWorkerOptions.workerSrc = workerUrl
 export interface PdfHandle {
   readonly fileName: string
   readonly pageCount: number
-  /** Rendert eine Seite (1-basiert) in das Canvas; löst einen laufenden Render auf demselben Canvas ab. */
+  /** Renders a page (1-based) into the canvas; supersedes any render still running on the same canvas. */
   renderPage(pageNumber: number, canvas: HTMLCanvasElement, zoom: number): Promise<void>
-  /** Exportiert das Dokument unverändert (T1: reiner Roundtrip). */
+  /** Exports the document unchanged (T1: pure roundtrip). */
   exportBytes(): Promise<Uint8Array>
-  /** Gibt Worker-Ressourcen frei; beim Wechsel oder Schließen aufrufen. */
+  /** Releases worker resources; call when switching or closing documents. */
   destroy(): Promise<void>
 }
 
 export async function loadPdf(fileName: string, bytes: Uint8Array): Promise<PdfHandle> {
-  // getDocument transferiert den Buffer in den Worker und „detached“ ihn dabei —
-  // deshalb bekommt PDF.js eine Kopie, das Original bleibt für den Export nutzbar.
+  // getDocument transfers the buffer to the worker, which detaches it —
+  // so PDF.js gets a copy and the original stays usable for export.
   const loadingTask = getDocument({ data: bytes.slice() })
   const document = await loadingTask.promise
   const activeRenders = new Map<HTMLCanvasElement, RenderTask>()
@@ -47,7 +48,7 @@ export async function loadPdf(fileName: string, bytes: Uint8Array): Promise<PdfH
       try {
         await task.promise
       } catch (error) {
-        // Abgebrochene Renders (neuer Zoom/Wischeffekt) sind kein Fehler.
+        // Cancelled renders (new zoom level / page switch) are not errors.
         if (!(error instanceof RenderingCancelledException)) throw error
       } finally {
         if (activeRenders.get(canvas) === task) activeRenders.delete(canvas)

@@ -1,4 +1,4 @@
-// Kern-Modul: PDF exportieren (pdf-lib). T1 = reiner Roundtrip ohne Änderungen.
+// Core module: export a PDF (pdf-lib). T1 = plain roundtrip without changes.
 import { PDFDocument } from 'pdf-lib'
 
 export async function exportPdf(bytes: Uint8Array): Promise<Uint8Array> {

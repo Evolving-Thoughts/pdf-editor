@@ -2,7 +2,7 @@ import { expect, test } from 'vitest'
 import { PDFDocument } from 'pdf-lib'
 import { exportPdf } from '../../src/core/pdf/exportPdf'
 
-test('exportPdf erhält Seitenzahl und Seitengröße unverändert', async () => {
+test('exportPdf preserves page count and page sizes', async () => {
   const doc = await PDFDocument.create()
   doc.addPage([595, 842])
   doc.addPage([420, 595])
