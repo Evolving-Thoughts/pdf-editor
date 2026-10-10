@@ -44,7 +44,13 @@ check(`Freie Schriftgröße 13.5 übernommen (${fontSize})`, fontSize === '13.5p
 // 4. Datalist presets exist
 check('Vorschläge (datalist) vorhanden', await page.locator('datalist option').count() === 7)
 
-// 5. Invalid input reverts
+// 5. Non-numeric input reverts to the previous size
+await sizeInput.click()
+await sizeInput.fill('abc')
+await sizeInput.press('Enter')
+check('Ungültige Eingabe verworfen', (await sizeInput.inputValue()) === '13.5')
+
+// 5b. Out-of-range input is clamped
 await sizeInput.click()
 await sizeInput.fill('999')
 await sizeInput.press('Enter')

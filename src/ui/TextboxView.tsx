@@ -118,11 +118,10 @@ export function TextboxView({ box, zoom, pageHeightPts, selected, tool, store, o
             ))}
           </select>
           <input
-            type="number"
+            type="text"
+            inputMode="decimal"
+            className="font-size"
             aria-label="Schriftgröße"
-            min={MIN_FONT_SIZE}
-            max={MAX_FONT_SIZE}
-            step={1}
             list={`font-size-presets-${box.id}`}
             value={sizeDraft ?? box.fontSize}
             onChange={(event) => setSizeDraft(event.target.value)}

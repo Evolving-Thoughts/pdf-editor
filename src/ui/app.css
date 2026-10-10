@@ -169,8 +169,8 @@
   cursor: pointer;
 }
 
-.minibar input[type='number'] {
-  width: 56px;
+.minibar input.font-size {
+  width: 48px;
   cursor: text;
 }
 
