@@ -5,8 +5,17 @@ import type { OverlayFont, Textbox } from '../model'
 
 const FONT_MAP: Record<OverlayFont, StandardFonts> = {
   helvetica: StandardFonts.Helvetica,
+  'helvetica-bold': StandardFonts.HelveticaBold,
+  'helvetica-oblique': StandardFonts.HelveticaOblique,
+  'helvetica-boldOblique': StandardFonts.HelveticaBoldOblique,
   times: StandardFonts.TimesRoman,
+  'times-bold': StandardFonts.TimesRomanBold,
+  'times-italic': StandardFonts.TimesRomanItalic,
+  'times-boldItalic': StandardFonts.TimesRomanBoldItalic,
   courier: StandardFonts.Courier,
+  'courier-bold': StandardFonts.CourierBold,
+  'courier-oblique': StandardFonts.CourierOblique,
+  'courier-boldOblique': StandardFonts.CourierBoldOblique,
 }
 
 export async function exportPdf(bytes: Uint8Array, overlays: Textbox[] = []): Promise<Uint8Array> {

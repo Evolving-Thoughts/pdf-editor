@@ -1,28 +1,182 @@
-import { useEffect, useRef, useState } from 'react'
+import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react'
 import { moveTextbox, removeTextbox, updateTextbox } from '../core/commands'
 import type { EditorStore } from '../core/editorStore'
 import { patchOverlay, type OverlayFont, type Textbox } from '../core/model'
 import type { Tool } from './tools'
 
-const FONT_CSS: Record<OverlayFont, string> = {
-  helvetica: 'Helvetica, Arial, sans-serif',
-  times: "'Times New Roman', Times, serif",
-  courier: "'Courier New', Courier, monospace",
+interface FontCss {
+  fontFamily: string
+  fontWeight?: 'bold'
+  fontStyle?: 'italic'
 }
 
-const FONT_OPTIONS: Array<{ value: OverlayFont; label: string }> = [
-  { value: 'helvetica', label: 'Helvetica' },
-  { value: 'times', label: 'Times' },
-  { value: 'courier', label: 'Courier' },
+const HELVETICA = 'Helvetica, Arial, sans-serif'
+const TIMES = "'Times New Roman', Times, serif"
+const COURIER = "'Courier New', Courier, monospace"
+
+const FONT_CSS: Record<OverlayFont, FontCss> = {
+  helvetica: { fontFamily: HELVETICA },
+  'helvetica-bold': { fontFamily: HELVETICA, fontWeight: 'bold' },
+  'helvetica-oblique': { fontFamily: HELVETICA, fontStyle: 'italic' },
+  'helvetica-boldOblique': { fontFamily: HELVETICA, fontWeight: 'bold', fontStyle: 'italic' },
+  times: { fontFamily: TIMES },
+  'times-bold': { fontFamily: TIMES, fontWeight: 'bold' },
+  'times-italic': { fontFamily: TIMES, fontStyle: 'italic' },
+  'times-boldItalic': { fontFamily: TIMES, fontWeight: 'bold', fontStyle: 'italic' },
+  courier: { fontFamily: COURIER },
+  'courier-bold': { fontFamily: COURIER, fontWeight: 'bold' },
+  'courier-oblique': { fontFamily: COURIER, fontStyle: 'italic' },
+  'courier-boldOblique': { fontFamily: COURIER, fontWeight: 'bold', fontStyle: 'italic' },
+}
+
+const FONT_GROUPS: Array<{ label: string; options: Array<{ value: OverlayFont; label: string }> }> = [
+  {
+    label: 'Helvetica',
+    options: [
+      { value: 'helvetica', label: 'Helvetica' },
+      { value: 'helvetica-bold', label: 'Fett' },
+      { value: 'helvetica-oblique', label: 'Kursiv' },
+      { value: 'helvetica-boldOblique', label: 'Fett Kursiv' },
+    ],
+  },
+  {
+    label: 'Times',
+    options: [
+      { value: 'times', label: 'Times' },
+      { value: 'times-bold', label: 'Fett' },
+      { value: 'times-italic', label: 'Kursiv' },
+      { value: 'times-boldItalic', label: 'Fett Kursiv' },
+    ],
+  },
+  {
+    label: 'Courier',
+    options: [
+      { value: 'courier', label: 'Courier' },
+      { value: 'courier-bold', label: 'Fett' },
+      { value: 'courier-oblique', label: 'Kursiv' },
+      { value: 'courier-boldOblique', label: 'Fett Kursiv' },
+    ],
+  },
 ]
+
 const SIZE_PRESETS = [8, 10, 12, 14, 18, 24, 36]
 const MIN_FONT_SIZE = 4
 const MAX_FONT_SIZE = 200
+const LINE_HEIGHT = 1.2
 
 function clampFontSize(raw: string): number | null {
   const parsed = Number(raw)
   if (!Number.isFinite(parsed) || parsed <= 0) return null
   return Math.min(MAX_FONT_SIZE, Math.max(MIN_FONT_SIZE, Math.round(parsed * 10) / 10))
+}
+
+// Text measurement for the textarea autosize: field-sizing is not reliable
+// enough across browsers, so we size the box explicitly from the content.
+let measureCtx: CanvasRenderingContext2D | null = null
+
+function measureText(text: string, css: FontCss, px: number): { width: number; lines: number } {
+  const lines = text.split('\n')
+  if (!measureCtx) measureCtx = document.createElement('canvas').getContext('2d')
+  if (!measureCtx) return { width: text.length * px * 0.6, lines: Math.max(1, lines.length) }
+  measureCtx.font = `${css.fontStyle ?? 'normal'} ${css.fontWeight ?? 'normal'} ${px}px ${css.fontFamily}`
+  let width = 0
+  for (const line of lines) width = Math.max(width, measureCtx.measureText(line || ' ').width)
+  return { width, lines: Math.max(1, lines.length) }
+}
+
+interface FontSizePickerProps {
+  value: number
+  onCommit: (size: number) => void
+}
+
+/** Button that opens a small popover: free input on top, preset list below. */
+function FontSizePicker({ value, onCommit }: FontSizePickerProps) {
+  const [open, setOpen] = useState(false)
+  const [draft, setDraft] = useState(String(value))
+  const wrapRef = useRef<HTMLSpanElement>(null)
+  const cancelled = useRef(false)
+
+  const close = useCallback(
+    (commit: boolean) => {
+      if (commit && !cancelled.current) {
+        const size = clampFontSize(draft)
+        if (size !== null && size !== value) onCommit(size)
+      }
+      cancelled.current = false
+      setOpen(false)
+    },
+    [draft, value, onCommit],
+  )
+
+  // Commit-and-close when clicking anywhere outside the picker.
+  useEffect(() => {
+    if (!open) return
+    const onPointerDown = (event: PointerEvent) => {
+      if (!wrapRef.current?.contains(event.target as Node)) close(true)
+    }
+    window.addEventListener('pointerdown', onPointerDown)
+    return () => window.removeEventListener('pointerdown', onPointerDown)
+  }, [open, close])
+
+  const pickPreset = (size: number) => {
+    setOpen(false)
+    if (size !== value) onCommit(size)
+  }
+
+  return (
+    <span className="font-size-picker" ref={wrapRef}>
+      <button
+        type="button"
+        aria-label="Schriftgröße"
+        aria-expanded={open}
+        onClick={() => {
+          if (open) close(true)
+          else {
+            setDraft(String(value))
+            setOpen(true)
+          }
+        }}
+      >
+        {value}&nbsp;▾
+      </button>
+      {open && (
+        <span className="font-size-popover">
+          <input
+            type="text"
+            inputMode="decimal"
+            autoFocus
+            aria-label="Schriftgröße eingeben"
+            value={draft}
+            onChange={(event) => setDraft(event.target.value)}
+            onFocus={(event) => event.currentTarget.select()}
+            onKeyDown={(event) => {
+              if (event.key === 'Enter') close(true)
+              if (event.key === 'Escape') {
+                cancelled.current = true
+                close(false)
+              }
+            }}
+            onBlur={() => close(true)}
+          />
+          {SIZE_PRESETS.map((size) => (
+            <button
+              key={size}
+              type="button"
+              className={size === value ? 'current' : ''}
+              // pointerdown (not click) + preventDefault: commit before the
+              // input's blur can fire, so no double commit with a stale value.
+              onPointerDown={(event) => {
+                event.preventDefault()
+                pickPreset(size)
+              }}
+            >
+              {size}
+            </button>
+          ))}
+        </span>
+      )}
+    </span>
+  )
 }
 
 interface TextboxViewProps {
@@ -38,13 +192,22 @@ interface TextboxViewProps {
 export function TextboxView({ box, zoom, pageHeightPts, selected, tool, store, onSelect }: TextboxViewProps) {
   const [draft, setDraft] = useState(box.text)
   const [focused, setFocused] = useState(false)
-  // Local editing state for the font-size field; null = show the box's value.
-  const [sizeDraft, setSizeDraft] = useState<string | null>(null)
-  // Escape blurs the size field; this flag stops the blur from committing.
-  const sizeCancelled = useRef(false)
   const beforeEdit = useRef(box.text)
   const textareaRef = useRef<HTMLTextAreaElement>(null)
   const dragFrom = useRef<{ pointerX: number; pointerY: number; x: number; y: number } | null>(null)
+
+  const displayText = focused ? draft : box.text
+
+  // Autosize the textarea to its content (also when the font size grows
+  // beyond the current box): width fits the longest line, height the lines.
+  useLayoutEffect(() => {
+    const el = textareaRef.current
+    if (!el) return
+    const px = box.fontSize * zoom
+    const { width, lines } = measureText(displayText, FONT_CSS[box.font], px)
+    el.style.width = `${Math.max(40, Math.ceil(width) + 10 + Math.ceil(px * 0.2))}px`
+    el.style.height = `${Math.ceil(lines * px * LINE_HEIGHT) + 6}px`
+  }, [displayText, box.font, box.fontSize, zoom])
 
   // Focus the textarea when a new (still empty) box gets selected.
   useEffect(() => {
@@ -96,7 +259,7 @@ export function TextboxView({ box, zoom, pageHeightPts, selected, tool, store, o
   return (
     <div
       className={`textbox${selected ? ' selected' : ''}`}
-      style={{ left, top, fontFamily: FONT_CSS[box.font], fontSize: box.fontSize * zoom }}
+      style={{ left, top, ...FONT_CSS[box.font], fontSize: box.fontSize * zoom }}
       onPointerDown={(event) => {
         event.stopPropagation()
         onSelect(box.id)
@@ -111,46 +274,24 @@ export function TextboxView({ box, zoom, pageHeightPts, selected, tool, store, o
               store.dispatch(updateTextbox(box.id, { font: box.font }, { font: event.target.value as OverlayFont }))
             }
           >
-            {FONT_OPTIONS.map((option) => (
-              <option key={option.value} value={option.value}>
-                {option.label}
-              </option>
+            {FONT_GROUPS.map((group) => (
+              <optgroup key={group.label} label={group.label}>
+                {group.options.map((option) => (
+                  <option key={option.value} value={option.value}>
+                    {option.label}
+                  </option>
+                ))}
+              </optgroup>
             ))}
           </select>
-          <input
-            type="text"
-            inputMode="decimal"
-            className="font-size"
-            aria-label="Schriftgröße"
-            list={`font-size-presets-${box.id}`}
-            value={sizeDraft ?? box.fontSize}
-            onChange={(event) => setSizeDraft(event.target.value)}
-            onBlur={(event) => {
-              if (sizeCancelled.current) {
-                sizeCancelled.current = false
-                setSizeDraft(null)
-                return
-              }
-              setSizeDraft(null)
-              const size = clampFontSize(event.target.value)
-              if (size !== null && size !== box.fontSize) {
+          <FontSizePicker
+            value={box.fontSize}
+            onCommit={(size) => {
+              if (size !== box.fontSize) {
                 store.dispatch(updateTextbox(box.id, { fontSize: box.fontSize }, { fontSize: size }))
               }
             }}
-            onKeyDown={(event) => {
-              if (event.key === 'Enter') event.currentTarget.blur()
-              if (event.key === 'Escape') {
-                sizeCancelled.current = true
-                setSizeDraft(null)
-                event.currentTarget.blur()
-              }
-            }}
           />
-          <datalist id={`font-size-presets-${box.id}`}>
-            {SIZE_PRESETS.map((size) => (
-              <option key={size} value={size} />
-            ))}
-          </datalist>
           <button
             type="button"
             aria-label="Textbox löschen"
@@ -165,7 +306,7 @@ export function TextboxView({ box, zoom, pageHeightPts, selected, tool, store, o
       )}
       <textarea
         ref={textareaRef}
-        value={focused ? draft : box.text}
+        value={displayText}
         rows={1}
         placeholder="Text …"
         aria-label="Textbox-Inhalt"

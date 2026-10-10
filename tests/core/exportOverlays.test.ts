@@ -58,3 +58,17 @@ test('overlays respect page index and font choice', async () => {
   // subset aliases (e.g. "g_d3_f1") instead of the base font name.
   // The 'times' code path is exercised by the export succeeding at all.
 })
+
+test('bold and italic font variants export successfully', async () => {
+  const doc = await PDFDocument.create()
+  doc.addPage([595, 842])
+  const bytes = await exportPdf(await doc.save(), [
+    box({ text: 'Fett', font: 'helvetica-bold', y: 600 }),
+    box({ text: 'Kursiv', font: 'times-italic', y: 500 }),
+    box({ text: 'Fett Kursiv', font: 'courier-boldOblique', y: 400 }),
+  ])
+  // pdfjs may split runs and emit empty items; compare the joined text.
+  const items = await extractItems(bytes, 1)
+  const joined = items.map((item) => item.str).join('')
+  for (const text of ['Fett', 'Kursiv', 'Fett Kursiv']) expect(joined).toContain(text)
+})
