@@ -112,3 +112,12 @@ test('nudges do not merge across a time gap', () => {
     vi.useRealTimers()
   }
 })
+
+test('undoing a removal restores the original position in the overlay order', () => {
+  const state: EditorState = { overlays: [makeBox('a'), makeBox('b'), makeBox('c')] }
+  const stack = new CommandStack(state)
+  stack.execute(removeTextbox(state.overlays[1]))
+  expect(state.overlays.map((o) => o.id)).toEqual(['a', 'c'])
+  stack.undo()
+  expect(state.overlays.map((o) => o.id)).toEqual(['a', 'b', 'c'])
+})

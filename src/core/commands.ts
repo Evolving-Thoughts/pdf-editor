@@ -74,13 +74,19 @@ export function addTextbox(box: Textbox): Command {
 
 export function removeTextbox(box: Textbox): Command {
   const snapshot = { ...box }
+  // Captured in apply: undo must restore the exact prior state, including
+  // the overlay's position in the array (stacking/paint order, hit targets).
+  let index = -1
   return {
     label: 'Remove textbox',
     apply: (s) => {
+      index = s.overlays.findIndex((o) => o.id === snapshot.id)
       s.overlays = s.overlays.filter((o) => o.id !== snapshot.id)
     },
     revert: (s) => {
-      s.overlays.push({ ...snapshot })
+      const restored = { ...snapshot }
+      if (index >= 0 && index <= s.overlays.length) s.overlays.splice(index, 0, restored)
+      else s.overlays.push(restored)
     },
   }
 }
