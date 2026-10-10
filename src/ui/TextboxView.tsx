@@ -15,7 +15,15 @@ const FONT_OPTIONS: Array<{ value: OverlayFont; label: string }> = [
   { value: 'times', label: 'Times' },
   { value: 'courier', label: 'Courier' },
 ]
-const SIZE_OPTIONS = [8, 10, 12, 14, 18, 24, 36]
+const SIZE_PRESETS = [8, 10, 12, 14, 18, 24, 36]
+const MIN_FONT_SIZE = 4
+const MAX_FONT_SIZE = 200
+
+function clampFontSize(raw: string): number | null {
+  const parsed = Number(raw)
+  if (!Number.isFinite(parsed) || parsed <= 0) return null
+  return Math.min(MAX_FONT_SIZE, Math.max(MIN_FONT_SIZE, Math.round(parsed * 10) / 10))
+}
 
 interface TextboxViewProps {
   box: Textbox
@@ -30,6 +38,10 @@ interface TextboxViewProps {
 export function TextboxView({ box, zoom, pageHeightPts, selected, tool, store, onSelect }: TextboxViewProps) {
   const [draft, setDraft] = useState(box.text)
   const [focused, setFocused] = useState(false)
+  // Local editing state for the font-size field; null = show the box's value.
+  const [sizeDraft, setSizeDraft] = useState<string | null>(null)
+  // Escape blurs the size field; this flag stops the blur from committing.
+  const sizeCancelled = useRef(false)
   const beforeEdit = useRef(box.text)
   const textareaRef = useRef<HTMLTextAreaElement>(null)
   const dragFrom = useRef<{ pointerX: number; pointerY: number; x: number; y: number } | null>(null)
@@ -105,19 +117,41 @@ export function TextboxView({ box, zoom, pageHeightPts, selected, tool, store, o
               </option>
             ))}
           </select>
-          <select
+          <input
+            type="number"
             aria-label="Schriftgröße"
-            value={box.fontSize}
-            onChange={(event) =>
-              store.dispatch(updateTextbox(box.id, { fontSize: box.fontSize }, { fontSize: Number(event.target.value) }))
-            }
-          >
-            {SIZE_OPTIONS.map((size) => (
-              <option key={size} value={size}>
-                {size}
-              </option>
+            min={MIN_FONT_SIZE}
+            max={MAX_FONT_SIZE}
+            step={1}
+            list={`font-size-presets-${box.id}`}
+            value={sizeDraft ?? box.fontSize}
+            onChange={(event) => setSizeDraft(event.target.value)}
+            onBlur={(event) => {
+              if (sizeCancelled.current) {
+                sizeCancelled.current = false
+                setSizeDraft(null)
+                return
+              }
+              setSizeDraft(null)
+              const size = clampFontSize(event.target.value)
+              if (size !== null && size !== box.fontSize) {
+                store.dispatch(updateTextbox(box.id, { fontSize: box.fontSize }, { fontSize: size }))
+              }
+            }}
+            onKeyDown={(event) => {
+              if (event.key === 'Enter') event.currentTarget.blur()
+              if (event.key === 'Escape') {
+                sizeCancelled.current = true
+                setSizeDraft(null)
+                event.currentTarget.blur()
+              }
+            }}
+          />
+          <datalist id={`font-size-presets-${box.id}`}>
+            {SIZE_PRESETS.map((size) => (
+              <option key={size} value={size} />
             ))}
-          </select>
+          </datalist>
           <button
             type="button"
             aria-label="Textbox löschen"

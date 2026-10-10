@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState, useSyncExternalStore } from 'react'
-import { removeTextbox } from '../core/commands'
+import { nudgeTextbox, removeTextbox } from '../core/commands'
 import { EditorStore } from '../core/editorStore'
 import { loadPdf, type PdfHandle } from '../core/pdf/loadPdf'
 import { zoomIn, zoomOut } from '../core/viewerState'
@@ -61,6 +61,18 @@ export default function App() {
           store.dispatch(removeTextbox(box))
           setSelectedId(null)
         }
+        return
+      }
+      if (selectedId && event.key.startsWith('Arrow')) {
+        const box = store.state.overlays.find((o) => o.id === selectedId)
+        if (!box) return
+        event.preventDefault()
+        const step = event.shiftKey ? 10 : 1
+        const dx = event.key === 'ArrowLeft' ? -step : event.key === 'ArrowRight' ? step : 0
+        const dy = event.key === 'ArrowUp' ? step : event.key === 'ArrowDown' ? -step : 0
+        store.dispatch(
+          nudgeTextbox(box.id, { x: box.x, y: box.y }, { x: Math.max(0, box.x + dx), y: Math.max(0, box.y + dy) }),
+        )
         return
       }
       if (!(event.ctrlKey || event.metaKey)) return

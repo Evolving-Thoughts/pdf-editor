@@ -157,6 +157,7 @@
 }
 
 .minibar select,
+.minibar input,
 .minibar button {
   font: inherit;
   font-size: 13px;
@@ -166,6 +167,11 @@
   background: var(--bg);
   color: var(--text-h);
   cursor: pointer;
+}
+
+.minibar input[type='number'] {
+  width: 56px;
+  cursor: text;
 }
 
 .textbox .drag-surface {

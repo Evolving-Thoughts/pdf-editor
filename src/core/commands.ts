@@ -8,6 +8,12 @@ export interface Command {
   readonly label: string
   apply(state: EditorState): void
   revert(state: EditorState): void
+  /**
+   * Optionally absorb the previous top-of-stack command (already applied)
+   * into this one, returning the combined command. Used to coalesce rapid
+   * repeats like arrow-key nudges into a single undo step.
+   */
+  merge?(previous: Command): Command | null
 }
 
 export class CommandStack {
@@ -29,7 +35,10 @@ export class CommandStack {
 
   execute(command: Command): void {
     command.apply(this.state)
-    this.done.push(command)
+    const previous = this.done[this.done.length - 1]
+    const merged = previous && command.merge ? command.merge(previous) : null
+    if (merged) this.done[this.done.length - 1] = merged
+    else this.done.push(command)
     this.undone = []
   }
 
@@ -94,4 +103,31 @@ export function moveTextbox(
     apply: (s) => patchOverlay(s, id, to),
     revert: (s) => patchOverlay(s, id, from),
   }
+}
+
+/** Nudges within this gap merge into one undo step. */
+const NUDGE_MERGE_MS = 1000
+
+interface NudgeData {
+  id: string
+  from: { x: number; y: number }
+  time: number
+}
+
+/** Small keyboard move; consecutive nudges on the same box merge for undo. */
+export function nudgeTextbox(id: string, from: { x: number; y: number }, to: { x: number; y: number }): Command {
+  const self: Command & { nudge?: NudgeData } = {
+    label: 'Nudge textbox',
+    nudge: { id, from, time: Date.now() },
+    apply: (s) => patchOverlay(s, id, to),
+    revert: (s) => patchOverlay(s, id, from),
+    merge: (previous) => {
+      const prev = (previous as { nudge?: NudgeData }).nudge
+      const own = self.nudge
+      if (!prev || !own || prev.id !== id) return null
+      if (own.time - prev.time > NUDGE_MERGE_MS) return null
+      return nudgeTextbox(id, prev.from, to)
+    },
+  }
+  return self
 }

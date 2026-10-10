@@ -1,8 +1,9 @@
-import { expect, test } from 'vitest'
+import { expect, test, vi } from 'vitest'
 import {
   addTextbox,
   CommandStack,
   moveTextbox,
+  nudgeTextbox,
   removeTextbox,
   updateTextbox,
 } from '../../src/core/commands'
@@ -68,4 +69,46 @@ test('25 mixed actions undo cleanly back to empty', () => {
   expect(state.overlays).toHaveLength(0)
   expect(stack.canUndo).toBe(false)
   expect(stack.canRedo).toBe(true)
+})
+
+test('rapid nudges on the same box merge into one undo step', () => {
+  const state: EditorState = { overlays: [makeBox('a')] }
+  const stack = new CommandStack(state)
+  for (let i = 1; i <= 5; i++) {
+    const box = state.overlays[0]
+    stack.execute(nudgeTextbox('a', { x: box.x, y: box.y }, { x: box.x + 1, y: box.y }))
+  }
+  expect(state.overlays[0].x).toBe(55)
+  stack.undo()
+  expect(state.overlays[0].x).toBe(50)
+  expect(stack.canUndo).toBe(false)
+  stack.redo()
+  expect(state.overlays[0].x).toBe(55)
+})
+
+test('nudges on different boxes do not merge', () => {
+  const state: EditorState = { overlays: [makeBox('a'), makeBox('b')] }
+  const stack = new CommandStack(state)
+  stack.execute(nudgeTextbox('a', { x: 50, y: 700 }, { x: 51, y: 700 }))
+  stack.execute(nudgeTextbox('b', { x: 50, y: 700 }, { x: 51, y: 700 }))
+  stack.undo()
+  expect(state.overlays[1].x).toBe(50)
+  expect(state.overlays[0].x).toBe(51)
+  stack.undo()
+  expect(state.overlays[0].x).toBe(50)
+})
+
+test('nudges do not merge across a time gap', () => {
+  vi.useFakeTimers()
+  try {
+    const state: EditorState = { overlays: [makeBox('a')] }
+    const stack = new CommandStack(state)
+    stack.execute(nudgeTextbox('a', { x: 50, y: 700 }, { x: 51, y: 700 }))
+    vi.advanceTimersByTime(2000)
+    stack.execute(nudgeTextbox('a', { x: 51, y: 700 }, { x: 52, y: 700 }))
+    stack.undo()
+    expect(state.overlays[0].x).toBe(51)
+  } finally {
+    vi.useRealTimers()
+  }
 })
