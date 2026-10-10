@@ -8,18 +8,16 @@ export default function App() {
   const [zoom, setZoom] = useState(1)
   const [error, setError] = useState<string | null>(null)
   const pagesRef = useRef<HTMLDivElement>(null)
-  // Current handle in a ref so destroy() runs outside React state updaters
-  // (updaters must stay pure; StrictMode double-invokes them in dev).
-  const pdfRef = useRef<PdfHandle | null>(null)
 
   const onOpenFile = useCallback(async (file: File) => {
     setError(null)
     try {
       const bytes = new Uint8Array(await file.arrayBuffer())
       const next = await loadPdf(file.name, bytes)
-      void pdfRef.current?.destroy()
-      pdfRef.current = next
-      setPdf(next)
+      setPdf((previous) => {
+        void previous?.destroy()
+        return next
+      })
     } catch {
       setError(`„${file.name}“ konnte nicht geöffnet werden (beschädigt oder passwortgeschützt?).`)
     }
@@ -33,9 +31,6 @@ export default function App() {
     })
   }, [pdf, zoom])
 
-  // Release the worker document when the app unmounts.
-  useEffect(() => () => void pdfRef.current?.destroy(), [])
-
   const onExport = useCallback(async () => {
     if (!pdf) return
     const bytes = await pdf.exportBytes()
@@ -44,7 +39,9 @@ export default function App() {
     link.href = url
     link.download = pdf.fileName
     link.click()
-    URL.revokeObjectURL(url)
+    // Defer revocation: Firefox/Safari may abort the download if the URL
+    // is revoked in the same tick as the click.
+    setTimeout(() => URL.revokeObjectURL(url), 1000)
   }, [pdf])
 
   return (
@@ -55,7 +52,7 @@ export default function App() {
           <input
             type="file"
             accept="application/pdf"
-            className="visually-hidden"
+            hidden
             onChange={(event) => {
               const file = event.target.files?.[0]
               if (file) void onOpenFile(file)
