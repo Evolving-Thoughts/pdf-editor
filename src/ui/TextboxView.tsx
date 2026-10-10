@@ -14,13 +14,20 @@ const FONT_CSS: Record<OverlayFont, string> = {
   helvetica: 'Helvetica, Arial, sans-serif',
   times: "'Times New Roman', Times, serif",
   courier: "'Courier New', Courier, monospace",
+  // Browsers have no ZapfDingbats; the box stores Unicode symbols anyway,
+  // so the editor renders them with system fonts. Export maps to the font.
+  zapfdingbats: 'system-ui, sans-serif',
 }
 
 const FONT_OPTIONS: Array<{ value: OverlayFont; label: string }> = [
   { value: 'helvetica', label: 'Helvetica' },
   { value: 'times', label: 'Times' },
   { value: 'courier', label: 'Courier' },
+  { value: 'zapfdingbats', label: 'Symbole' },
 ]
+
+// Verified against pdf-lib's ZapfDingbats encoding (scripts: dingbats check).
+const SYMBOLS = ['✓', '✔', '✕', '✖', '✗', '✘', '■', '❑', '●', '◆', '★', '✦', '➔', '✎', '✉', '☎']
 
 const SIZE_PRESETS = [8, 10, 12, 14, 18, 24, 36]
 const MIN_FONT_SIZE = 4
@@ -142,6 +149,56 @@ function FontSizePicker({ value, onCommit }: FontSizePickerProps) {
   )
 }
 
+interface SymbolPickerProps {
+  onPick: (symbol: string) => void
+}
+
+/** Button that opens a grid of ZapfDingbats symbols (form checkmarks etc.). */
+function SymbolPicker({ onPick }: SymbolPickerProps) {
+  const [open, setOpen] = useState(false)
+  const wrapRef = useRef<HTMLSpanElement>(null)
+
+  useEffect(() => {
+    if (!open) return
+    const onPointerDown = (event: PointerEvent) => {
+      if (!wrapRef.current?.contains(event.target as Node)) setOpen(false)
+    }
+    window.addEventListener('pointerdown', onPointerDown)
+    return () => window.removeEventListener('pointerdown', onPointerDown)
+  }, [open])
+
+  return (
+    <span className="symbol-picker" ref={wrapRef}>
+      <button
+        type="button"
+        aria-label="Symbol einfügen"
+        aria-expanded={open}
+        title="Symbol einfügen (Häkchen, Kreuze, …)"
+        onClick={() => setOpen((o) => !o)}
+      >
+        ✓&nbsp;▾
+      </button>
+      {open && (
+        <span className="symbol-popover">
+          {SYMBOLS.map((symbol) => (
+            <button
+              key={symbol}
+              type="button"
+              onPointerDown={(event) => {
+                event.preventDefault()
+                setOpen(false)
+                onPick(symbol)
+              }}
+            >
+              {symbol}
+            </button>
+          ))}
+        </span>
+      )}
+    </span>
+  )
+}
+
 interface TextboxViewProps {
   box: Textbox
   zoom: number
@@ -236,13 +293,7 @@ export function TextboxView({ box, zoom, pageHeightPts, selected, tool, store, o
   return (
     <div
       className={`textbox${selected ? ' selected' : ''}`}
-      style={{
-        left,
-        top,
-        ...fontCss,
-        textDecoration: box.underline ? 'underline' : undefined,
-        fontSize: box.fontSize * zoom,
-      }}
+      style={{ left, top, ...fontCss, fontSize: box.fontSize * zoom }}
       onPointerDown={(event) => {
         event.stopPropagation()
         onSelect(box.id)
@@ -263,36 +314,53 @@ export function TextboxView({ box, zoom, pageHeightPts, selected, tool, store, o
               </option>
             ))}
           </select>
-          <button
-            type="button"
-            className="style-toggle"
-            aria-label="Fett"
-            aria-pressed={box.bold}
-            title="Fett"
-            onClick={() => store.dispatch(updateTextbox(box.id, { bold: box.bold }, { bold: !box.bold }))}
-          >
-            <b>B</b>
-          </button>
-          <button
-            type="button"
-            className="style-toggle"
-            aria-label="Kursiv"
-            aria-pressed={box.italic}
-            title="Kursiv"
-            onClick={() => store.dispatch(updateTextbox(box.id, { italic: box.italic }, { italic: !box.italic }))}
-          >
-            <i>I</i>
-          </button>
-          <button
-            type="button"
-            className="style-toggle"
-            aria-label="Unterstrichen"
-            aria-pressed={box.underline}
-            title="Unterstrichen"
-            onClick={() => store.dispatch(updateTextbox(box.id, { underline: box.underline }, { underline: !box.underline }))}
-          >
-            <u>U</u>
-          </button>
+          {box.font !== 'zapfdingbats' && (
+            <>
+              <button
+                type="button"
+                className="style-toggle"
+                aria-label="Fett"
+                aria-pressed={box.bold}
+                title="Fett"
+                onClick={() => store.dispatch(updateTextbox(box.id, { bold: box.bold }, { bold: !box.bold }))}
+              >
+                <b>B</b>
+              </button>
+              <button
+                type="button"
+                className="style-toggle"
+                aria-label="Kursiv"
+                aria-pressed={box.italic}
+                title="Kursiv"
+                onClick={() => store.dispatch(updateTextbox(box.id, { italic: box.italic }, { italic: !box.italic }))}
+              >
+                <i>I</i>
+              </button>
+              <button
+                type="button"
+                className="style-toggle"
+                aria-label="Unterstrichen"
+                aria-pressed={box.underline}
+                title="Unterstrichen"
+                onClick={() =>
+                  store.dispatch(updateTextbox(box.id, { underline: box.underline }, { underline: !box.underline }))
+                }
+              >
+                <u>U</u>
+              </button>
+            </>
+          )}
+          <SymbolPicker
+            onPick={(symbol) =>
+              store.dispatch(
+                updateTextbox(
+                  box.id,
+                  { text: box.text, font: box.font, bold: box.bold, italic: box.italic, underline: box.underline },
+                  { text: symbol, font: 'zapfdingbats', bold: false, italic: false, underline: false },
+                ),
+              )
+            }
+          />
           <FontSizePicker
             value={box.fontSize}
             onCommit={(size) => {
@@ -315,6 +383,9 @@ export function TextboxView({ box, zoom, pageHeightPts, selected, tool, store, o
       )}
       <textarea
         ref={textareaRef}
+        // text-decoration does not propagate into the textarea's text (it is
+        // a replaced element), so underline must be set on the element itself.
+        style={{ textDecoration: box.underline ? 'underline' : undefined }}
         value={displayText}
         rows={1}
         placeholder="Text …"

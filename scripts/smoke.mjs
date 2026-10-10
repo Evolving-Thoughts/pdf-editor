@@ -35,8 +35,8 @@ await page.keyboard.press('Escape')
 const box = page.locator('.textbox')
 check('Minibar sichtbar nach Auswahl', await box.locator('.minibar').isVisible())
 
-// 3. Font select offers the 3 families
-check('3 Schriftfamilien im Select', (await box.locator('select[aria-label="Schriftart"] option').count()) === 3)
+// 3. Font select offers the 3 text families + symbols
+check('4 Einträge im Schriftart-Select (inkl. Symbole)', (await box.locator('select[aria-label="Schriftart"] option').count()) === 4)
 
 // 4. B/I/U toggle buttons switch styles on AND off again
 const boldBtn = box.locator('button[aria-label="Fett"]')
@@ -50,10 +50,27 @@ check('I aktiviert Kursiv', (await box.evaluate((el) => getComputedStyle(el).fon
 await italicBtn.click()
 check('I erneut deaktiviert Kursiv', (await box.evaluate((el) => getComputedStyle(el).fontStyle)) === 'normal')
 const underlineBtn = box.locator('button[aria-label="Unterstrichen"]')
+const ta = box.locator('textarea')
 await underlineBtn.click()
-check('U aktiviert Unterstrichen', ((await box.evaluate((el) => getComputedStyle(el).textDecorationLine))).includes('underline'))
+check('U aktiviert Unterstrichen (im Text)', ((await ta.evaluate((el) => getComputedStyle(el).textDecorationLine))).includes('underline'))
 await underlineBtn.click()
-check('U erneut deaktiviert Unterstrichen', !((await box.evaluate((el) => getComputedStyle(el).textDecorationLine))).includes('underline'))
+check('U erneut deaktiviert Unterstrichen', !((await ta.evaluate((el) => getComputedStyle(el).textDecorationLine))).includes('underline'))
+
+// 4b. Symbol palette: pick a checkmark, B/I/U disappear for symbol boxes
+await box.locator('button[aria-label="Symbol einfügen"]').click()
+const palette = box.locator('.symbol-popover')
+check('Symbol-Palette geht auf (16 Symbole)', (await palette.locator('button').count()) === 16)
+await palette.locator('button', { hasText: '✓' }).first().click()
+check('Symbol ✓ in der Box', (await ta.inputValue()) === '✓')
+check('Font steht auf Symbole', (await box.locator('select[aria-label="Schriftart"]').inputValue()) === 'zapfdingbats')
+check('B/I/U bei Symbolen ausgeblendet', (await box.locator('button[aria-label="Fett"]').count()) === 0)
+// back to text for the remaining steps
+await box.locator('select[aria-label="Schriftart"]').selectOption('helvetica')
+await ta.click({ force: true })
+await ta.fill('Hallo Welt')
+await page.keyboard.press('Escape')
+await page.locator('.textbox textarea').click({ force: true })
+await page.keyboard.press('Escape')
 
 // 5. Font-size picker: opens with input + all 7 presets visible
 const sizeButton = box.locator('button[aria-label="Schriftgröße"]')

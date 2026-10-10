@@ -73,3 +73,22 @@ test('bold, italic and underline export successfully', async () => {
   const joined = items.map((item) => item.str).join('')
   for (const text of ['Fett', 'Kursiv', 'Fett Kursiv', 'Unterstrichen']) expect(joined).toContain(text)
 })
+
+test('zapfdingbats symbols export as vector glyphs', async () => {
+  const doc = await PDFDocument.create()
+  doc.addPage([595, 842])
+  const bytes = await exportPdf(await doc.save(), [
+    box({ text: '✓', font: 'zapfdingbats', fontSize: 20 }),
+    box({ text: '■', font: 'zapfdingbats', fontSize: 20, y: 650 }),
+  ])
+  // Succeeding at all means the symbols mapped to valid ZapfDingbats glyphs.
+  expect((await PDFDocument.load(bytes)).getPageCount()).toBe(1)
+})
+
+test('unencodable characters in text fonts become question marks', async () => {
+  const doc = await PDFDocument.create()
+  doc.addPage([595, 842])
+  const bytes = await exportPdf(await doc.save(), [box({ text: 'Hä✓llo' })])
+  const items = await extractItems(bytes, 1)
+  expect(items.map((item) => item.str).join('')).toContain('Hä?llo')
+})

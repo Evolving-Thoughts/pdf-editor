@@ -1,6 +1,7 @@
 // Domain model for overlay elements. Pure data, no framework, no PDF libraries.
 
-export type OverlayFont = 'helvetica' | 'times' | 'courier'
+/** 'zapfdingbats' = symbol font; the text then holds Unicode symbols (✓, ■, …). */
+export type OverlayFont = 'helvetica' | 'times' | 'courier' | 'zapfdingbats'
 
 export interface Textbox {
   id: string
