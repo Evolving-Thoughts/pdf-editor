@@ -250,13 +250,20 @@ export function TextboxView({ box, zoom, pageHeightPts, selected, tool, store, o
     }
   }, [selected, box.text])
 
-  const commitText = () => {
-    if (draft === beforeEdit.current) return
+  const commitText = (removeIfEmpty: boolean) => {
+    // Empty check before the no-change return: a freshly created box is
+    // auto-focused with empty text, so draft === beforeEdit ('' === '')
+    // would early-return and leave an invisible orphan box on the page.
     if (draft.trim().length === 0) {
-      store.dispatch(removeTextbox(box))
-      onSelect(null)
+      // …but only when focus truly leaves the box: blurring into the
+      // minibar (e.g. to set the font size first) must keep the empty box.
+      if (removeIfEmpty) {
+        store.dispatch(removeTextbox(box))
+        onSelect(null)
+      }
       return
     }
+    if (draft === beforeEdit.current) return
     store.dispatch(updateTextbox(box.id, { text: beforeEdit.current }, { text: draft }))
   }
 
@@ -399,9 +406,12 @@ export function TextboxView({ box, zoom, pageHeightPts, selected, tool, store, o
         onKeyDown={(event) => {
           if (event.key === 'Escape') event.currentTarget.blur()
         }}
-        onBlur={() => {
+        onBlur={(event) => {
           setFocused(false)
-          commitText()
+          const staysInside =
+            event.relatedTarget instanceof Node &&
+            event.currentTarget.closest('.textbox')?.contains(event.relatedTarget) === true
+          commitText(!staysInside)
         }}
       />
       {tool === 'select' && !focused && (

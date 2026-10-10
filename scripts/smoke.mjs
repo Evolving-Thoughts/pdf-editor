@@ -22,6 +22,26 @@ await page.goto(baseUrl)
 await page.locator('input[type=file]').setInputFiles(new URL('../tests/fixtures/zweiseitig.pdf', import.meta.url).pathname)
 await page.waitForSelector('canvas')
 
+// 0. Empty-box cleanup: create with text tool, Escape without typing -> removed
+await page.getByRole('button', { name: /Text/ }).click()
+await page.locator('.page').first().click({ position: { x: 500, y: 500 } })
+check('Leere Box nach Erstellen vorhanden', (await page.locator('.textbox').count()) === 1)
+await page.keyboard.press('Escape')
+check('Esc ohne Tippen räumt leere Box weg', (await page.locator('.textbox').count()) === 0)
+
+// 0b. Blurring into the minibar keeps the empty box (e.g. set size first)
+await page.locator('.page').first().click({ position: { x: 500, y: 500 } })
+await page.locator('.textbox button[aria-label="Schriftgröße"]').click()
+check('Leere Box bleibt bei Minibar-Klick', (await page.locator('.textbox').count()) === 1)
+check('Größen-Popover offen ohne Tippen', await page.locator('.font-size-popover').isVisible())
+await page.keyboard.press('Escape') // close picker
+await page.keyboard.press('Escape') // global: deselect, back to select tool
+// Selecting the empty box autofocuses its textarea (Delete stays an editing
+// key there); Escape blurs with focus leaving the box -> cleanup removes it.
+await page.locator('.textbox .drag-surface').click({ force: true })
+await page.keyboard.press('Escape')
+check('Leere Box nach Auswahl + Esc entfernt', (await page.locator('.textbox').count()) === 0)
+
 // 1. Create a textbox with the text tool
 await page.getByRole('button', { name: /Text/ }).click()
 await page.locator('.page').first().click({ position: { x: 200, y: 300 } })
