@@ -1,0 +1,87 @@
+import { useCallback, useEffect, useRef, useState } from 'react'
+import { loadPdf, renderPage, type LoadedPdf } from '../core/pdf/loadPdf'
+import { exportPdf } from '../core/pdf/exportPdf'
+import { zoomIn, zoomOut } from '../core/viewerState'
+import './app.css'
+
+export default function App() {
+  const [pdf, setPdf] = useState<LoadedPdf | null>(null)
+  const [zoom, setZoom] = useState(1)
+  const [error, setError] = useState<string | null>(null)
+  const pagesRef = useRef<HTMLDivElement>(null)
+
+  const onOpenFile = useCallback(async (file: File) => {
+    setError(null)
+    try {
+      const bytes = new Uint8Array(await file.arrayBuffer())
+      setPdf(await loadPdf(file.name, bytes))
+    } catch {
+      setPdf(null)
+      setError(`„${file.name}" konnte nicht geöffnet werden (beschädigt oder passwortgeschützt?).`)
+    }
+  }, [])
+
+  useEffect(() => {
+    if (!pdf || !pagesRef.current) return
+    const canvases = pagesRef.current.querySelectorAll('canvas')
+    canvases.forEach((canvas, index) => {
+      void renderPage(pdf.document, index + 1, canvas, zoom)
+    })
+  }, [pdf, zoom])
+
+  const onExport = useCallback(async () => {
+    if (!pdf) return
+    const bytes = await exportPdf(pdf.bytes)
+    const url = URL.createObjectURL(new Blob([new Uint8Array(bytes)], { type: 'application/pdf' }))
+    const link = document.createElement('a')
+    link.href = url
+    link.download = pdf.fileName
+    link.click()
+    URL.revokeObjectURL(url)
+  }, [pdf])
+
+  return (
+    <div className="app">
+      <header className="toolbar">
+        <label className="button">
+          PDF öffnen
+          <input
+            type="file"
+            accept="application/pdf"
+            hidden
+            onChange={(event) => {
+              const file = event.target.files?.[0]
+              if (file) void onOpenFile(file)
+            }}
+          />
+        </label>
+        {pdf && (
+          <>
+            <span className="file-info">
+              {pdf.fileName} · {pdf.pageCount} {pdf.pageCount === 1 ? 'Seite' : 'Seiten'}
+            </span>
+            <button type="button" onClick={() => setZoom((z) => zoomOut(z))}>
+              −
+            </button>
+            <span className="zoom-label">{Math.round(zoom * 100)} %</span>
+            <button type="button" onClick={() => setZoom((z) => zoomIn(z))}>
+              +
+            </button>
+            <button type="button" onClick={() => void onExport()}>
+              Exportieren
+            </button>
+          </>
+        )}
+      </header>
+      {error && (
+        <p role="alert" className="error">
+          {error}
+        </p>
+      )}
+      {!pdf && !error && <p className="hint">Wähle eine PDF-Datei, um sie anzuzeigen.</p>}
+      <div className="pages" ref={pagesRef}>
+        {pdf && Array.from({ length: pdf.pageCount }, (_, i) => <canvas key={i} />)}
+      </div>
+    </div>
+  )
+}
