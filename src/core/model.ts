@@ -1,18 +1,6 @@
 // Domain model for overlay elements. Pure data, no framework, no PDF libraries.
 
-export type OverlayFont =
-  | 'helvetica'
-  | 'helvetica-bold'
-  | 'helvetica-oblique'
-  | 'helvetica-boldOblique'
-  | 'times'
-  | 'times-bold'
-  | 'times-italic'
-  | 'times-boldItalic'
-  | 'courier'
-  | 'courier-bold'
-  | 'courier-oblique'
-  | 'courier-boldOblique'
+export type OverlayFont = 'helvetica' | 'times' | 'courier'
 
 export interface Textbox {
   id: string
@@ -24,6 +12,10 @@ export interface Textbox {
   text: string
   font: OverlayFont
   fontSize: number
+  bold: boolean
+  italic: boolean
+  /** Drawn as a line under the text (not a font variant). */
+  underline: boolean
 }
 
 export type Overlay = Textbox

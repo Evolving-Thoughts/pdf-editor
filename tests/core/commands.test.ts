@@ -10,7 +10,7 @@ import {
 import type { EditorState, Textbox } from '../../src/core/model'
 
 function makeBox(id: string, text = ''): Textbox {
-  return { id, pageIndex: 0, x: 50, y: 700, text, font: 'helvetica', fontSize: 14 }
+  return { id, pageIndex: 0, x: 50, y: 700, text, font: 'helvetica', fontSize: 14, bold: false, italic: false, underline: false }
 }
 
 test('add, undo and redo a textbox', () => {

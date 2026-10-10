@@ -58,6 +58,9 @@ export function PageView({ pdf, pageIndex, zoom, tool, overlays, store, selected
       text: '',
       font: 'helvetica',
       fontSize: 14,
+      bold: false,
+      italic: false,
+      underline: false,
     }
     store.dispatch(addTextbox(box))
     onSelect(box.id)

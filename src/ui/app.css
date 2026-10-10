@@ -170,6 +170,17 @@
   cursor: pointer;
 }
 
+.minibar .style-toggle {
+  min-width: 26px;
+  padding: 2px 6px;
+  text-align: center;
+}
+
+.minibar .style-toggle[aria-pressed='true'] {
+  border-color: var(--accent);
+  background: var(--accent-bg);
+}
+
 .font-size-picker {
   position: relative;
   display: inline-flex;

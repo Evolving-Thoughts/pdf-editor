@@ -5,7 +5,7 @@ import { exportPdf } from '../../src/core/pdf/exportPdf'
 import type { Textbox } from '../../src/core/model'
 
 function box(overrides: Partial<Textbox>): Textbox {
-  return { id: 'x', pageIndex: 0, x: 50, y: 700, text: '', font: 'helvetica', fontSize: 14, ...overrides }
+  return { id: 'x', pageIndex: 0, x: 50, y: 700, text: '', font: 'helvetica', fontSize: 14, bold: false, italic: false, underline: false, ...overrides }
 }
 
 interface TextItemLike {
@@ -59,16 +59,17 @@ test('overlays respect page index and font choice', async () => {
   // The 'times' code path is exercised by the export succeeding at all.
 })
 
-test('bold and italic font variants export successfully', async () => {
+test('bold, italic and underline export successfully', async () => {
   const doc = await PDFDocument.create()
   doc.addPage([595, 842])
   const bytes = await exportPdf(await doc.save(), [
-    box({ text: 'Fett', font: 'helvetica-bold', y: 600 }),
-    box({ text: 'Kursiv', font: 'times-italic', y: 500 }),
-    box({ text: 'Fett Kursiv', font: 'courier-boldOblique', y: 400 }),
+    box({ text: 'Fett', bold: true, y: 600 }),
+    box({ text: 'Kursiv', font: 'times', italic: true, y: 500 }),
+    box({ text: 'Fett Kursiv', font: 'courier', bold: true, italic: true, y: 400 }),
+    box({ text: 'Unterstrichen', underline: true, y: 300 }),
   ])
   // pdfjs may split runs and emit empty items; compare the joined text.
   const items = await extractItems(bytes, 1)
   const joined = items.map((item) => item.str).join('')
-  for (const text of ['Fett', 'Kursiv', 'Fett Kursiv']) expect(joined).toContain(text)
+  for (const text of ['Fett', 'Kursiv', 'Fett Kursiv', 'Unterstrichen']) expect(joined).toContain(text)
 })

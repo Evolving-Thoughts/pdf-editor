@@ -10,53 +10,16 @@ interface FontCss {
   fontStyle?: 'italic'
 }
 
-const HELVETICA = 'Helvetica, Arial, sans-serif'
-const TIMES = "'Times New Roman', Times, serif"
-const COURIER = "'Courier New', Courier, monospace"
-
-const FONT_CSS: Record<OverlayFont, FontCss> = {
-  helvetica: { fontFamily: HELVETICA },
-  'helvetica-bold': { fontFamily: HELVETICA, fontWeight: 'bold' },
-  'helvetica-oblique': { fontFamily: HELVETICA, fontStyle: 'italic' },
-  'helvetica-boldOblique': { fontFamily: HELVETICA, fontWeight: 'bold', fontStyle: 'italic' },
-  times: { fontFamily: TIMES },
-  'times-bold': { fontFamily: TIMES, fontWeight: 'bold' },
-  'times-italic': { fontFamily: TIMES, fontStyle: 'italic' },
-  'times-boldItalic': { fontFamily: TIMES, fontWeight: 'bold', fontStyle: 'italic' },
-  courier: { fontFamily: COURIER },
-  'courier-bold': { fontFamily: COURIER, fontWeight: 'bold' },
-  'courier-oblique': { fontFamily: COURIER, fontStyle: 'italic' },
-  'courier-boldOblique': { fontFamily: COURIER, fontWeight: 'bold', fontStyle: 'italic' },
+const FONT_CSS: Record<OverlayFont, string> = {
+  helvetica: 'Helvetica, Arial, sans-serif',
+  times: "'Times New Roman', Times, serif",
+  courier: "'Courier New', Courier, monospace",
 }
 
-const FONT_GROUPS: Array<{ label: string; options: Array<{ value: OverlayFont; label: string }> }> = [
-  {
-    label: 'Helvetica',
-    options: [
-      { value: 'helvetica', label: 'Helvetica' },
-      { value: 'helvetica-bold', label: 'Fett' },
-      { value: 'helvetica-oblique', label: 'Kursiv' },
-      { value: 'helvetica-boldOblique', label: 'Fett Kursiv' },
-    ],
-  },
-  {
-    label: 'Times',
-    options: [
-      { value: 'times', label: 'Times' },
-      { value: 'times-bold', label: 'Fett' },
-      { value: 'times-italic', label: 'Kursiv' },
-      { value: 'times-boldItalic', label: 'Fett Kursiv' },
-    ],
-  },
-  {
-    label: 'Courier',
-    options: [
-      { value: 'courier', label: 'Courier' },
-      { value: 'courier-bold', label: 'Fett' },
-      { value: 'courier-oblique', label: 'Kursiv' },
-      { value: 'courier-boldOblique', label: 'Fett Kursiv' },
-    ],
-  },
+const FONT_OPTIONS: Array<{ value: OverlayFont; label: string }> = [
+  { value: 'helvetica', label: 'Helvetica' },
+  { value: 'times', label: 'Times' },
+  { value: 'courier', label: 'Courier' },
 ]
 
 const SIZE_PRESETS = [8, 10, 12, 14, 18, 24, 36]
@@ -198,16 +161,30 @@ export function TextboxView({ box, zoom, pageHeightPts, selected, tool, store, o
 
   const displayText = focused ? draft : box.text
 
+  const fontCss: FontCss = {
+    fontFamily: FONT_CSS[box.font],
+    fontWeight: box.bold ? 'bold' : undefined,
+    fontStyle: box.italic ? 'italic' : undefined,
+  }
+
   // Autosize the textarea to its content (also when the font size grows
   // beyond the current box): width fits the longest line, height the lines.
   useLayoutEffect(() => {
     const el = textareaRef.current
     if (!el) return
     const px = box.fontSize * zoom
-    const { width, lines } = measureText(displayText, FONT_CSS[box.font], px)
+    const { width, lines } = measureText(
+      displayText,
+      {
+        fontFamily: FONT_CSS[box.font],
+        fontWeight: box.bold ? 'bold' : undefined,
+        fontStyle: box.italic ? 'italic' : undefined,
+      },
+      px,
+    )
     el.style.width = `${Math.max(40, Math.ceil(width) + 10 + Math.ceil(px * 0.2))}px`
     el.style.height = `${Math.ceil(lines * px * LINE_HEIGHT) + 6}px`
-  }, [displayText, box.font, box.fontSize, zoom])
+  }, [displayText, box.font, box.bold, box.italic, box.fontSize, zoom])
 
   // Focus the textarea when a new (still empty) box gets selected.
   useEffect(() => {
@@ -259,7 +236,13 @@ export function TextboxView({ box, zoom, pageHeightPts, selected, tool, store, o
   return (
     <div
       className={`textbox${selected ? ' selected' : ''}`}
-      style={{ left, top, ...FONT_CSS[box.font], fontSize: box.fontSize * zoom }}
+      style={{
+        left,
+        top,
+        ...fontCss,
+        textDecoration: box.underline ? 'underline' : undefined,
+        fontSize: box.fontSize * zoom,
+      }}
       onPointerDown={(event) => {
         event.stopPropagation()
         onSelect(box.id)
@@ -274,16 +257,42 @@ export function TextboxView({ box, zoom, pageHeightPts, selected, tool, store, o
               store.dispatch(updateTextbox(box.id, { font: box.font }, { font: event.target.value as OverlayFont }))
             }
           >
-            {FONT_GROUPS.map((group) => (
-              <optgroup key={group.label} label={group.label}>
-                {group.options.map((option) => (
-                  <option key={option.value} value={option.value}>
-                    {option.label}
-                  </option>
-                ))}
-              </optgroup>
+            {FONT_OPTIONS.map((option) => (
+              <option key={option.value} value={option.value}>
+                {option.label}
+              </option>
             ))}
           </select>
+          <button
+            type="button"
+            className="style-toggle"
+            aria-label="Fett"
+            aria-pressed={box.bold}
+            title="Fett"
+            onClick={() => store.dispatch(updateTextbox(box.id, { bold: box.bold }, { bold: !box.bold }))}
+          >
+            <b>B</b>
+          </button>
+          <button
+            type="button"
+            className="style-toggle"
+            aria-label="Kursiv"
+            aria-pressed={box.italic}
+            title="Kursiv"
+            onClick={() => store.dispatch(updateTextbox(box.id, { italic: box.italic }, { italic: !box.italic }))}
+          >
+            <i>I</i>
+          </button>
+          <button
+            type="button"
+            className="style-toggle"
+            aria-label="Unterstrichen"
+            aria-pressed={box.underline}
+            title="Unterstrichen"
+            onClick={() => store.dispatch(updateTextbox(box.id, { underline: box.underline }, { underline: !box.underline }))}
+          >
+            <u>U</u>
+          </button>
           <FontSizePicker
             value={box.fontSize}
             onCommit={(size) => {

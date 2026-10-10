@@ -35,14 +35,25 @@ await page.keyboard.press('Escape')
 const box = page.locator('.textbox')
 check('Minibar sichtbar nach Auswahl', await box.locator('.minibar').isVisible())
 
-// 3. Font select offers 12 variants (base + bold/italic/bold-italic)
-check('12 Schriftvarianten (3 Familien x 4)', (await box.locator('select[aria-label="Schriftart"] option').count()) === 12)
+// 3. Font select offers the 3 families
+check('3 Schriftfamilien im Select', (await box.locator('select[aria-label="Schriftart"] option').count()) === 3)
 
-// 4. Bold variant applies font-weight
-await box.locator('select[aria-label="Schriftart"]').selectOption('helvetica-bold')
-const weight = await box.evaluate((el) => getComputedStyle(el).fontWeight)
-check(`Fett-Variante aktiv (font-weight ${weight})`, weight === '700' || weight === 'bold')
-await box.locator('select[aria-label="Schriftart"]').selectOption('helvetica')
+// 4. B/I/U toggle buttons switch styles on AND off again
+const boldBtn = box.locator('button[aria-label="Fett"]')
+await boldBtn.click()
+check('B aktiviert Fett', (await box.evaluate((el) => getComputedStyle(el).fontWeight)) === '700')
+await boldBtn.click()
+check('B erneut deaktiviert Fett', (await box.evaluate((el) => getComputedStyle(el).fontWeight)) === '400')
+const italicBtn = box.locator('button[aria-label="Kursiv"]')
+await italicBtn.click()
+check('I aktiviert Kursiv', (await box.evaluate((el) => getComputedStyle(el).fontStyle)) === 'italic')
+await italicBtn.click()
+check('I erneut deaktiviert Kursiv', (await box.evaluate((el) => getComputedStyle(el).fontStyle)) === 'normal')
+const underlineBtn = box.locator('button[aria-label="Unterstrichen"]')
+await underlineBtn.click()
+check('U aktiviert Unterstrichen', ((await box.evaluate((el) => getComputedStyle(el).textDecorationLine))).includes('underline'))
+await underlineBtn.click()
+check('U erneut deaktiviert Unterstrichen', !((await box.evaluate((el) => getComputedStyle(el).textDecorationLine))).includes('underline'))
 
 // 5. Font-size picker: opens with input + all 7 presets visible
 const sizeButton = box.locator('button[aria-label="Schriftgröße"]')

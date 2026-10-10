@@ -3,38 +3,65 @@
 import { PDFDocument, StandardFonts, type PDFFont } from 'pdf-lib'
 import type { OverlayFont, Textbox } from '../model'
 
-const FONT_MAP: Record<OverlayFont, StandardFonts> = {
-  helvetica: StandardFonts.Helvetica,
-  'helvetica-bold': StandardFonts.HelveticaBold,
-  'helvetica-oblique': StandardFonts.HelveticaOblique,
-  'helvetica-boldOblique': StandardFonts.HelveticaBoldOblique,
-  times: StandardFonts.TimesRoman,
-  'times-bold': StandardFonts.TimesRomanBold,
-  'times-italic': StandardFonts.TimesRomanItalic,
-  'times-boldItalic': StandardFonts.TimesRomanBoldItalic,
-  courier: StandardFonts.Courier,
-  'courier-bold': StandardFonts.CourierBold,
-  'courier-oblique': StandardFonts.CourierOblique,
-  'courier-boldOblique': StandardFonts.CourierBoldOblique,
+// Bold/italic map to the matching PDF standard font; underline has no font
+// variant and is drawn as a line below the text.
+const FONT_VARIANTS: Record<OverlayFont, { plain: StandardFonts; bold: StandardFonts; italic: StandardFonts; boldItalic: StandardFonts }> = {
+  helvetica: {
+    plain: StandardFonts.Helvetica,
+    bold: StandardFonts.HelveticaBold,
+    italic: StandardFonts.HelveticaOblique,
+    boldItalic: StandardFonts.HelveticaBoldOblique,
+  },
+  times: {
+    plain: StandardFonts.TimesRoman,
+    bold: StandardFonts.TimesRomanBold,
+    italic: StandardFonts.TimesRomanItalic,
+    boldItalic: StandardFonts.TimesRomanBoldItalic,
+  },
+  courier: {
+    plain: StandardFonts.Courier,
+    bold: StandardFonts.CourierBold,
+    italic: StandardFonts.CourierOblique,
+    boldItalic: StandardFonts.CourierBoldOblique,
+  },
+}
+
+function variantFor(overlay: Textbox): StandardFonts {
+  const variants = FONT_VARIANTS[overlay.font]
+  if (overlay.bold && overlay.italic) return variants.boldItalic
+  if (overlay.bold) return variants.bold
+  if (overlay.italic) return variants.italic
+  return variants.plain
 }
 
 export async function exportPdf(bytes: Uint8Array, overlays: Textbox[] = []): Promise<Uint8Array> {
   const doc = await PDFDocument.load(bytes)
   const visible = overlays.filter((overlay) => overlay.text.trim().length > 0)
   if (visible.length > 0) {
-    const fonts = new Map<OverlayFont, PDFFont>()
+    const fonts = new Map<StandardFonts, PDFFont>()
     for (const overlay of visible) {
-      let font = fonts.get(overlay.font)
+      const variant = variantFor(overlay)
+      let font = fonts.get(variant)
       if (!font) {
-        font = await doc.embedFont(FONT_MAP[overlay.font])
-        fonts.set(overlay.font, font)
+        font = await doc.embedFont(variant)
+        fonts.set(variant, font)
       }
-      doc.getPage(overlay.pageIndex).drawText(overlay.text, {
+      const page = doc.getPage(overlay.pageIndex)
+      page.drawText(overlay.text, {
         x: overlay.x,
         y: overlay.y,
         size: overlay.fontSize,
         font,
       })
+      if (overlay.underline) {
+        const width = font.widthOfTextAtSize(overlay.text, overlay.fontSize)
+        const lineY = overlay.y - overlay.fontSize * 0.12
+        page.drawLine({
+          start: { x: overlay.x, y: lineY },
+          end: { x: overlay.x + width, y: lineY },
+          thickness: Math.max(0.5, overlay.fontSize * 0.05),
+        })
+      }
     }
   }
   return doc.save()
