@@ -8,16 +8,18 @@ export default function App() {
   const [zoom, setZoom] = useState(1)
   const [error, setError] = useState<string | null>(null)
   const pagesRef = useRef<HTMLDivElement>(null)
+  // Current handle in a ref so destroy() runs outside React state updaters
+  // (updaters must stay pure; StrictMode double-invokes them in dev).
+  const pdfRef = useRef<PdfHandle | null>(null)
 
   const onOpenFile = useCallback(async (file: File) => {
     setError(null)
     try {
       const bytes = new Uint8Array(await file.arrayBuffer())
       const next = await loadPdf(file.name, bytes)
-      setPdf((previous) => {
-        void previous?.destroy()
-        return next
-      })
+      void pdfRef.current?.destroy()
+      pdfRef.current = next
+      setPdf(next)
     } catch {
       setError(`„${file.name}“ konnte nicht geöffnet werden (beschädigt oder passwortgeschützt?).`)
     }
@@ -30,6 +32,9 @@ export default function App() {
       void pdf.renderPage(index + 1, canvas, zoom)
     })
   }, [pdf, zoom])
+
+  // Release the worker document when the app unmounts.
+  useEffect(() => () => void pdfRef.current?.destroy(), [])
 
   const onExport = useCallback(async () => {
     if (!pdf) return
@@ -52,7 +57,7 @@ export default function App() {
           <input
             type="file"
             accept="application/pdf"
-            hidden
+            className="visually-hidden"
             onChange={(event) => {
               const file = event.target.files?.[0]
               if (file) void onOpenFile(file)
