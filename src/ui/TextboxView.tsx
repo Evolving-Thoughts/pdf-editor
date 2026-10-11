@@ -23,11 +23,7 @@ const FONT_OPTIONS: Array<{ value: OverlayFont; label: string }> = [
   { value: 'helvetica', label: 'Helvetica' },
   { value: 'times', label: 'Times' },
   { value: 'courier', label: 'Courier' },
-  { value: 'zapfdingbats', label: 'Symbole' },
 ]
-
-// Verified against pdf-lib's ZapfDingbats encoding (scripts: dingbats check).
-const SYMBOLS = ['✓', '✔', '✕', '✖', '✗', '✘', '■', '❑', '●', '◆', '★', '✦', '➔', '✎', '✉', '☎']
 
 const SIZE_PRESETS = [8, 10, 12, 14, 18, 24, 36]
 const MIN_FONT_SIZE = 4
@@ -149,56 +145,6 @@ function FontSizePicker({ value, onCommit }: FontSizePickerProps) {
   )
 }
 
-interface SymbolPickerProps {
-  onPick: (symbol: string) => void
-}
-
-/** Button that opens a grid of ZapfDingbats symbols (form checkmarks etc.). */
-function SymbolPicker({ onPick }: SymbolPickerProps) {
-  const [open, setOpen] = useState(false)
-  const wrapRef = useRef<HTMLSpanElement>(null)
-
-  useEffect(() => {
-    if (!open) return
-    const onPointerDown = (event: PointerEvent) => {
-      if (!wrapRef.current?.contains(event.target as Node)) setOpen(false)
-    }
-    window.addEventListener('pointerdown', onPointerDown)
-    return () => window.removeEventListener('pointerdown', onPointerDown)
-  }, [open])
-
-  return (
-    <span className="symbol-picker" ref={wrapRef}>
-      <button
-        type="button"
-        aria-label="Symbol einfügen"
-        aria-expanded={open}
-        title="Symbol einfügen (Häkchen, Kreuze, …)"
-        onClick={() => setOpen((o) => !o)}
-      >
-        ✓&nbsp;▾
-      </button>
-      {open && (
-        <span className="symbol-popover">
-          {SYMBOLS.map((symbol) => (
-            <button
-              key={symbol}
-              type="button"
-              onPointerDown={(event) => {
-                event.preventDefault()
-                setOpen(false)
-                onPick(symbol)
-              }}
-            >
-              {symbol}
-            </button>
-          ))}
-        </span>
-      )}
-    </span>
-  )
-}
-
 interface TextboxViewProps {
   box: Textbox
   zoom: number
@@ -217,6 +163,7 @@ export function TextboxView({ box, zoom, pageHeightPts, selected, tool, store, o
   const dragFrom = useRef<{ pointerX: number; pointerY: number; x: number; y: number } | null>(null)
 
   const displayText = focused ? draft : box.text
+  const isSymbol = box.font === 'zapfdingbats'
 
   const fontCss: FontCss = {
     fontFamily: FONT_CSS[box.font],
@@ -251,6 +198,7 @@ export function TextboxView({ box, zoom, pageHeightPts, selected, tool, store, o
   }, [selected, box.text])
 
   const commitText = (removeIfEmpty: boolean) => {
+    if (isSymbol) return
     // Empty check before the no-change return: a freshly created box is
     // auto-focused with empty text, so draft === beforeEdit ('' === '')
     // would early-return and leave an invisible orphan box on the page.
@@ -308,20 +256,23 @@ export function TextboxView({ box, zoom, pageHeightPts, selected, tool, store, o
     >
       {selected && (
         <div className="minibar">
-          <select
-            aria-label="Schriftart"
-            value={box.font}
-            onChange={(event) =>
-              store.dispatch(updateTextbox(box.id, { font: box.font }, { font: event.target.value as OverlayFont }))
-            }
-          >
-            {FONT_OPTIONS.map((option) => (
-              <option key={option.value} value={option.value}>
-                {option.label}
-              </option>
-            ))}
-          </select>
-          {box.font !== 'zapfdingbats' && (
+          {!isSymbol && (
+            <select
+              aria-label="Schriftart"
+              value={box.font}
+              onChange={(event) =>
+                store.dispatch(updateTextbox(box.id, { font: box.font }, { font: event.target.value as OverlayFont }))
+              }
+            >
+              {FONT_OPTIONS.map((option) => (
+                <option key={option.value} value={option.value}>
+                  {option.label}
+                </option>
+              ))}
+            </select>
+          )}
+          {isSymbol && <span className="symbol-kind">Symbol</span>}
+          {!isSymbol && (
             <>
               <button
                 type="button"
@@ -357,17 +308,6 @@ export function TextboxView({ box, zoom, pageHeightPts, selected, tool, store, o
               </button>
             </>
           )}
-          <SymbolPicker
-            onPick={(symbol) =>
-              store.dispatch(
-                updateTextbox(
-                  box.id,
-                  { text: box.text, font: box.font, bold: box.bold, italic: box.italic, underline: box.underline },
-                  { text: symbol, font: 'zapfdingbats', bold: false, italic: false, underline: false },
-                ),
-              )
-            }
-          />
           <FontSizePicker
             value={box.fontSize}
             onCommit={(size) => {
@@ -395,14 +335,22 @@ export function TextboxView({ box, zoom, pageHeightPts, selected, tool, store, o
         style={{ textDecoration: box.underline ? 'underline' : undefined }}
         value={displayText}
         rows={1}
-        placeholder="Text …"
-        aria-label="Textbox-Inhalt"
-        onFocus={() => {
+        placeholder={isSymbol ? undefined : 'Text …'}
+        aria-label={isSymbol ? 'Symbol' : 'Textbox-Inhalt'}
+        readOnly={isSymbol}
+        tabIndex={isSymbol ? -1 : undefined}
+        onFocus={(event) => {
+          if (isSymbol) {
+            event.currentTarget.blur()
+            return
+          }
           beforeEdit.current = box.text
           setDraft(box.text)
           setFocused(true)
         }}
-        onChange={(event) => setDraft(event.target.value)}
+        onChange={(event) => {
+          if (!isSymbol) setDraft(event.target.value)
+        }}
         onKeyDown={(event) => {
           if (event.key === 'Escape') event.currentTarget.blur()
         }}
@@ -421,7 +369,9 @@ export function TextboxView({ box, zoom, pageHeightPts, selected, tool, store, o
           onPointerDown={onSurfacePointerDown}
           onPointerMove={onSurfacePointerMove}
           onPointerUp={onSurfacePointerUp}
-          onDoubleClick={() => textareaRef.current?.focus()}
+          onDoubleClick={() => {
+            if (!isSymbol) textareaRef.current?.focus()
+          }}
         />
       )}
     </div>

@@ -11,13 +11,14 @@ interface PageViewProps {
   pageIndex: number
   zoom: number
   tool: Tool
+  symbol: string
   overlays: Overlay[]
   store: EditorStore
   selectedId: string | null
   onSelect: (id: string | null) => void
 }
 
-export function PageView({ pdf, pageIndex, zoom, tool, overlays, store, selectedId, onSelect }: PageViewProps) {
+export function PageView({ pdf, pageIndex, zoom, tool, symbol, overlays, store, selectedId, onSelect }: PageViewProps) {
   const canvasRef = useRef<HTMLCanvasElement>(null)
   const wrapperRef = useRef<HTMLDivElement>(null)
   const [pageSize, setPageSize] = useState<PageSize | null>(null)
@@ -42,7 +43,7 @@ export function PageView({ pdf, pageIndex, zoom, tool, overlays, store, selected
       onSelect(null)
       return
     }
-    // Text tool: create a textbox at the click position.
+    // Text and symbol tools create their respective box at the click position.
     if (!pageSize || !wrapperRef.current) return
     // Prevent the browser's mousedown default from moving focus to the
     // (non-focusable) canvas, which would undo the textarea autofocus.
@@ -50,13 +51,14 @@ export function PageView({ pdf, pageIndex, zoom, tool, overlays, store, selected
     const rect = wrapperRef.current.getBoundingClientRect()
     const cssX = event.clientX - rect.left
     const cssY = event.clientY - rect.top
+    const placingSymbol = tool === 'symbol'
     const box: Textbox = {
       id: createId(),
       pageIndex,
       x: cssX / zoom,
       y: pageSize.height - cssY / zoom,
-      text: '',
-      font: 'helvetica',
+      text: placingSymbol ? symbol : '',
+      font: placingSymbol ? 'zapfdingbats' : 'helvetica',
       fontSize: 14,
       bold: false,
       italic: false,
@@ -68,7 +70,7 @@ export function PageView({ pdf, pageIndex, zoom, tool, overlays, store, selected
 
   return (
     <div
-      className={`page${tool === 'text' ? ' text-tool' : ''}`}
+      className={`page${tool === 'text' ? ' text-tool' : ''}${tool === 'symbol' ? ' symbol-tool' : ''}`}
       ref={wrapperRef}
       onPointerDown={onPagePointerDown}
     >

@@ -70,3 +70,25 @@ test('subscribers can unsubscribe and dispatch updates via commands', () => {
   expect(notify).toHaveBeenCalledTimes(1)
   expect(store.state.overlays[0].text).toBe('neu')
 })
+
+test('restore replaces overlays and clears history (loading a draft)', () => {
+  const store = new EditorStore()
+  store.dispatch(addTextbox(makeBox('old')))
+  const notify = vi.fn()
+  store.subscribe(notify)
+
+  store.restore([makeBox('a', 'aus Entwurf'), makeBox('b')])
+
+  expect(store.state.overlays.map((o) => o.id)).toEqual(['a', 'b'])
+  expect(store.canUndo).toBe(false)
+  expect(store.canRedo).toBe(false)
+  expect(notify).toHaveBeenCalled()
+})
+
+test('restore deep-copies so later draft edits cannot mutate the store', () => {
+  const store = new EditorStore()
+  const draft = [makeBox('a', 'original')]
+  store.restore(draft)
+  draft[0].text = 'von außen verändert'
+  expect(store.state.overlays[0].text).toBe('original')
+})

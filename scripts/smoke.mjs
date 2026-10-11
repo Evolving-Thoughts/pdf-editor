@@ -49,14 +49,39 @@ await page.keyboard.type('Hallo Welt')
 await page.keyboard.press('Escape')
 check('Textbox erstellt', await page.locator('.textbox').count() === 1)
 
+// 1b. Auto-save: after the debounce the draft must be in IndexedDB
+await page.waitForTimeout(900)
+const saved = await page.evaluate(async () => {
+  const db = await new Promise((resolve, reject) => {
+    const r = indexedDB.open('pdf-editor-drafts')
+    r.onsuccess = () => resolve(r.result)
+    r.onerror = () => reject(r.error)
+  })
+  const all = await new Promise((resolve, reject) => {
+    const r = db.transaction('drafts', 'readonly').objectStore('drafts').getAll()
+    r.onsuccess = () => resolve(r.result)
+    r.onerror = () => reject(r.error)
+  })
+  const bytes = await new Promise((resolve, reject) => {
+    const r = db.transaction('draft-bytes', 'readonly').objectStore('draft-bytes').getAll()
+    r.onsuccess = () => resolve(r.result)
+    r.onerror = () => reject(r.error)
+  })
+  db.close()
+  return all.map((d, index) => ({ name: d.name, texts: d.overlays.map((o) => o.text), bytes: bytes[index].byteLength }))
+})
+check('Entwurf automatisch in IndexedDB gespeichert', saved.length === 1 && saved[0].texts.includes('Hallo Welt'))
+check('Original-PDF-Bytes im Entwurf enthalten', saved.length === 1 && saved[0].bytes > 1000)
+
 // 2. Select it -> minibar appears
 await page.locator('.textbox textarea').click({ force: true })
 await page.keyboard.press('Escape')
 const box = page.locator('.textbox')
 check('Minibar sichtbar nach Auswahl', await box.locator('.minibar').isVisible())
 
-// 3. Font select offers the 3 text families + symbols
-check('4 Einträge im Schriftart-Select (inkl. Symbole)', (await box.locator('select[aria-label="Schriftart"] option').count()) === 4)
+// 3. Font select offers only the 3 text families; symbols are not formatting
+check('3 Einträge im Schriftart-Select', (await box.locator('select[aria-label="Schriftart"] option').count()) === 3)
+check('Kein Symbol-Picker in der Textbox-Leiste', (await box.locator('button[aria-label="Symbol auswählen"]').count()) === 0)
 
 // 4. B/I/U toggle buttons switch styles on AND off again
 const boldBtn = box.locator('button[aria-label="Fett"]')
@@ -75,22 +100,6 @@ await underlineBtn.click()
 check('U aktiviert Unterstrichen (im Text)', ((await ta.evaluate((el) => getComputedStyle(el).textDecorationLine))).includes('underline'))
 await underlineBtn.click()
 check('U erneut deaktiviert Unterstrichen', !((await ta.evaluate((el) => getComputedStyle(el).textDecorationLine))).includes('underline'))
-
-// 4b. Symbol palette: pick a checkmark, B/I/U disappear for symbol boxes
-await box.locator('button[aria-label="Symbol einfügen"]').click()
-const palette = box.locator('.symbol-popover')
-check('Symbol-Palette geht auf (16 Symbole)', (await palette.locator('button').count()) === 16)
-await palette.locator('button', { hasText: '✓' }).first().click()
-check('Symbol ✓ in der Box', (await ta.inputValue()) === '✓')
-check('Font steht auf Symbole', (await box.locator('select[aria-label="Schriftart"]').inputValue()) === 'zapfdingbats')
-check('B/I/U bei Symbolen ausgeblendet', (await box.locator('button[aria-label="Fett"]').count()) === 0)
-// back to text for the remaining steps
-await box.locator('select[aria-label="Schriftart"]').selectOption('helvetica')
-await ta.click({ force: true })
-await ta.fill('Hallo Welt')
-await page.keyboard.press('Escape')
-await page.locator('.textbox textarea').click({ force: true })
-await page.keyboard.press('Escape')
 
 // 5. Font-size picker: opens with input + all 7 presets visible
 const sizeButton = box.locator('button[aria-label="Schriftgröße"]')
@@ -156,6 +165,99 @@ check('Redo stellt Nudges wieder her', Math.round(redone.x - before.x) === -1)
 // 14. Escape switches to the select tool
 await page.keyboard.press('Escape')
 check('Esc → Auswahl-Tool aktiv', await page.getByRole('button', { name: /Auswahl/ }).getAttribute('aria-pressed') === 'true')
+
+// 14b. Symbols are a separate placement tool, not textbox formatting
+await page.getByRole('button', { name: 'Symbol auswählen' }).click()
+const symbolPalette = page.locator('.toolbar .symbol-popover')
+check('Symbol-Palette in der Haupt-Toolbar (16 Symbole)', (await symbolPalette.locator('button').count()) === 16)
+await symbolPalette.getByRole('button', { name: 'Symbol ✓' }).click()
+check('Symbol-Werkzeug aktiv', await page.getByRole('button', { name: 'Symbol auswählen' }).getAttribute('aria-pressed') === 'true')
+await page.locator('.page').first().click({ position: { x: 500, y: 500 } })
+const symbolBox = page.locator('.textbox').nth(1)
+check('Symbol als eigene Box platziert', (await page.locator('.textbox').count()) === 2)
+check('Symbolbox enthält ✓', (await symbolBox.locator('textarea').inputValue()) === '✓')
+check('Symbolbox ist schreibgeschützt', (await symbolBox.locator('textarea').getAttribute('readonly')) !== null)
+await symbolBox.locator('textarea').click({ force: true })
+await page.keyboard.type('abc')
+check('Symbol lässt sich nicht mit Text mischen', (await symbolBox.locator('textarea').inputValue()) === '✓')
+check('Symbolbox zeigt keine B/I/U-Buttons', (await symbolBox.locator('button[aria-label="Fett"]').count()) === 0)
+await symbolBox.locator('button[aria-label="Textbox löschen"]').click()
+check('Symbolbox wieder gelöscht', (await page.locator('.textbox').count()) === 1)
+await page.waitForTimeout(900)
+
+// 15. Draft menu: active draft is listed with useful metadata
+await page.getByRole('button', { name: /Entwürfe/ }).click()
+const menu = page.locator('.drafts-menu')
+check('Entwürfe-Menü öffnet', await menu.isVisible())
+check(
+  'Entwurfsliste nutzt einfache Gruppen-Semantik',
+  (await page.locator('.drafts-menu[role="menu"]').count()) === 0 &&
+    (await page.locator('.drafts-menu [role="menuitemradio"]').count()) === 0,
+)
+check('Aktiver Entwurf ist markiert', (await page.locator('.draft-row.active .draft-badge').textContent()) === 'Aktiv')
+check(
+  'Entwurf zeigt Änderungszahl',
+  ((await page.locator('.draft-row.active .draft-meta').textContent()) ?? '').includes('1 Änderung'),
+)
+await page.keyboard.press('Escape')
+check('Esc schließt Entwürfe-Menü', (await menu.count()) === 0)
+
+// 16. Multiple drafts: open a second PDF, edit it, then switch back
+await page.locator('input[type=file]').setInputFiles(new URL('../tests/fixtures/zweiseitig.pdf', import.meta.url).pathname)
+await page.waitForFunction(() => document.querySelector('canvas') && !document.querySelector('.textbox'))
+check('Neue PDF startet ohne alte Boxen', (await page.locator('.textbox').count()) === 0)
+await page.getByRole('button', { name: /Text/ }).click()
+await page.locator('.page').first().click({ position: { x: 220, y: 320 } })
+await page.keyboard.type('Zweiter Entwurf')
+await page.keyboard.press('Escape')
+await page.waitForTimeout(900)
+const draftCount = await page.evaluate(async () => {
+  const db = await new Promise((resolve, reject) => {
+    const r = indexedDB.open('pdf-editor-drafts')
+    r.onsuccess = () => resolve(r.result)
+    r.onerror = () => reject(r.error)
+  })
+  const all = await new Promise((resolve, reject) => {
+    const r = db.transaction('drafts', 'readonly').objectStore('drafts').getAll()
+    r.onsuccess = () => resolve(r.result)
+    r.onerror = () => reject(r.error)
+  })
+  db.close()
+  return all.length
+})
+check('Zwei Entwürfe liegen parallel in IndexedDB', draftCount === 2)
+await page.getByRole('button', { name: /Entwürfe/ }).click()
+const draftRows = page.locator('.drafts-menu .draft-open')
+check('Menü listet beide Entwürfe', (await draftRows.count()) === 2)
+await draftRows.nth(1).click()
+await page.waitForFunction(() => document.querySelector('.textbox textarea')?.value === 'Hallo Welt')
+check('Wechsel lädt ersten Entwurf zurück', (await page.locator('.textbox textarea').inputValue()) === 'Hallo Welt')
+
+// 17. Full reload: the chosen draft survives closing/reopening the tab
+await page.waitForTimeout(900) // let the restore-triggered save update the order
+await page.reload()
+await page.getByRole('button', { name: /Entwürfe/ }).click()
+check('Entwürfe überleben Reload', (await page.locator('.drafts-menu .draft-open').count()) === 2)
+await page.locator('.drafts-menu .draft-open').first().click()
+await page.waitForSelector('.textbox textarea')
+check('Reload + Öffnen stellt Overlay wieder her', (await page.locator('.textbox textarea').inputValue()) === 'Hallo Welt')
+
+// 18. Delete current and remaining draft from the menu
+await page.getByRole('button', { name: /Entwürfe/ }).click()
+const activeDeleteButton = page.getByRole('button', { name: /Entwurf „zweiseitig.pdf“ löschen/ }).first()
+await activeDeleteButton.focus()
+page.once('dialog', (dialog) => void dialog.accept())
+await page.keyboard.press(' ')
+await page.waitForFunction(() => !document.querySelector('canvas'))
+check('Aktiven Entwurf per Leertaste löschen schließt Dokument', (await page.locator('canvas').count()) === 0)
+check('Ein Entwurf bleibt nach dem Löschen übrig', (await page.locator('.drafts-menu .draft-open').count()) === 1)
+const remainingDeleteButton = page.getByRole('button', { name: /Entwurf „zweiseitig.pdf“ löschen/ }).first()
+await remainingDeleteButton.focus()
+page.once('dialog', (dialog) => void dialog.accept())
+await page.keyboard.press('Enter')
+await page.waitForFunction(() => document.querySelectorAll('.drafts-menu .draft-open').length === 0)
+check('Letzten Entwurf per Enter löschen leert die Liste', (await page.locator('.drafts-menu .draft-open').count()) === 0)
+check('Leerzustand im Entwürfe-Menü', await page.getByText('Keine Entwürfe vorhanden.').isVisible())
 
 check('Keine Konsolen-/Seitenfehler', errors.length === 0)
 if (errors.length) console.log(errors.join('\n'))
