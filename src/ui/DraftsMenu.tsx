@@ -67,11 +67,11 @@ export function DraftsMenu({
 
   return (
     <div className="drafts-menu-wrap" ref={wrapRef}>
-      <button type="button" aria-haspopup="menu" aria-expanded={open} onClick={toggle}>
+      <button type="button" aria-expanded={open} onClick={toggle}>
         Entwürfe&nbsp;▾
       </button>
       {open && (
-        <div className="drafts-menu" role="menu" aria-label="Gespeicherte Entwürfe">
+        <div className="drafts-menu" role="group" aria-label="Gespeicherte Entwürfe">
           {error && (
             <p className="draft-menu-message" role="status">
               {error}
@@ -83,34 +83,23 @@ export function DraftsMenu({
               const active = draft.id === activeDraftId
               const loading = draft.id === loadingDraftId
               return (
-                <div
-                  key={draft.id}
-                  className={`draft-row${active ? ' active' : ''}`}
-                  role="menuitemradio"
-                  aria-checked={active}
-                  tabIndex={0}
-                  onClick={() => {
-                    setOpen(false)
-                    if (!active) onOpenDraft(draft.id)
-                  }}
-                  onKeyDown={(event) => {
-                    // Nested controls (currently the delete button) keep their
-                    // own keyboard behavior; the row only handles direct focus.
-                    if (event.target !== event.currentTarget) return
-                    if (event.key !== 'Enter' && event.key !== ' ') return
-                    event.preventDefault()
-                    setOpen(false)
-                    if (!active) onOpenDraft(draft.id)
-                  }}
-                >
-                  <span className="draft-row-text">
+                <div key={draft.id} className={`draft-row${active ? ' active' : ''}`}>
+                  <button
+                    type="button"
+                    className="draft-open"
+                    aria-current={active ? 'true' : undefined}
+                    onClick={() => {
+                      setOpen(false)
+                      if (!active) onOpenDraft(draft.id)
+                    }}
+                  >
                     <span className="draft-name">
                       {draft.name}
                       {active && <span className="draft-badge">Aktiv</span>}
                       {loading && <span className="draft-badge">Öffnet…</span>}
                     </span>
                     <span className="draft-meta">{formatDraftMeta(draft)}</span>
-                  </span>
+                  </button>
                   <button
                     type="button"
                     className="draft-delete"
@@ -128,8 +117,7 @@ export function DraftsMenu({
             })}
           <button
             type="button"
-            className="draft-row draft-menu-footer"
-            role="menuitem"
+            className="draft-menu-footer"
             onClick={() => {
               setOpen(false)
               onNewPdf()

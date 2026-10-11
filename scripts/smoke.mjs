@@ -189,6 +189,11 @@ await page.waitForTimeout(900)
 await page.getByRole('button', { name: /Entwürfe/ }).click()
 const menu = page.locator('.drafts-menu')
 check('Entwürfe-Menü öffnet', await menu.isVisible())
+check(
+  'Entwurfsliste nutzt einfache Gruppen-Semantik',
+  (await page.locator('.drafts-menu[role="menu"]').count()) === 0 &&
+    (await page.locator('.drafts-menu [role="menuitemradio"]').count()) === 0,
+)
 check('Aktiver Entwurf ist markiert', (await page.locator('.draft-row.active .draft-badge').textContent()) === 'Aktiv')
 check(
   'Entwurf zeigt Änderungszahl',
@@ -222,7 +227,7 @@ const draftCount = await page.evaluate(async () => {
 })
 check('Zwei Entwürfe liegen parallel in IndexedDB', draftCount === 2)
 await page.getByRole('button', { name: /Entwürfe/ }).click()
-const draftRows = page.locator('.drafts-menu [role="menuitemradio"]')
+const draftRows = page.locator('.drafts-menu .draft-open')
 check('Menü listet beide Entwürfe', (await draftRows.count()) === 2)
 await draftRows.nth(1).click()
 await page.waitForFunction(() => document.querySelector('.textbox textarea')?.value === 'Hallo Welt')
@@ -232,8 +237,8 @@ check('Wechsel lädt ersten Entwurf zurück', (await page.locator('.textbox text
 await page.waitForTimeout(900) // let the restore-triggered save update the order
 await page.reload()
 await page.getByRole('button', { name: /Entwürfe/ }).click()
-check('Entwürfe überleben Reload', (await page.locator('.drafts-menu [role="menuitemradio"]').count()) === 2)
-await page.locator('.drafts-menu [role="menuitemradio"]').first().click()
+check('Entwürfe überleben Reload', (await page.locator('.drafts-menu .draft-open').count()) === 2)
+await page.locator('.drafts-menu .draft-open').first().click()
 await page.waitForSelector('.textbox textarea')
 check('Reload + Öffnen stellt Overlay wieder her', (await page.locator('.textbox textarea').inputValue()) === 'Hallo Welt')
 
@@ -245,13 +250,13 @@ page.once('dialog', (dialog) => void dialog.accept())
 await page.keyboard.press(' ')
 await page.waitForFunction(() => !document.querySelector('canvas'))
 check('Aktiven Entwurf per Leertaste löschen schließt Dokument', (await page.locator('canvas').count()) === 0)
-check('Ein Entwurf bleibt nach dem Löschen übrig', (await page.locator('.drafts-menu [role="menuitemradio"]').count()) === 1)
+check('Ein Entwurf bleibt nach dem Löschen übrig', (await page.locator('.drafts-menu .draft-open').count()) === 1)
 const remainingDeleteButton = page.getByRole('button', { name: /Entwurf „zweiseitig.pdf“ löschen/ }).first()
 await remainingDeleteButton.focus()
 page.once('dialog', (dialog) => void dialog.accept())
 await page.keyboard.press('Enter')
-await page.waitForFunction(() => document.querySelectorAll('.drafts-menu [role="menuitemradio"]').length === 0)
-check('Letzten Entwurf per Enter löschen leert die Liste', (await page.locator('.drafts-menu [role="menuitemradio"]').count()) === 0)
+await page.waitForFunction(() => document.querySelectorAll('.drafts-menu .draft-open').length === 0)
+check('Letzten Entwurf per Enter löschen leert die Liste', (await page.locator('.drafts-menu .draft-open').count()) === 0)
 check('Leerzustand im Entwürfe-Menü', await page.getByText('Keine Entwürfe vorhanden.').isVisible())
 
 check('Keine Konsolen-/Seitenfehler', errors.length === 0)
