@@ -94,6 +94,9 @@ export function DraftsMenu({
                     if (!active) onOpenDraft(draft.id)
                   }}
                   onKeyDown={(event) => {
+                    // Nested controls (currently the delete button) keep their
+                    // own keyboard behavior; the row only handles direct focus.
+                    if (event.target !== event.currentTarget) return
                     if (event.key !== 'Enter' && event.key !== ' ') return
                     event.preventDefault()
                     setOpen(false)

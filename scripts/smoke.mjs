@@ -239,15 +239,19 @@ check('Reload + Öffnen stellt Overlay wieder her', (await page.locator('.textbo
 
 // 18. Delete current and remaining draft from the menu
 await page.getByRole('button', { name: /Entwürfe/ }).click()
+const activeDeleteButton = page.getByRole('button', { name: /Entwurf „zweiseitig.pdf“ löschen/ }).first()
+await activeDeleteButton.focus()
 page.once('dialog', (dialog) => void dialog.accept())
-await page.getByRole('button', { name: /Entwurf „zweiseitig.pdf“ löschen/ }).first().click()
+await page.keyboard.press(' ')
 await page.waitForFunction(() => !document.querySelector('canvas'))
-check('Aktiven Entwurf löschen schließt Dokument', (await page.locator('canvas').count()) === 0)
+check('Aktiven Entwurf per Leertaste löschen schließt Dokument', (await page.locator('canvas').count()) === 0)
 check('Ein Entwurf bleibt nach dem Löschen übrig', (await page.locator('.drafts-menu [role="menuitemradio"]').count()) === 1)
+const remainingDeleteButton = page.getByRole('button', { name: /Entwurf „zweiseitig.pdf“ löschen/ }).first()
+await remainingDeleteButton.focus()
 page.once('dialog', (dialog) => void dialog.accept())
-await page.getByRole('button', { name: /Entwurf „zweiseitig.pdf“ löschen/ }).first().click()
+await page.keyboard.press('Enter')
 await page.waitForFunction(() => document.querySelectorAll('.drafts-menu [role="menuitemradio"]').length === 0)
-check('Letzten Entwurf löschen leert die Liste', (await page.locator('.drafts-menu [role="menuitemradio"]').count()) === 0)
+check('Letzten Entwurf per Enter löschen leert die Liste', (await page.locator('.drafts-menu [role="menuitemradio"]').count()) === 0)
 check('Leerzustand im Entwürfe-Menü', await page.getByText('Keine Entwürfe vorhanden.').isVisible())
 
 check('Keine Konsolen-/Seitenfehler', errors.length === 0)
