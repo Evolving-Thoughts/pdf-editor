@@ -13,7 +13,7 @@ export interface DraftRecord {
   overlays: Overlay[]
 }
 
-/** Draft metadata for the start-screen list; the heavy bytes stay in the DB. */
+/** Draft metadata for the menu list; the heavy bytes stay outside this record. */
 export interface DraftSummary {
   id: string
   name: string
@@ -30,7 +30,7 @@ const STORE = 'drafts'
 const BYTES_STORE = 'draft-bytes'
 const DB_VERSION = 2
 
-type StoredDraft = Omit<DraftRecord, 'pdfBytes'>
+type StoredDraft = Omit<DraftRecord, 'pdfBytes'> & { sizeBytes: number }
 
 export function openDraftDb(): Promise<IDBDatabase> {
   return new Promise((resolve, reject) => {
@@ -58,8 +58,8 @@ export function openDraftDb(): Promise<IDBDatabase> {
           const value = cursor.value as StoredDraft & { pdfBytes?: ArrayBuffer }
           if (value.pdfBytes) {
             bytesStore.put(value.pdfBytes, value.id)
-            const stored = { ...value }
-            delete stored.pdfBytes
+            const { pdfBytes, ...metadata } = value
+            const stored: StoredDraft = { ...metadata, sizeBytes: pdfBytes.byteLength }
             cursor.update(stored)
           }
           cursor.continue()
@@ -81,7 +81,8 @@ function transactionDone(transaction: IDBTransaction): Promise<void> {
 
 export async function saveDraft(db: IDBDatabase, draft: Omit<DraftRecord, 'updatedAt'>): Promise<DraftRecord> {
   const record: DraftRecord = { ...draft, updatedAt: Date.now() }
-  const { pdfBytes, ...stored } = record
+  const { pdfBytes, ...metadata } = record
+  const stored: StoredDraft = { ...metadata, sizeBytes: pdfBytes.byteLength }
   const transaction = db.transaction([STORE, BYTES_STORE], 'readwrite')
   transaction.objectStore(STORE).put(stored)
   transaction.objectStore(BYTES_STORE).put(pdfBytes, record.id)
@@ -100,7 +101,14 @@ export async function loadDraft(db: IDBDatabase, id: string): Promise<DraftRecor
         resolve(null)
         return
       }
-      resolve({ ...stored, pdfBytes: (bytesRequest.result as ArrayBuffer | undefined) ?? new ArrayBuffer(0) })
+      resolve({
+        id: stored.id,
+        name: stored.name,
+        createdAt: stored.createdAt,
+        updatedAt: stored.updatedAt,
+        overlays: stored.overlays,
+        pdfBytes: (bytesRequest.result as ArrayBuffer | undefined) ?? new ArrayBuffer(0),
+      })
     }
     transaction.onerror = () => reject(transaction.error)
     transaction.onabort = () => reject(transaction.error)
@@ -109,15 +117,9 @@ export async function loadDraft(db: IDBDatabase, id: string): Promise<DraftRecor
 
 export async function listDrafts(db: IDBDatabase): Promise<DraftSummary[]> {
   return new Promise((resolve, reject) => {
-    const transaction = db.transaction([STORE, BYTES_STORE], 'readonly')
+    const transaction = db.transaction(STORE, 'readonly')
     const recordsRequest = transaction.objectStore(STORE).getAll()
-    const byteKeysRequest = transaction.objectStore(BYTES_STORE).getAllKeys()
-    const byteSizesRequest = transaction.objectStore(BYTES_STORE).getAll()
     transaction.oncomplete = () => {
-      const sizes = new Map<string, number>()
-      const keys = byteKeysRequest.result as string[]
-      const bytes = byteSizesRequest.result as ArrayBuffer[]
-      keys.forEach((key, index) => sizes.set(key, bytes[index]?.byteLength ?? 0))
       const records = recordsRequest.result as StoredDraft[]
       resolve(
         records
@@ -125,7 +127,7 @@ export async function listDrafts(db: IDBDatabase): Promise<DraftSummary[]> {
             id: record.id,
             name: record.name,
             updatedAt: record.updatedAt,
-            sizeBytes: sizes.get(record.id) ?? 0,
+            sizeBytes: record.sizeBytes,
             overlayCount: record.overlays.length,
           }))
           .sort((a, b) => b.updatedAt - a.updatedAt),
