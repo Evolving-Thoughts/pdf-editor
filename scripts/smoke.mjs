@@ -79,8 +79,9 @@ await page.keyboard.press('Escape')
 const box = page.locator('.textbox')
 check('Minibar sichtbar nach Auswahl', await box.locator('.minibar').isVisible())
 
-// 3. Font select offers the 3 text families + symbols
-check('4 Einträge im Schriftart-Select (inkl. Symbole)', (await box.locator('select[aria-label="Schriftart"] option').count()) === 4)
+// 3. Font select offers only the 3 text families; symbols are not formatting
+check('3 Einträge im Schriftart-Select', (await box.locator('select[aria-label="Schriftart"] option').count()) === 3)
+check('Kein Symbol-Picker in der Textbox-Leiste', (await box.locator('button[aria-label="Symbol auswählen"]').count()) === 0)
 
 // 4. B/I/U toggle buttons switch styles on AND off again
 const boldBtn = box.locator('button[aria-label="Fett"]')
@@ -99,22 +100,6 @@ await underlineBtn.click()
 check('U aktiviert Unterstrichen (im Text)', ((await ta.evaluate((el) => getComputedStyle(el).textDecorationLine))).includes('underline'))
 await underlineBtn.click()
 check('U erneut deaktiviert Unterstrichen', !((await ta.evaluate((el) => getComputedStyle(el).textDecorationLine))).includes('underline'))
-
-// 4b. Symbol palette: pick a checkmark, B/I/U disappear for symbol boxes
-await box.locator('button[aria-label="Symbol einfügen"]').click()
-const palette = box.locator('.symbol-popover')
-check('Symbol-Palette geht auf (16 Symbole)', (await palette.locator('button').count()) === 16)
-await palette.locator('button', { hasText: '✓' }).first().click()
-check('Symbol ✓ in der Box', (await ta.inputValue()) === '✓')
-check('Font steht auf Symbole', (await box.locator('select[aria-label="Schriftart"]').inputValue()) === 'zapfdingbats')
-check('B/I/U bei Symbolen ausgeblendet', (await box.locator('button[aria-label="Fett"]').count()) === 0)
-// back to text for the remaining steps
-await box.locator('select[aria-label="Schriftart"]').selectOption('helvetica')
-await ta.click({ force: true })
-await ta.fill('Hallo Welt')
-await page.keyboard.press('Escape')
-await page.locator('.textbox textarea').click({ force: true })
-await page.keyboard.press('Escape')
 
 // 5. Font-size picker: opens with input + all 7 presets visible
 const sizeButton = box.locator('button[aria-label="Schriftgröße"]')
@@ -180,6 +165,25 @@ check('Redo stellt Nudges wieder her', Math.round(redone.x - before.x) === -1)
 // 14. Escape switches to the select tool
 await page.keyboard.press('Escape')
 check('Esc → Auswahl-Tool aktiv', await page.getByRole('button', { name: /Auswahl/ }).getAttribute('aria-pressed') === 'true')
+
+// 14b. Symbols are a separate placement tool, not textbox formatting
+await page.getByRole('button', { name: 'Symbol auswählen' }).click()
+const symbolPalette = page.locator('.toolbar .symbol-popover')
+check('Symbol-Palette in der Haupt-Toolbar (16 Symbole)', (await symbolPalette.locator('button').count()) === 16)
+await symbolPalette.getByRole('button', { name: 'Symbol ✓' }).click()
+check('Symbol-Werkzeug aktiv', await page.getByRole('button', { name: 'Symbol auswählen' }).getAttribute('aria-pressed') === 'true')
+await page.locator('.page').first().click({ position: { x: 500, y: 500 } })
+const symbolBox = page.locator('.textbox').nth(1)
+check('Symbol als eigene Box platziert', (await page.locator('.textbox').count()) === 2)
+check('Symbolbox enthält ✓', (await symbolBox.locator('textarea').inputValue()) === '✓')
+check('Symbolbox ist schreibgeschützt', (await symbolBox.locator('textarea').getAttribute('readonly')) !== null)
+await symbolBox.locator('textarea').click({ force: true })
+await page.keyboard.type('abc')
+check('Symbol lässt sich nicht mit Text mischen', (await symbolBox.locator('textarea').inputValue()) === '✓')
+check('Symbolbox zeigt keine B/I/U-Buttons', (await symbolBox.locator('button[aria-label="Fett"]').count()) === 0)
+await symbolBox.locator('button[aria-label="Textbox löschen"]').click()
+check('Symbolbox wieder gelöscht', (await page.locator('.textbox').count()) === 1)
+await page.waitForTimeout(900)
 
 // 15. Draft menu: active draft is listed with useful metadata
 await page.getByRole('button', { name: /Entwürfe/ }).click()

@@ -233,6 +233,16 @@
   cursor: text;
 }
 
+.page.symbol-tool {
+  cursor: crosshair;
+}
+
+.symbol-kind {
+  padding: 2px 6px;
+  color: var(--text);
+  font-size: 13px;
+}
+
 .toolbar button.tool[aria-pressed="true"] {
   border-color: var(--accent);
   background: var(--accent-bg);

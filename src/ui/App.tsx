@@ -16,6 +16,7 @@ import { loadPdf, type PdfHandle } from '../core/pdf/loadPdf'
 import { zoomIn, zoomOut } from '../core/viewerState'
 import { DraftsMenu } from './DraftsMenu'
 import { PageView } from './PageView'
+import { SymbolPicker } from './SymbolPicker'
 import type { Tool } from './tools'
 import './app.css'
 
@@ -40,6 +41,7 @@ export default function App() {
   const [pdf, setPdf] = useState<PdfHandle | null>(null)
   const [zoom, setZoom] = useState(1)
   const [tool, setTool] = useState<Tool>('select')
+  const [symbol, setSymbol] = useState('✓')
   const [error, setError] = useState<string | null>(null)
   const [selectedId, setSelectedId] = useState<string | null>(null)
   const [sizeWarning, setSizeWarning] = useState(false)
@@ -408,6 +410,14 @@ export default function App() {
             >
               T Text
             </button>
+            <SymbolPicker
+              value={symbol}
+              active={tool === 'symbol'}
+              onPick={(nextSymbol) => {
+                setSymbol(nextSymbol)
+                setTool('symbol')
+              }}
+            />
             <span className="separator" />
             <button type="button" disabled={!store.canUndo} onClick={() => store.undo()} title="Rückgängig (Strg+Z)">
               ↩︎
@@ -445,6 +455,7 @@ export default function App() {
               pageIndex={index}
               zoom={zoom}
               tool={tool}
+              symbol={symbol}
               overlays={overlays}
               store={store}
               selectedId={selectedId}
