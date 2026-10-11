@@ -85,7 +85,13 @@ export async function saveDraft(db: IDBDatabase, draft: Omit<DraftRecord, 'updat
   const stored: StoredDraft = { ...metadata, sizeBytes: pdfBytes.byteLength }
   const transaction = db.transaction([STORE, BYTES_STORE], 'readwrite')
   transaction.objectStore(STORE).put(stored)
-  transaction.objectStore(BYTES_STORE).put(pdfBytes, record.id)
+  const bytesStore = transaction.objectStore(BYTES_STORE)
+  const existingBytesKey = bytesStore.getKey(record.id)
+  existingBytesKey.onsuccess = () => {
+    // PDF bytes are immutable for a draft ID. Autosave therefore updates the
+    // lightweight metadata record only after the first write.
+    if (existingBytesKey.result === undefined) bytesStore.put(pdfBytes, record.id)
+  }
   await transactionDone(transaction)
   return record
 }

@@ -77,6 +77,30 @@ test('saving the same draft again updates it in place and refreshes updatedAt', 
   expect(reloaded.createdAt).toBe(1000)
 })
 
+test('saving an existing draft does not rewrite its immutable PDF bytes', async () => {
+  const db = await openDb()
+  const originalPut = IDBObjectStore.prototype.put
+  let byteWrites = 0
+  IDBObjectStore.prototype.put = function (value: unknown, key?: IDBValidKey) {
+    if (this.name === 'draft-bytes') byteWrites += 1
+    return originalPut.call(this, value, key)
+  }
+
+  try {
+    await saveDraft(db, sampleDraft('one'))
+    expect(byteWrites).toBe(1)
+    await saveDraft(db, { ...sampleDraft('one'), overlays: [] })
+    expect(byteWrites).toBe(1)
+  } finally {
+    IDBObjectStore.prototype.put = originalPut
+  }
+
+  const loaded = await loadDraft(db, 'one')
+  expect(loaded).not.toBeNull()
+  expect(new TextDecoder().decode(loaded!.pdfBytes)).toBe('%PDF-fake-one')
+  expect(loaded!.overlays).toEqual([])
+})
+
 test('listDrafts summarizes multiple drafts newest first, without loading bytes', async () => {
   const db = await openDb()
   await saveDraft(db, sampleDraft('a'))
