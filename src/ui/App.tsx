@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useRef, useState, useSyncExternalStore } from 'react'
-import { addImage, clearDrawing, nudgeImage, nudgeTextbox, removeImage, removeTextbox } from '../core/commands'
+import { addImage, clearDrawing, nudgeImage, nudgeShape, nudgeTextbox, removeImage, removeShape, removeTextbox } from '../core/commands'
 import { EditorStore } from '../core/editorStore'
-import { cloneOverlay, createId, isImage, isStroke, isTextbox } from '../core/model'
+import { cloneOverlay, createId, isImage, isMarker, isShape, isStroke, isTextbox } from '../core/model'
 import {
   deleteDraft,
   DRAFT_SIZE_WARN_BYTES,
@@ -15,6 +15,9 @@ import {
 import { loadPdf, type PdfHandle } from '../core/pdf/loadPdf'
 import { importImage } from '../core/images/importImage'
 import { imageGeometry, initialImageGeometry, moveImage } from '../core/images/geometry'
+import { shapeGeometry, moveShape, type ShapeStyle } from '../core/shapes'
+import { ShapeToolbar } from './ShapeToolbar'
+import { SHAPE_TOOLS } from './tools'
 import { zoomIn, zoomOut } from '../core/viewerState'
 import { DraftsMenu } from './DraftsMenu'
 import { DrawingToolbar } from './DrawingToolbar'
@@ -47,6 +50,9 @@ export default function App() {
   const [symbol, setSymbol] = useState('✓')
   const [strokeColor, setStrokeColor] = useState('#111111')
   const [strokeWidth, setStrokeWidth] = useState(3)
+  const [shapeStyle,setShapeStyle] = useState<ShapeStyle>({fill:null,strokeColor:'#2455c7',strokeWidth:3})
+  const [markerStyle,setMarkerStyle] = useState<ShapeStyle>({fill:null,strokeColor:'#ffe34d',strokeWidth:24})
+  const [shapePageSize,setShapePageSize] = useState<{pdf:PdfHandle;pageIndex:number;size:{width:number;height:number}}|null>(null)
   const [eraserRadius, setEraserRadius] = useState(8)
   const [error, setError] = useState<string | null>(null)
   const [selectedId, setSelectedId] = useState<string | null>(null)
@@ -75,6 +81,13 @@ export default function App() {
   const [store] = useState(() => new EditorStore())
   useSyncExternalStore(store.subscribe, store.getVersion)
   const overlays = store.state.overlays
+  const selectedShape = overlays.find(o=>o.id===selectedId && isShape(o))
+  const shapePage = selectedShape?.pageIndex
+  useEffect(()=>{
+    let cancelled=false
+    if(pdf && shapePage!==undefined) void pdf.getPageSize(shapePage+1).then(size=>{if(!cancelled)setShapePageSize({pdf,pageIndex:shapePage,size})})
+    return ()=>{cancelled=true}
+  },[pdf,shapePage])
 
   const ensureDraftDb = useCallback(async () => {
     dbRef.current ??= await openDraftDb()
@@ -354,9 +367,9 @@ export default function App() {
       }
       if ((event.key === 'Delete' || event.key === 'Backspace') && selectedId) {
         const box = store.state.overlays.find((o) => o.id === selectedId)
-        if (box && (isTextbox(box) || isImage(box))) {
+        if (box && (isTextbox(box) || isImage(box) || isShape(box))) {
           event.preventDefault()
-          store.dispatch(isImage(box) ? removeImage(box) : removeTextbox(box))
+          store.dispatch(isImage(box) ? removeImage(box) : isShape(box) ? removeShape(box) : removeTextbox(box))
           setSelectedId(null)
         }
         return
@@ -365,16 +378,20 @@ export default function App() {
         const box = store.state.overlays.find((o) => o.id === selectedId)
         if (!box || isStroke(box)) return
         event.preventDefault()
-        if (isImage(box)) {
+        if (isImage(box) || isShape(box)) {
           const step = event.shiftKey ? 10 : 1
           const element = workspaceRef.current?.querySelector<HTMLElement>(`[data-page-index="${box.pageIndex}"]`)
           if (!element) return
-          const before = imageGeometry(box)
-          const next = moveImage(before,
-            event.key === 'ArrowLeft' ? -step : event.key === 'ArrowRight' ? step : 0,
-            event.key === 'ArrowUp' ? step : event.key === 'ArrowDown' ? -step : 0,
-            { width: element.clientWidth / zoom, height: element.clientHeight / zoom })
-          if (next.x !== box.x || next.y !== box.y) store.dispatch(nudgeImage(box.id, before, next))
+          const stepX = event.key === 'ArrowLeft' ? -step : event.key === 'ArrowRight' ? step : 0
+          const stepY = event.key === 'ArrowUp' ? step : event.key === 'ArrowDown' ? -step : 0
+          const page = {width:element.clientWidth/zoom,height:element.clientHeight/zoom}
+          if(isImage(box)) {
+            const before=imageGeometry(box), next=moveImage(before,stepX,stepY,page)
+            if(next.x!==box.x || next.y!==box.y) store.dispatch(nudgeImage(box.id,before,next))
+          } else {
+            const before=shapeGeometry(box), next=moveShape(before,stepX,stepY,page)
+            if(next.x!==box.x || next.y!==box.y) store.dispatch(nudgeShape(box.id,before,next))
+          }
           return
         }
         const step = event.shiftKey ? 10 : 1
@@ -524,6 +541,10 @@ export default function App() {
               </svg>
               Radierer
             </button>
+            {SHAPE_TOOLS.map(option=><button key={option.tool} type="button" className="tool" aria-label={option.label}
+              aria-pressed={tool===option.tool} onClick={()=>{setSelectedId(null);setTool(option.tool)}}>
+              <svg className="tool-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7" aria-hidden="true"><path d={option.path} /></svg>{option.label}
+            </button>)}
             <span className="separator" />
             <button type="button" aria-label="Rückgängig" disabled={!store.canUndo} onClick={() => store.undo()} title="Rückgängig (Strg+Z)">
               ↩︎
@@ -557,6 +578,9 @@ export default function App() {
           <DrawingToolbar workspaceRef={workspaceRef} tool={tool} color={strokeColor} width={strokeWidth}
             eraserRadius={eraserRadius} onColor={setStrokeColor} onWidth={setStrokeWidth} onEraserRadius={setEraserRadius} />
         )}
+        {pdf && tool==='select' && selectedShape && isShape(selectedShape) && shapePageSize?.pdf===pdf && shapePageSize.pageIndex===shapePage && <ShapeToolbar
+          key={activeDraftId} workspaceRef={workspaceRef} shape={selectedShape} pageSize={shapePageSize.size} store={store} onSelect={setSelectedId}
+          onStyle={shape=>{const next={fill:shape.fill,strokeColor:shape.strokeColor,strokeWidth:shape.strokeWidth};if(shape.shape==='marker')setMarkerStyle(next);else setShapeStyle(next)}} />}
         <div className="pages">
         {pdf &&
           Array.from({ length: pdf.pageCount }, (_, index) => (
@@ -570,6 +594,9 @@ export default function App() {
               strokeColor={strokeColor}
               strokeWidth={strokeWidth}
               eraserRadius={eraserRadius}
+              shapeStyle={shapeStyle}
+              markerStyle={markerStyle}
+              onTool={setTool}
               overlays={overlays}
               store={store}
               selectedId={selectedId}
@@ -581,10 +608,10 @@ export default function App() {
       </div>
       {pdf && (
         <footer className="drawing-footer">
-          <button type="button" disabled={!overlays.some(isStroke)}
-            title="Alle Freihandstriche in diesem Dokument löschen · Texte, Bilder und PDF bleiben erhalten"
+          <button type="button" disabled={!overlays.some(o=>isStroke(o)||isMarker(o))}
+            title="Freihandstriche und Textmarker löschen · Formen, Texte, Bilder und PDF bleiben erhalten"
             onClick={() => {
-              if (store.state.overlays.some(isStroke)) store.dispatch(clearDrawing(store.state.overlays))
+              if (store.state.overlays.some(o=>isStroke(o)||isMarker(o))) store.dispatch(clearDrawing(store.state.overlays))
             }}>
             Zeichnung löschen
           </button>

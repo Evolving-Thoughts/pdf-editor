@@ -1,11 +1,12 @@
 // Core module: export a PDF (pdf-lib). Overlays are written as real,
 // selectable PDF text objects (see ADR-001 and the spec).
 import {
-  LineCapStyle, LineJoinStyle, PDFDocument, PDFName, PDFNumber, popGraphicsState, pushGraphicsState,
+  BlendMode, LineCapStyle, LineJoinStyle, PDFDocument, PDFName, PDFNumber, popGraphicsState, pushGraphicsState,
   degrees, rgb, setLineJoin, StandardFonts, type Color, type PDFFont, type PDFImage, type PDFPage,
 } from 'pdf-lib'
 import { strokeToSvgPath } from '../drawing'
-import { isImage, isStroke, type Overlay, type OverlayFont, type Stroke, type Textbox } from '../model'
+import { MARKER_OPACITY, shapeToSvgPath } from '../shapes'
+import { isImage, isShape, isStroke, type Overlay, type OverlayFont, type ShapeOverlay, type Stroke, type Textbox } from '../model'
 
 // Bold/italic map to the matching PDF standard font; underline has no font
 // variant and is drawn as a line below the text.
@@ -96,6 +97,10 @@ export async function exportPdf(bytes: Uint8Array, overlays: Overlay[] = []): Pr
         height: overlay.height / space.unit, rotate: degrees(space.rotation - rotation) })
       continue
     }
+    if (isShape(overlay)) {
+      drawShape(page, overlay)
+      continue
+    }
     if (overlay.text.trim().length === 0) continue
     const variant = variantFor(overlay)
     let font = fonts.get(variant)
@@ -105,19 +110,20 @@ export async function exportPdf(bytes: Uint8Array, overlays: Overlay[] = []): Pr
     }
     const text = sanitizeFor(font, overlay.text, overlay.font)
     if (text.length === 0) continue
+    const space = displayedPageSpace(page)
     page.drawText(text, {
-      x: overlay.x,
-      y: overlay.y,
-      size: overlay.fontSize,
+      ...space.toPdf(overlay.x, overlay.y),
+      size: overlay.fontSize / space.unit,
+      rotate: degrees(space.rotation),
       font,
     })
     if (overlay.underline && overlay.font !== 'zapfdingbats') {
       const width = font.widthOfTextAtSize(text, overlay.fontSize)
       const lineY = overlay.y - overlay.fontSize * 0.12
       page.drawLine({
-        start: { x: overlay.x, y: lineY },
-        end: { x: overlay.x + width, y: lineY },
-        thickness: Math.max(0.5, overlay.fontSize * 0.05),
+        start: space.toPdf(overlay.x, lineY),
+        end: space.toPdf(overlay.x + width, lineY),
+        thickness: Math.max(0.5, overlay.fontSize * 0.05) / space.unit,
       })
     }
   }
@@ -172,4 +178,21 @@ function drawStroke(page: PDFPage, stroke: Stroke): void {
     borderLineCap: LineCapStyle.Round,
   })
   page.pushOperators(popGraphicsState())
+}
+
+function drawShape(page: PDFPage, shape: ShapeOverlay): void {
+  const path = shapeToSvgPath(shape)
+  if (!path || (!shape.fill && !shape.strokeColor)) return
+  const space = displayedPageSpace(page)
+  const angle = shape.rotation * Math.PI / 180
+  const cx = shape.x + shape.width / 2, cy = shape.y + shape.height / 2
+  const origin = space.toPdf(cx - Math.cos(angle) * shape.width / 2 + Math.sin(angle) * shape.height / 2,
+    cy + Math.sin(angle) * shape.width / 2 + Math.cos(angle) * shape.height / 2)
+  page.drawSvgPath(path, { ...origin, scale: 1 / space.unit, rotate: degrees(space.rotation - shape.rotation),
+    color: shape.fill ? colorFromHex(shape.fill) : undefined,
+    borderColor: shape.strokeColor ? colorFromHex(shape.strokeColor) : undefined,
+    borderWidth: shape.strokeColor ? shape.strokeWidth / space.unit : 0,
+    borderLineCap: LineCapStyle.Round,
+    ...(shape.shape === 'marker' ? { borderOpacity: MARKER_OPACITY, blendMode: BlendMode.Multiply } : {}),
+  })
 }

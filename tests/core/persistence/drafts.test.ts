@@ -281,3 +281,14 @@ test('repeated add/delete/save cycles cannot accumulate orphaned image asset row
   }
   expect((await loadDraft(db, 'cycles'))!.overlays).toEqual([])
 })
+
+test('shape drafts retain styles, rotation and independent normalized marker samples', async () => {
+  const { createShape } = await import('../../../src/core/shapes')
+  const marker = createShape('marker',[{x:40,y:50},{x:80,y:90}],0,{fill:null,strokeColor:'#ffe34d',strokeWidth:24},'marker')!
+  marker.rotation=37.5
+  const shape = createShape('ellipse',[{x:100,y:100},{x:200,y:250}],1,{fill:'#ffffff',strokeColor:null,strokeWidth:3},'ellipse')!
+  const db=await openDb(); const expected=structuredClone([marker,shape])
+  await saveDraft(db,{...sampleDraft('shapes'),overlays:[marker,shape]})
+  marker.markerPoints![0].x=.9
+  const loaded=await loadDraft(db,'shapes'); expect(loaded!.overlays).toEqual(expected)
+})

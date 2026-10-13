@@ -1,5 +1,7 @@
 // Geometry for freehand strokes. Pure and framework-free (ADR-004).
-import { createId, isStroke, type Overlay, type Stroke, type StrokePoint } from './model'
+import { createId, isMarker, isStroke, type Overlay, type Stroke, type StrokePoint } from './model'
+
+import { createShape, shapeWorldPoints } from './shapes'
 
 function formatCoordinate(value: number): string {
   return Number(value.toFixed(3)).toString()
@@ -141,15 +143,19 @@ export function eraseStrokes(overlays: Overlay[], pageIndex: number, eraserPoint
   let changed = false
   const result: Overlay[] = []
   for (const overlay of overlays) {
-    if (!isStroke(overlay) || overlay.pageIndex !== pageIndex) {
+    if ((!isStroke(overlay) && !isMarker(overlay)) || overlay.pageIndex !== pageIndex) {
       result.push(overlay)
       continue
     }
-    const remaining = eraseStroke(overlay, eraserPoints, radius)
+    const remaining = eraseStroke(isMarker(overlay) ? { id: overlay.id, pageIndex, points: shapeWorldPoints(overlay),
+      color: overlay.strokeColor ?? '#ffff00', width: overlay.strokeWidth } : overlay, eraserPoints, radius)
     if (remaining === null) result.push(overlay)
     else {
       changed = true
-      result.push(...remaining)
+      result.push(...(isMarker(overlay) ? remaining.flatMap(part => {
+        const shape = createShape('marker', part.points, pageIndex, { fill: null, strokeColor: part.color, strokeWidth: part.width }, part.id)
+        return shape ? [shape] : []
+      }) : remaining))
     }
   }
   return changed ? result : overlays

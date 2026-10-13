@@ -1,10 +1,13 @@
 import { useEffect, useRef, useState } from 'react'
-import { addStroke, addTextbox, replaceOverlays } from '../core/commands'
+import { addShape, addStroke, addTextbox, replaceOverlays } from '../core/commands'
 import { eraseStrokes, strokeToSvgPath } from '../core/drawing'
 import type { EditorStore } from '../core/editorStore'
-import { createId, isImage, isStroke, type Overlay, type StrokePoint, type Textbox } from '../core/model'
+import { createId, isImage, isShape, isStroke, type Overlay, type StrokePoint, type Textbox } from '../core/model'
 import type { PageSize, PdfHandle } from '../core/pdf/loadPdf'
 import { ImageView } from './ImageView'
+import { createShape, MARKER_OPACITY, shapeToSvgPath, type ShapeStyle } from '../core/shapes'
+import { ShapeView } from './ShapeView'
+import { isShapeTool } from './tools'
 import { TextboxView } from './TextboxView'
 import type { Tool } from './tools'
 
@@ -21,13 +24,18 @@ interface PageViewProps {
   strokeColor?: string
   strokeWidth?: number
   onImageDrop: (file: File, pageIndex: number, point: StrokePoint) => void
+  shapeStyle: ShapeStyle
+  markerStyle: ShapeStyle
+  onTool: (tool: Tool) => void
   eraserRadius?: number
 }
 
 interface DrawingGesture {
   pointerId: number
   pdf: PdfHandle
-  tool: 'pen' | 'eraser'
+  tool: Tool
+  version: number
+  style: ShapeStyle
   zoom: number
   color: string
   width: number
@@ -37,14 +45,16 @@ interface DrawingGesture {
 
 export function PageView({
   pdf, pageIndex, zoom, tool, symbol, overlays, store, selectedId, onSelect,
-  onImageDrop, strokeColor = '#111111', strokeWidth = 3, eraserRadius = 8,
+  shapeStyle, markerStyle, onTool, onImageDrop, strokeColor = '#111111', strokeWidth = 3, eraserRadius = 8,
 }: PageViewProps) {
   const canvasRef = useRef<HTMLCanvasElement>(null)
   const wrapperRef = useRef<HTMLDivElement>(null)
   const [pageSize, setPageSize] = useState<PageSize | null>(null)
   const gestureRef = useRef<DrawingGesture | null>(null)
-  const [previewPoints, setPreviewPoints] = useState<StrokePoint[]>([])
-  const drawing = tool === 'pen' || tool === 'eraser'
+  const [preview, setPreview] = useState<DrawingGesture | null>(null)
+  const previewPoints = preview && preview.pdf === pdf && preview.tool === tool && preview.zoom === zoom && preview.version === store.getVersion()
+    ? preview.points : []
+  const drawing = tool === 'pen' || tool === 'eraser' || isShapeTool(tool)
 
   useEffect(() => {
     let cancelled = false
@@ -62,7 +72,7 @@ export function PageView({
 
   const onPagePointerDown = (event: React.PointerEvent<HTMLDivElement>) => {
     if (!event.isPrimary || event.button !== 0 || gestureRef.current) return
-    if ((event.target as HTMLElement).closest('.textbox, .image-overlay')) return
+    if ((event.target as HTMLElement).closest('.textbox, .image-overlay, .shape-overlay')) return
     if (tool === 'select') {
       onSelect(null)
       return
@@ -75,15 +85,15 @@ export function PageView({
     const rect = wrapperRef.current.getBoundingClientRect()
     const cssX = event.clientX - rect.left
     const cssY = event.clientY - rect.top
-    if (tool === 'pen' || tool === 'eraser') {
+    if (drawing) {
       onSelect(null)
       gestureRef.current = {
-        pointerId: event.pointerId, pdf, tool, zoom, color: strokeColor,
+        pointerId: event.pointerId, pdf, tool, zoom, version: store.getVersion(), style: { ...(tool === 'marker' ? markerStyle : shapeStyle) }, color: strokeColor,
         width: strokeWidth, radius: eraserRadius,
         points: [pointFrom(event.clientX, event.clientY)],
       }
       event.currentTarget.setPointerCapture(event.pointerId)
-      setPreviewPoints([...gestureRef.current.points])
+      setPreview({ ...gestureRef.current, points: [...gestureRef.current.points] })
       return
     }
     const placingSymbol = tool === 'symbol'
@@ -114,6 +124,7 @@ export function PageView({
   const appendPoints = (event: React.PointerEvent<HTMLDivElement>) => {
     const gesture = gestureRef.current
     if (!gesture || gesture.pointerId !== event.pointerId || !pageSize) return
+    if (gesture.pdf !== pdf || gesture.zoom !== zoom || gesture.tool !== tool || gesture.version !== store.getVersion()) return
     const coalesced = event.nativeEvent.getCoalescedEvents?.() ?? []
     const samples = coalesced.length ? coalesced : [event]
     for (const sample of samples) {
@@ -121,30 +132,33 @@ export function PageView({
       const last = gesture.points[gesture.points.length - 1]
       if (last.x !== point.x || last.y !== point.y) gesture.points.push(point)
     }
-    setPreviewPoints([...gesture.points])
+    setPreview({ ...gesture, points: [...gesture.points] })
   }
 
   const cancelDrawing = (event: React.PointerEvent<HTMLDivElement>) => {
     if (gestureRef.current?.pointerId !== event.pointerId) return
     gestureRef.current = null
-    setPreviewPoints([])
+    setPreview(null)
   }
 
   const finishDrawing = (event: React.PointerEvent<HTMLDivElement>) => {
     const gesture = gestureRef.current
     if (!gesture || gesture.pointerId !== event.pointerId) return
-    if (gesture.pdf !== pdf || gesture.zoom !== zoom || gesture.tool !== tool) {
+    if (gesture.pdf !== pdf || gesture.zoom !== zoom || gesture.tool !== tool || gesture.version !== store.getVersion()) {
       cancelDrawing(event)
       return
     }
     appendPoints(event)
     gestureRef.current = null
-    setPreviewPoints([])
+    setPreview(null)
     if (event.currentTarget.hasPointerCapture(event.pointerId)) event.currentTarget.releasePointerCapture(event.pointerId)
     if (gesture.tool === 'pen') {
       store.dispatch(addStroke({
         id: createId(), pageIndex, points: gesture.points, color: gesture.color, width: gesture.width,
       }))
+    } else if (isShapeTool(gesture.tool)) {
+      const shape = createShape(gesture.tool, gesture.points, pageIndex, gesture.style)
+      if (shape) { store.dispatch(addShape(shape)); onSelect(shape.id); onTool('select') }
     } else {
       const before = store.state.overlays
       const after = eraseStrokes(before, pageIndex, gesture.points, gesture.radius)
@@ -152,6 +166,7 @@ export function PageView({
     }
   }
 
+  const shapePreview = isShapeTool(tool) && previewPoints.length > 0 ? createShape(tool, previewPoints, pageIndex, preview!.style) : null
   return (
     <div
       className={`page${tool === 'text' ? ' text-tool' : ''}${tool === 'symbol' ? ' symbol-tool' : ''}${drawing ? ' drawing-tool' : ''}`}
@@ -181,18 +196,28 @@ export function PageView({
           ) : isImage(overlay) ? (
             <ImageView key={overlay.id} image={overlay} zoom={zoom} pageSize={pageSize}
               selected={overlay.id === selectedId} tool={tool} store={store} onSelect={onSelect} />
+          ) : isShape(overlay) ? (
+            <ShapeView key={overlay.id} shape={overlay} zoom={zoom} pageSize={pageSize}
+              selected={overlay.id === selectedId} tool={tool} store={store} onSelect={onSelect} />
           ) : (
             <TextboxView key={overlay.id} box={overlay} zoom={zoom} pageHeightPts={pageSize.height}
               selected={overlay.id === selectedId} tool={tool} store={store} onSelect={onSelect} />
           ))}
-      {pageSize && previewPoints.length > 0 && (
+      {pageSize && previewPoints.length > 0 && !isShapeTool(tool) && (
         <svg className="stroke-layer" viewBox={`0 0 ${pageSize.width} ${pageSize.height}`} aria-hidden="true">
           <path className="stroke-preview" d={strokeToSvgPath(previewPoints, pageSize.height)} fill="none"
-            stroke={tool === 'eraser' ? '#2783de' : strokeColor}
-            strokeWidth={tool === 'eraser' ? eraserRadius * 2 : strokeWidth}
+            stroke={tool === 'eraser' ? '#2783de' : preview?.color}
+            strokeWidth={tool === 'eraser' ? (preview?.radius ?? eraserRadius) * 2 : preview?.width}
             opacity={tool === 'eraser' ? 0.25 : 1} strokeLinecap="round" strokeLinejoin="round" />
         </svg>
       )}
+      {pageSize && shapePreview && <svg className="stroke-layer" viewBox={`0 0 ${pageSize.width} ${pageSize.height}`} aria-hidden="true"
+        style={tool === 'marker' ? {mixBlendMode:'multiply'} : undefined}>
+        <g transform={`translate(${shapePreview.x},${pageSize.height-shapePreview.y-shapePreview.height})`}>
+          <path className="shape-preview" d={shapeToSvgPath(shapePreview)} fill={shapePreview.fill ?? 'none'} stroke={shapePreview.strokeColor ?? 'none'}
+            strokeWidth={shapePreview.strokeWidth} strokeLinecap="round" strokeLinejoin="round" opacity={tool === 'marker' ? MARKER_OPACITY : 1} />
+        </g>
+      </svg>}
     </div>
   )
 }
