@@ -1,6 +1,17 @@
 import { expect, test } from 'vitest'
-import { PDFArray, PDFDocument, PDFRawStream, decodePDFRawStream } from 'pdf-lib'
+import {
+  PDFArray,
+  PDFDocument,
+  PDFRawStream,
+  decodePDFRawStream,
+  LineJoinStyle,
+  popGraphicsState,
+  pushGraphicsState,
+  setLineJoin,
+  rgb,
+} from 'pdf-lib'
 import { exportPdf } from '../../src/core/pdf/exportPdf'
+import { createShape } from '../../src/core/shapes'
 import type { ShapeOverlay, Textbox } from '../../src/core/model'
 function contents(doc: PDFDocument) {
   const value = doc.getPage(0).node.Contents()
@@ -124,3 +135,61 @@ test('correction and later text share displayed coordinates on rotated cropped U
     .map(Number)
   ;[0, 1, -1, 0, 330, 120].forEach((value, index) => expect(matrix[index]).toBeCloseTo(value))
 })
+
+// Interpret the emitted graphics-state operators rather than only looking for
+// "1 j": missing q/Q restoration must also fail this regression.
+test.each(['rect', 'ellipse', 'line', 'arrow', 'marker'] as const)(
+  '%s exports round joins in an isolated graphics state',
+  async (kind) => {
+    const doc = await PDFDocument.create()
+    const page = doc.addPage([600, 800])
+    page.pushOperators(pushGraphicsState(), setLineJoin(LineJoinStyle.Bevel))
+    page.drawSvgPath('M 20 20 L 60 20 L 60 60', { borderColor: rgb(0, 0, 0), borderWidth: 4 })
+    page.pushOperators(popGraphicsState())
+    const shape = createShape(
+      kind,
+      [
+        { x: 100, y: 200 },
+        { x: 160, y: 260 },
+        { x: 220, y: 220 },
+      ],
+      0,
+      { fill: null, strokeColor: '#111111', strokeWidth: 6 },
+    )!
+    const text: Textbox = {
+      id: 'after-shape',
+      pageIndex: 0,
+      x: 100,
+      y: 150,
+      text: 'Nachfolgend',
+      font: 'helvetica',
+      fontSize: 14,
+      bold: false,
+      italic: false,
+      underline: true,
+    }
+    const original = JSON.stringify(shape)
+    const output = await PDFDocument.load(await exportPdf(await doc.save(), [shape, text]))
+    const stack: number[] = []
+    const paintedJoins: number[] = []
+    let join = LineJoinStyle.Miter
+    for (const operator of contents(output)
+      .split('\n')
+      .map((line) => line.trim())) {
+      if (operator === 'q') stack.push(join)
+      else if (operator === 'Q') {
+        expect(stack.length).toBeGreaterThan(0)
+        join = stack.pop()!
+      } else if (/^[012] j$/.test(operator)) join = Number(operator[0])
+      else if (operator === 'S') paintedJoins.push(join)
+    }
+    expect(stack).toHaveLength(0)
+    expect(paintedJoins).toEqual([
+      LineJoinStyle.Bevel, // Original PDF path is untouched.
+      LineJoinStyle.Round, // This exported shape matches the SVG preview.
+      LineJoinStyle.Miter, // Later underline sees the original/default state.
+    ])
+    expect(join).toBe(LineJoinStyle.Miter)
+    expect(JSON.stringify(shape)).toBe(original)
+  },
+)

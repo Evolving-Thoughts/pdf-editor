@@ -196,6 +196,8 @@ function drawShape(page: PDFPage, shape: ShapeOverlay): void {
   const cx = shape.x + shape.width / 2, cy = shape.y + shape.height / 2
   const origin = space.toPdf(cx - Math.cos(angle) * shape.width / 2 + Math.sin(angle) * shape.height / 2,
     cy + Math.sin(angle) * shape.width / 2 + Math.cos(angle) * shape.height / 2)
+  // Match SVG round joins without leaking stroke state to later elements.
+  page.pushOperators(pushGraphicsState(), setLineJoin(LineJoinStyle.Round))
   page.drawSvgPath(path, { ...origin, scale: 1 / space.unit, rotate: degrees(space.rotation - shape.rotation),
     color: shape.fill ? colorFromHex(shape.fill) : undefined,
     borderColor: shape.strokeColor ? colorFromHex(shape.strokeColor) : undefined,
@@ -203,4 +205,5 @@ function drawShape(page: PDFPage, shape: ShapeOverlay): void {
     borderLineCap: LineCapStyle.Round,
     ...(shape.shape === 'marker' ? { borderOpacity: MARKER_OPACITY, blendMode: BlendMode.Multiply } : {}),
   })
+  page.pushOperators(popGraphicsState())
 }
