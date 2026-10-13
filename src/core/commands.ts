@@ -1,8 +1,8 @@
 // Command stack for unlimited undo/redo (ADR-002).
 // Every state change goes through a reversible Command; no direct mutations
 // from the UI except store.preview() for transient gestures.
-import type { EditorState, Textbox } from './model'
-import { patchOverlay } from './model'
+import type { EditorState, Overlay, Stroke, Textbox } from './model'
+import { cloneOverlay, patchOverlay } from './model'
 
 export interface Command {
   readonly label: string
@@ -68,6 +68,34 @@ export function addTextbox(box: Textbox): Command {
     },
     revert: (s) => {
       s.overlays = s.overlays.filter((o) => o.id !== snapshot.id)
+    },
+  }
+}
+
+export function addStroke(stroke: Stroke): Command {
+  const snapshot = cloneOverlay(stroke) as Stroke
+  return {
+    label: 'Add stroke',
+    apply: (s) => {
+      s.overlays.push(cloneOverlay(snapshot))
+    },
+    revert: (s) => {
+      s.overlays = s.overlays.filter((overlay) => overlay.id !== snapshot.id)
+    },
+  }
+}
+
+/** Replaces the overlay order atomically; used for one completed eraser gesture. */
+export function replaceOverlays(before: Overlay[], after: Overlay[]): Command {
+  const beforeSnapshot = before.map(cloneOverlay)
+  const afterSnapshot = after.map(cloneOverlay)
+  return {
+    label: 'Erase stroke parts',
+    apply: (s) => {
+      s.overlays = afterSnapshot.map(cloneOverlay)
+    },
+    revert: (s) => {
+      s.overlays = beforeSnapshot.map(cloneOverlay)
     },
   }
 }

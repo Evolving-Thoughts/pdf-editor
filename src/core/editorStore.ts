@@ -1,7 +1,7 @@
 // Central editor store: holds the document overlay state and the command
 // stack (ADR-002). Framework-free; the UI subscribes and re-renders.
 import { CommandStack, type Command } from './commands'
-import type { EditorState, Overlay } from './model'
+import { cloneOverlay, type EditorState, type Overlay } from './model'
 
 export class EditorStore {
   readonly state: EditorState = { overlays: [] }
@@ -54,7 +54,7 @@ export class EditorStore {
 
   /** Replaces overlays with a stored draft's state and clears history. */
   restore(overlays: Overlay[]): void {
-    this.state.overlays = overlays.map((overlay) => ({ ...overlay }))
+    this.state.overlays = overlays.map(cloneOverlay)
     this.stack = new CommandStack(this.state)
     this.notify()
   }

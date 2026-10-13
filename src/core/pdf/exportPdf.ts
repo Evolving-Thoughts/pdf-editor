@@ -1,7 +1,11 @@
 // Core module: export a PDF (pdf-lib). Overlays are written as real,
 // selectable PDF text objects (see ADR-001 and the spec).
-import { PDFDocument, StandardFonts, type PDFFont } from 'pdf-lib'
-import type { OverlayFont, Textbox } from '../model'
+import {
+  LineCapStyle, LineJoinStyle, PDFDocument, PDFName, PDFNumber, popGraphicsState, pushGraphicsState,
+  rgb, setLineJoin, StandardFonts, type Color, type PDFFont, type PDFPage,
+} from 'pdf-lib'
+import { strokeToSvgPath } from '../drawing'
+import { isStroke, type Overlay, type OverlayFont, type Stroke, type Textbox } from '../model'
 
 // Bold/italic map to the matching PDF standard font; underline has no font
 // variant and is drawn as a line below the text.
@@ -61,37 +65,83 @@ function variantFor(overlay: Textbox): StandardFonts {
   return variants.plain
 }
 
-export async function exportPdf(bytes: Uint8Array, overlays: Textbox[] = []): Promise<Uint8Array> {
+export async function exportPdf(bytes: Uint8Array, overlays: Overlay[] = []): Promise<Uint8Array> {
   const doc = await PDFDocument.load(bytes)
-  const visible = overlays.filter((overlay) => overlay.text.trim().length > 0)
-  if (visible.length > 0) {
-    const fonts = new Map<StandardFonts, PDFFont>()
-    for (const overlay of visible) {
-      const variant = variantFor(overlay)
-      let font = fonts.get(variant)
-      if (!font) {
-        font = await doc.embedFont(variant)
-        fonts.set(variant, font)
-      }
-      const text = sanitizeFor(font, overlay.text, overlay.font)
-      if (text.length === 0) continue
-      const page = doc.getPage(overlay.pageIndex)
-      page.drawText(text, {
-        x: overlay.x,
-        y: overlay.y,
-        size: overlay.fontSize,
-        font,
+  const fonts = new Map<StandardFonts, PDFFont>()
+  for (const overlay of overlays) {
+    const page = doc.getPage(overlay.pageIndex)
+    if (isStroke(overlay)) {
+      drawStroke(page, overlay)
+      continue
+    }
+    if (overlay.text.trim().length === 0) continue
+    const variant = variantFor(overlay)
+    let font = fonts.get(variant)
+    if (!font) {
+      font = await doc.embedFont(variant)
+      fonts.set(variant, font)
+    }
+    const text = sanitizeFor(font, overlay.text, overlay.font)
+    if (text.length === 0) continue
+    page.drawText(text, {
+      x: overlay.x,
+      y: overlay.y,
+      size: overlay.fontSize,
+      font,
+    })
+    if (overlay.underline && overlay.font !== 'zapfdingbats') {
+      const width = font.widthOfTextAtSize(text, overlay.fontSize)
+      const lineY = overlay.y - overlay.fontSize * 0.12
+      page.drawLine({
+        start: { x: overlay.x, y: lineY },
+        end: { x: overlay.x + width, y: lineY },
+        thickness: Math.max(0.5, overlay.fontSize * 0.05),
       })
-      if (overlay.underline && overlay.font !== 'zapfdingbats') {
-        const width = font.widthOfTextAtSize(text, overlay.fontSize)
-        const lineY = overlay.y - overlay.fontSize * 0.12
-        page.drawLine({
-          start: { x: overlay.x, y: lineY },
-          end: { x: overlay.x + width, y: lineY },
-          thickness: Math.max(0.5, overlay.fontSize * 0.05),
-        })
-      }
     }
   }
   return doc.save()
+}
+
+function colorFromHex(hex: string): Color {
+  const match = /^#([0-9a-f]{6})$/i.exec(hex)
+  if (!match) return rgb(0, 0, 0)
+  const value = Number.parseInt(match[1], 16)
+  return rgb(((value >> 16) & 255) / 255, ((value >> 8) & 255) / 255, (value & 255) / 255)
+}
+
+function drawStroke(page: PDFPage, stroke: Stroke): void {
+  if (stroke.points.length === 0) return
+  // PDF.js shows the MediaBox/CropBox intersection after page rotation and
+  // UserUnit scaling. Stored stroke points use that displayed bottom-left
+  // origin; convert back before writing PDF operators.
+  const media = page.getMediaBox()
+  const crop = page.getCropBox()
+  const left = Math.max(media.x, crop.x)
+  const bottom = Math.max(media.y, crop.y)
+  const right = Math.min(media.x + media.width, crop.x + crop.width)
+  const top = Math.min(media.y + media.height, crop.y + crop.height)
+  const box = right > left && top > bottom
+    ? { x: left, y: bottom, width: right - left, height: top - bottom }
+    : media
+  const unitValue = page.node.get(PDFName.of('UserUnit'))
+  const rawUnit = unitValue instanceof PDFNumber ? unitValue.asNumber() : 1
+  const unit = rawUnit > 0 ? rawUnit : 1
+  const rotation = ((page.getRotation().angle % 360) + 360) % 360
+  const points = stroke.points.map((point) => {
+    const x = point.x / unit
+    const y = point.y / unit
+    if (rotation === 90) return { x: box.x + box.width - y, y: box.y + x }
+    if (rotation === 180) return { x: box.x + box.width - x, y: box.y + box.height - y }
+    if (rotation === 270) return { x: box.x + y, y: box.y + box.height - x }
+    return { x: box.x + x, y: box.y + y }
+  })
+  page.pushOperators(pushGraphicsState(), setLineJoin(LineJoinStyle.Round))
+  page.drawSvgPath(strokeToSvgPath(points, page.getHeight()), {
+    x: 0,
+    y: page.getHeight(),
+    borderColor: colorFromHex(stroke.color),
+    borderWidth: stroke.width / unit,
+    borderLineCap: LineCapStyle.Round,
+  })
+  page.pushOperators(popGraphicsState())
 }

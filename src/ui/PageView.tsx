@@ -1,7 +1,8 @@
 import { useEffect, useRef, useState } from 'react'
-import { addTextbox } from '../core/commands'
+import { addStroke, addTextbox, replaceOverlays } from '../core/commands'
+import { eraseStrokes, strokeToSvgPath } from '../core/drawing'
 import type { EditorStore } from '../core/editorStore'
-import { createId, type Overlay, type Textbox } from '../core/model'
+import { createId, isStroke, type Overlay, type StrokePoint, type Textbox } from '../core/model'
 import type { PageSize, PdfHandle } from '../core/pdf/loadPdf'
 import { TextboxView } from './TextboxView'
 import type { Tool } from './tools'
@@ -16,12 +17,32 @@ interface PageViewProps {
   store: EditorStore
   selectedId: string | null
   onSelect: (id: string | null) => void
+  strokeColor?: string
+  strokeWidth?: number
+  eraserRadius?: number
 }
 
-export function PageView({ pdf, pageIndex, zoom, tool, symbol, overlays, store, selectedId, onSelect }: PageViewProps) {
+interface DrawingGesture {
+  pointerId: number
+  pdf: PdfHandle
+  tool: 'pen' | 'eraser'
+  zoom: number
+  color: string
+  width: number
+  radius: number
+  points: StrokePoint[]
+}
+
+export function PageView({
+  pdf, pageIndex, zoom, tool, symbol, overlays, store, selectedId, onSelect,
+  strokeColor = '#111111', strokeWidth = 3, eraserRadius = 8,
+}: PageViewProps) {
   const canvasRef = useRef<HTMLCanvasElement>(null)
   const wrapperRef = useRef<HTMLDivElement>(null)
   const [pageSize, setPageSize] = useState<PageSize | null>(null)
+  const gestureRef = useRef<DrawingGesture | null>(null)
+  const [previewPoints, setPreviewPoints] = useState<StrokePoint[]>([])
+  const drawing = tool === 'pen' || tool === 'eraser'
 
   useEffect(() => {
     let cancelled = false
@@ -38,6 +59,7 @@ export function PageView({ pdf, pageIndex, zoom, tool, symbol, overlays, store, 
   }, [pdf, pageIndex, zoom])
 
   const onPagePointerDown = (event: React.PointerEvent<HTMLDivElement>) => {
+    if (!event.isPrimary || event.button !== 0 || gestureRef.current) return
     if ((event.target as HTMLElement).closest('.textbox')) return
     if (tool === 'select') {
       onSelect(null)
@@ -51,6 +73,17 @@ export function PageView({ pdf, pageIndex, zoom, tool, symbol, overlays, store, 
     const rect = wrapperRef.current.getBoundingClientRect()
     const cssX = event.clientX - rect.left
     const cssY = event.clientY - rect.top
+    if (tool === 'pen' || tool === 'eraser') {
+      onSelect(null)
+      gestureRef.current = {
+        pointerId: event.pointerId, pdf, tool, zoom, color: strokeColor,
+        width: strokeWidth, radius: eraserRadius,
+        points: [pointFrom(event.clientX, event.clientY)],
+      }
+      event.currentTarget.setPointerCapture(event.pointerId)
+      setPreviewPoints([...gestureRef.current.points])
+      return
+    }
     const placingSymbol = tool === 'symbol'
     const box: Textbox = {
       id: createId(),
@@ -68,28 +101,86 @@ export function PageView({ pdf, pageIndex, zoom, tool, symbol, overlays, store, 
     onSelect(box.id)
   }
 
+  const pointFrom = (clientX: number, clientY: number): StrokePoint => {
+    const rect = wrapperRef.current!.getBoundingClientRect()
+    return {
+      x: Math.max(0, Math.min(pageSize!.width, (clientX - rect.left) / zoom)),
+      y: Math.max(0, Math.min(pageSize!.height, pageSize!.height - (clientY - rect.top) / zoom)),
+    }
+  }
+
+  const appendPoints = (event: React.PointerEvent<HTMLDivElement>) => {
+    const gesture = gestureRef.current
+    if (!gesture || gesture.pointerId !== event.pointerId || !pageSize) return
+    const coalesced = event.nativeEvent.getCoalescedEvents?.() ?? []
+    const samples = coalesced.length ? coalesced : [event]
+    for (const sample of samples) {
+      const point = pointFrom(sample.clientX, sample.clientY)
+      const last = gesture.points[gesture.points.length - 1]
+      if (last.x !== point.x || last.y !== point.y) gesture.points.push(point)
+    }
+    setPreviewPoints([...gesture.points])
+  }
+
+  const cancelDrawing = (event: React.PointerEvent<HTMLDivElement>) => {
+    if (gestureRef.current?.pointerId !== event.pointerId) return
+    gestureRef.current = null
+    setPreviewPoints([])
+  }
+
+  const finishDrawing = (event: React.PointerEvent<HTMLDivElement>) => {
+    const gesture = gestureRef.current
+    if (!gesture || gesture.pointerId !== event.pointerId) return
+    if (gesture.pdf !== pdf || gesture.zoom !== zoom || gesture.tool !== tool) {
+      cancelDrawing(event)
+      return
+    }
+    appendPoints(event)
+    gestureRef.current = null
+    setPreviewPoints([])
+    if (event.currentTarget.hasPointerCapture(event.pointerId)) event.currentTarget.releasePointerCapture(event.pointerId)
+    if (gesture.tool === 'pen') {
+      store.dispatch(addStroke({
+        id: createId(), pageIndex, points: gesture.points, color: gesture.color, width: gesture.width,
+      }))
+    } else {
+      const before = store.state.overlays
+      const after = eraseStrokes(before, pageIndex, gesture.points, gesture.radius)
+      if (after !== before) store.dispatch(replaceOverlays(before, after))
+    }
+  }
+
   return (
     <div
-      className={`page${tool === 'text' ? ' text-tool' : ''}${tool === 'symbol' ? ' symbol-tool' : ''}`}
+      className={`page${tool === 'text' ? ' text-tool' : ''}${tool === 'symbol' ? ' symbol-tool' : ''}${drawing ? ' drawing-tool' : ''}`}
       ref={wrapperRef}
       onPointerDown={onPagePointerDown}
+      onPointerMove={appendPoints}
+      onPointerUp={finishDrawing}
+      onPointerCancel={cancelDrawing}
+      onLostPointerCapture={cancelDrawing}
     >
       <canvas ref={canvasRef} />
       {pageSize &&
         overlays
           .filter((overlay) => overlay.pageIndex === pageIndex)
-          .map((box) => (
-            <TextboxView
-              key={box.id}
-              box={box}
-              zoom={zoom}
-              pageHeightPts={pageSize.height}
-              selected={box.id === selectedId}
-              tool={tool}
-              store={store}
-              onSelect={onSelect}
-            />
+          .map((overlay) => isStroke(overlay) ? (
+            <svg key={overlay.id} className="stroke-layer" viewBox={`0 0 ${pageSize.width} ${pageSize.height}`} aria-hidden="true">
+              <path className="stroke" d={strokeToSvgPath(overlay.points, pageSize.height)} fill="none"
+                stroke={overlay.color} strokeWidth={overlay.width} strokeLinecap="round" strokeLinejoin="round" />
+            </svg>
+          ) : (
+            <TextboxView key={overlay.id} box={overlay} zoom={zoom} pageHeightPts={pageSize.height}
+              selected={overlay.id === selectedId} tool={tool} store={store} onSelect={onSelect} />
           ))}
+      {pageSize && previewPoints.length > 0 && (
+        <svg className="stroke-layer" viewBox={`0 0 ${pageSize.width} ${pageSize.height}`} aria-hidden="true">
+          <path className="stroke-preview" d={strokeToSvgPath(previewPoints, pageSize.height)} fill="none"
+            stroke={tool === 'eraser' ? '#2783de' : strokeColor}
+            strokeWidth={tool === 'eraser' ? eraserRadius * 2 : strokeWidth}
+            opacity={tool === 'eraser' ? 0.25 : 1} strokeLinecap="round" strokeLinejoin="round" />
+        </svg>
+      )}
     </div>
   )
 }

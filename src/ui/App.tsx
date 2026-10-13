@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useRef, useState, useSyncExternalStore } from 'react'
 import { nudgeTextbox, removeTextbox } from '../core/commands'
 import { EditorStore } from '../core/editorStore'
-import { createId } from '../core/model'
+import { cloneOverlay, createId, isTextbox } from '../core/model'
 import {
   deleteDraft,
   DRAFT_SIZE_WARN_BYTES,
@@ -15,6 +15,7 @@ import {
 import { loadPdf, type PdfHandle } from '../core/pdf/loadPdf'
 import { zoomIn, zoomOut } from '../core/viewerState'
 import { DraftsMenu } from './DraftsMenu'
+import { DrawingToolbar } from './DrawingToolbar'
 import { PageView } from './PageView'
 import { SymbolPicker } from './SymbolPicker'
 import type { Tool } from './tools'
@@ -42,6 +43,9 @@ export default function App() {
   const [zoom, setZoom] = useState(1)
   const [tool, setTool] = useState<Tool>('select')
   const [symbol, setSymbol] = useState('✓')
+  const [strokeColor, setStrokeColor] = useState('#111111')
+  const [strokeWidth, setStrokeWidth] = useState(3)
+  const [eraserRadius, setEraserRadius] = useState(8)
   const [error, setError] = useState<string | null>(null)
   const [selectedId, setSelectedId] = useState<string | null>(null)
   const [sizeWarning, setSizeWarning] = useState(false)
@@ -56,6 +60,7 @@ export default function App() {
   const draftRef = useRef<ActiveDraft | null>(null)
   const dbRef = useRef<IDBDatabase | null>(null)
   const fileInputRef = useRef<HTMLInputElement>(null)
+  const workspaceRef = useRef<HTMLDivElement>(null)
   const saveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
   const saveQueueRef = useRef<Promise<void>>(Promise.resolve())
   const persistenceGenerationRef = useRef(0)
@@ -104,7 +109,7 @@ export default function App() {
     const generation = persistenceGenerationRef.current
     // Copy the overlays now: the record must describe this save point even if
     // the user keeps editing while the queued IndexedDB write is waiting.
-    const overlaysSnapshot = store.state.overlays.map((overlay) => ({ ...overlay }))
+    const overlaysSnapshot = store.state.overlays.map(cloneOverlay)
     const record = await queuePersistence(async () => {
       if (generation !== persistenceGenerationRef.current) return null
       const db = await ensureDraftDb()
@@ -203,7 +208,7 @@ export default function App() {
         replaceDocument(
           next,
           { id: record.id, name: record.name, createdAt: record.createdAt, bytes },
-          record.overlays.map((overlay) => ({ ...overlay })),
+          record.overlays.map(cloneOverlay),
         )
       } catch {
         setError('Der Entwurf konnte nicht geöffnet werden.')
@@ -302,7 +307,7 @@ export default function App() {
       }
       if ((event.key === 'Delete' || event.key === 'Backspace') && selectedId) {
         const box = store.state.overlays.find((o) => o.id === selectedId)
-        if (box) {
+        if (box && isTextbox(box)) {
           store.dispatch(removeTextbox(box))
           setSelectedId(null)
         }
@@ -310,7 +315,7 @@ export default function App() {
       }
       if (selectedId && event.key.startsWith('Arrow')) {
         const box = store.state.overlays.find((o) => o.id === selectedId)
-        if (!box) return
+        if (!box || !isTextbox(box)) return
         event.preventDefault()
         const step = event.shiftKey ? 10 : 1
         const dx = event.key === 'ArrowLeft' ? -step : event.key === 'ArrowRight' ? step : 0
@@ -418,11 +423,43 @@ export default function App() {
                 setTool('symbol')
               }}
             />
+            <button
+              type="button"
+              className="tool"
+              aria-label="Stift"
+              aria-pressed={tool === 'pen'}
+              onClick={() => {
+                setSelectedId(null)
+                setTool('pen')
+              }}
+            >
+              <svg className="tool-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+                strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+                <path d="m 4 16 12 -12 4 4 -12 12 -5 1 1 -5 M 13 7 l 4 4" />
+              </svg>
+              Stift
+            </button>
+            <button
+              type="button"
+              className="tool"
+              aria-label="Radierer"
+              aria-pressed={tool === 'eraser'}
+              onClick={() => {
+                setSelectedId(null)
+                setTool('eraser')
+              }}
+            >
+              <svg className="tool-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+                strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+                <path d="m 4 14 10 -10 7 7 -10 10 H 7 l -3 -3 Z M 9 9 l 7 7 M 11 21 h 10" />
+              </svg>
+              Radierer
+            </button>
             <span className="separator" />
-            <button type="button" disabled={!store.canUndo} onClick={() => store.undo()} title="Rückgängig (Strg+Z)">
+            <button type="button" aria-label="Rückgängig" disabled={!store.canUndo} onClick={() => store.undo()} title="Rückgängig (Strg+Z)">
               ↩︎
             </button>
-            <button type="button" disabled={!store.canRedo} onClick={() => store.redo()} title="Wiederholen (Strg+Y)">
+            <button type="button" aria-label="Wiederholen" disabled={!store.canRedo} onClick={() => store.redo()} title="Wiederholen (Strg+Y)">
               ↪︎
             </button>
             <button type="button" onClick={() => void onExport()}>
@@ -446,22 +483,31 @@ export default function App() {
           Wähle eine PDF-Datei – oder öffne über <b>Entwürfe&nbsp;▾</b> einen früheren Stand.
         </p>
       )}
-      <div className="pages">
+      <div className="workspace" ref={workspaceRef}>
+        {pdf && (
+          <DrawingToolbar workspaceRef={workspaceRef} tool={tool} color={strokeColor} width={strokeWidth}
+            eraserRadius={eraserRadius} onColor={setStrokeColor} onWidth={setStrokeWidth} onEraserRadius={setEraserRadius} />
+        )}
+        <div className="pages">
         {pdf &&
           Array.from({ length: pdf.pageCount }, (_, index) => (
             <PageView
-              key={index}
+              key={`${activeDraftId}-${index}`}
               pdf={pdf}
               pageIndex={index}
               zoom={zoom}
               tool={tool}
               symbol={symbol}
+              strokeColor={strokeColor}
+              strokeWidth={strokeWidth}
+              eraserRadius={eraserRadius}
               overlays={overlays}
               store={store}
               selectedId={selectedId}
               onSelect={setSelectedId}
             />
           ))}
+        </div>
       </div>
     </div>
   )
