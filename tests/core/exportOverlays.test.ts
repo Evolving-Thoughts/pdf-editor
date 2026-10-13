@@ -1,11 +1,26 @@
 import { expect, test } from 'vitest'
 import { PDFDocument } from 'pdf-lib'
-import { getDocument } from 'pdfjs-dist/legacy/build/pdf.mjs'
+import { getDocument, OPS } from 'pdfjs-dist/legacy/build/pdf.mjs'
 import { exportPdf } from '../../src/core/pdf/exportPdf'
-import type { Textbox } from '../../src/core/model'
+import type { Stroke, Textbox } from '../../src/core/model'
 
 function box(overrides: Partial<Textbox>): Textbox {
   return { id: 'x', pageIndex: 0, x: 50, y: 700, text: '', font: 'helvetica', fontSize: 14, bold: false, italic: false, underline: false, ...overrides }
+}
+
+function stroke(overrides: Partial<Stroke> = {}): Stroke {
+  return {
+    id: 'stroke-1',
+    pageIndex: 0,
+    points: [
+      { x: 10, y: 700 },
+      { x: 100, y: 650 },
+      { x: 150, y: 670 },
+    ],
+    color: '#0000ff',
+    width: 4,
+    ...overrides,
+  }
 }
 
 interface TextItemLike {
@@ -105,4 +120,74 @@ test('unencodable characters in text fonts become question marks', async () => {
   const bytes = await exportPdf(await doc.save(), [box({ text: 'Hä✓llo' })])
   const items = await extractItems(bytes, 1)
   expect(items.map((item) => item.str).join('')).toContain('Hä?llo')
+})
+
+test('freehand strokes export as vector paths, not raster images', async () => {
+  const doc = await PDFDocument.create()
+  doc.addPage([595, 842])
+  const bytes = await exportPdf(await doc.save(), [stroke()])
+
+  const task = getDocument({ data: bytes.slice() })
+  const pdf = await task.promise
+  const page = await pdf.getPage(1)
+  const operators = await page.getOperatorList()
+  expect(operators.fnArray).toContain(OPS.constructPath)
+  expect(operators.fnArray).not.toContain(OPS.paintImageXObject)
+  expect(operators.fnArray).not.toContain(OPS.paintImageXObjectRepeat)
+  await task.destroy()
+})
+
+async function exportContent(bytes: Uint8Array, pageIndex: number): Promise<string> {
+  const { PDFArray, PDFRawStream, decodePDFRawStream } = await import('pdf-lib')
+  const doc = await PDFDocument.load(bytes)
+  const contents = doc.getPage(pageIndex).node.Contents()
+  const streams = contents instanceof PDFArray
+    ? contents.asArray().map((ref) => doc.context.lookup(ref, PDFRawStream))
+    : contents ? [contents as InstanceType<typeof PDFRawStream>] : []
+  return streams.map((stream) => Buffer.from(decodePDFRawStream(stream).decode()).toString()).join('\n')
+}
+
+test('vector stroke coordinates remain at the displayed position on a rotated cropped page', async () => {
+  const { degrees } = await import('pdf-lib')
+  const doc = await PDFDocument.create()
+  const page = doc.addPage([595, 842])
+  page.setCropBox(20, 30, 400, 600)
+  page.setRotation(degrees(90))
+  const bytes = await exportPdf(await doc.save(), [stroke({ points: [{ x: 10, y: 100 }, { x: 100, y: 200 }] })])
+  const content = await exportContent(bytes, 0)
+  // Displayed (10,100) -> raw PDF (320,40); SVG's y-down transform at 842
+  // therefore encodes (320,802). Independent worked coordinates, not the converter.
+  expect(content).toContain('1 0 0 1 0 842 cm')
+  expect(content).toContain('1 0 0 -1 0 0 cm')
+  expect(content).toContain('320 802 m')
+  expect(content).toContain('220 712 l')
+})
+
+test.each([
+  [0, '30 712 m', '120 612 l'],
+  [180, '410 312 m', '320 412 l'],
+  [270, '120 222 m', '220 312 l'],
+])('stroke placement respects rotation %s and CropBox origin', async (angle, first, second) => {
+  const { degrees } = await import('pdf-lib')
+  const doc = await PDFDocument.create()
+  const page = doc.addPage([595, 842])
+  page.setCropBox(20, 30, 400, 600)
+  page.setRotation(degrees(angle as number))
+  const bytes = await exportPdf(await doc.save(), [stroke({ points: [{ x: 10, y: 100 }, { x: 100, y: 200 }] })])
+  const content = await exportContent(bytes, 0)
+  expect(content).toContain(first)
+  expect(content).toContain(second)
+})
+
+test('non-default PDF UserUnit preserves visible stroke position and width', async () => {
+  const { PDFName, PDFNumber } = await import('pdf-lib')
+  const doc = await PDFDocument.create()
+  const page = doc.addPage([595, 842])
+  page.node.set(PDFName.of('UserUnit'), PDFNumber.of(2))
+  const bytes = await exportPdf(await doc.save(), [stroke({ points: [{ x: 20, y: 200 }, { x: 200, y: 400 }], width: 6 })])
+  const content = await exportContent(bytes, 0)
+  expect(content).toContain('10 742 m')
+  expect(content).toContain('100 642 l')
+  expect(content).toContain('3 w')
+  expect(content).toContain('1 j') // round joins agree with the editor
 })

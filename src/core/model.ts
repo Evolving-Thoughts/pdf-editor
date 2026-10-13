@@ -19,7 +19,38 @@ export interface Textbox {
   underline: boolean
 }
 
-export type Overlay = Textbox
+export interface StrokePoint {
+  /** Displayed PDF points, origin bottom-left of the visible, rotated page. */
+  x: number
+  y: number
+}
+
+export interface Stroke {
+  id: string
+  /** 0-based page index. */
+  pageIndex: number
+  /** Ordered points relative to the visible, rotated page (bottom-left origin). */
+  points: StrokePoint[]
+  /** Hex color such as #111111. */
+  color: string
+  /** Stroke width in PDF points. */
+  width: number
+}
+
+export type Overlay = Textbox | Stroke
+
+export function isStroke(overlay: Overlay): overlay is Stroke {
+  return 'points' in overlay
+}
+
+export function isTextbox(overlay: Overlay): overlay is Textbox {
+  return !isStroke(overlay)
+}
+
+export function cloneOverlay(overlay: Overlay): Overlay {
+  if (isStroke(overlay)) return { ...overlay, points: overlay.points.map((point) => ({ ...point })) }
+  return { ...overlay }
+}
 
 export interface EditorState {
   overlays: Overlay[]
@@ -34,5 +65,5 @@ export function createId(): string {
 /** Mutates one overlay in place; used by commands and previews alike. */
 export function patchOverlay(state: EditorState, id: string, changes: Partial<Textbox>): void {
   const box = state.overlays.find((o) => o.id === id)
-  if (box) Object.assign(box, changes)
+  if (box && isTextbox(box)) Object.assign(box, changes)
 }

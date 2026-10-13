@@ -1,2 +1,2 @@
 // Editor tools (variant B: explicit tool mode, chosen via UI prototype).
-export type Tool = 'select' | 'text' | 'symbol'
+export type Tool = 'select' | 'text' | 'symbol' | 'pen' | 'eraser'

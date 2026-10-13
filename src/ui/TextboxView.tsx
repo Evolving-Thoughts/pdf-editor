@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react'
 import { moveTextbox, removeTextbox, updateTextbox } from '../core/commands'
 import type { EditorStore } from '../core/editorStore'
-import { patchOverlay, type OverlayFont, type Textbox } from '../core/model'
+import { isTextbox, patchOverlay, type OverlayFont, type Textbox } from '../core/model'
 import type { Tool } from './tools'
 
 interface FontCss {
@@ -238,7 +238,7 @@ export function TextboxView({ box, zoom, pageHeightPts, selected, tool, store, o
     dragFrom.current = null
     if (!drag) return
     const current = store.state.overlays.find((o) => o.id === box.id)
-    if (!current || (current.x === drag.x && current.y === drag.y)) return
+    if (!current || !isTextbox(current) || (current.x === drag.x && current.y === drag.y)) return
     store.dispatch(moveTextbox(box.id, { x: drag.x, y: drag.y }, { x: current.x, y: current.y }))
   }
 

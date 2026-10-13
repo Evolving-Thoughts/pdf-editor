@@ -3,7 +3,7 @@
 // (core/UI boundary, ADR-004).
 import { getDocument, GlobalWorkerOptions } from 'pdfjs-dist'
 import workerUrl from 'pdfjs-dist/build/pdf.worker.min.mjs?url'
-import type { Textbox } from '../model'
+import type { Overlay } from '../model'
 import { exportPdf } from './exportPdf'
 
 GlobalWorkerOptions.workerSrc = workerUrl
@@ -21,7 +21,7 @@ export interface PdfHandle {
   /** Page size in PDF points (1-based page number), cached after first call. */
   getPageSize(pageNumber: number): Promise<PageSize>
   /** Exports the document with the given overlays baked in as real text. */
-  exportBytes(overlays?: Textbox[]): Promise<Uint8Array>
+  exportBytes(overlays?: Overlay[]): Promise<Uint8Array>
   /** Releases worker resources; call when switching or closing documents. */
   destroy(): Promise<void>
 }

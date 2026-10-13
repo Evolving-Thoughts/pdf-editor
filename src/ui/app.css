@@ -1,5 +1,5 @@
 .app {
-  min-height: 100svh;
+  height: 100svh;
   display: flex;
   flex-direction: column;
 }
@@ -7,24 +7,28 @@
 .toolbar {
   position: sticky;
   top: 0;
-  z-index: 1;
+  z-index: 30;
   display: flex;
   align-items: center;
-  gap: 12px;
-  padding: 10px 16px;
+  gap: 8px;
+  padding: 8px 12px;
   background: var(--bg);
   border-bottom: 1px solid var(--border);
+  flex-wrap: wrap;
+  flex-shrink: 0;
 }
 
 .toolbar button {
   font: inherit;
-  font-size: 15px;
-  padding: 6px 14px;
+  font-size: 14px;
+  min-height: 44px;
+  padding: 6px 10px;
   border: 1px solid var(--border);
   border-radius: 6px;
   background: var(--bg);
   color: var(--text-h);
   cursor: pointer;
+  touch-action: manipulation;
 }
 
 .toolbar button:hover {
@@ -169,6 +173,124 @@
   align-items: center;
   gap: 16px;
   padding: 16px;
+  height: 100%;
+  overflow: auto;
+  box-sizing: border-box;
+}
+
+.workspace {
+  position: relative;
+  flex: 1;
+  min-height: 0;
+  overflow: hidden;
+}
+
+.page {
+  flex-shrink: 0;
+  align-self: safe center;
+}
+
+.drawing-toolbar {
+  position: absolute;
+  z-index: 10;
+  display: flex;
+  flex-direction: column;
+  width: max-content;
+  max-width: calc(100% - 16px);
+  box-sizing: border-box;
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  box-shadow: 0 1px 2px rgba(0,0,0,.05), 0 4px 12px rgba(0,0,0,.08);
+  touch-action: manipulation;
+}
+
+.drawing-toolbar[hidden] { display: none; }
+.drawing-options {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  padding: 8px;
+}
+.drawing-colors,
+.drawing-widths,
+.drawing-eraser-sizes { display: flex; gap: 4px; }
+.drawing-line-controls { display: flex; align-items: center; gap: 8px; }
+.drawing-toolbar button {
+  min-height: 44px;
+  min-width: 44px;
+  font: inherit;
+  font-size: 14px;
+  color: var(--text-h);
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  cursor: pointer;
+}
+.drawing-toolbar button[aria-pressed="true"] {
+  border-color: var(--accent);
+  background: var(--accent-bg);
+}
+.drawing-toolbar button { display: inline-flex; align-items: center; justify-content: center; }
+.drawing-toolbar .drawing-grip {
+  justify-content: flex-start;
+  gap: 8px;
+  padding: 0 12px;
+  border: 0;
+  border-bottom: 1px solid var(--border);
+  border-radius: 7px 7px 0 0;
+  background: color-mix(in srgb, var(--text-h) 4%, var(--bg));
+  font-weight: 600;
+  cursor: grab;
+  touch-action: none;
+  user-select: none;
+}
+.tool-icon { width: 16px; height: 16px; vertical-align: -3px; margin-right: 6px; }
+.drawing-toolbar .drawing-grip:active { cursor: grabbing; }
+.drawing-label { color: var(--text); font-size: 14px; }
+.color-dot {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 24px;
+  height: 24px;
+  border-radius: 50%;
+  color: #fff;
+  font-weight: 700;
+}
+.drawing-toolbar :focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+
+.drawing-footer {
+  display: flex;
+  justify-content: flex-end;
+  flex-shrink: 0;
+  padding: 8px 16px;
+  border-top: 1px solid var(--border);
+  background: var(--bg);
+}
+.drawing-footer button {
+  font: inherit;
+  font-size: 14px;
+  min-height: 44px;
+  padding: 6px 12px;
+  color: var(--text-h);
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  cursor: pointer;
+  touch-action: manipulation;
+}
+.drawing-footer button:hover:not(:disabled) { border-color: var(--accent-border); }
+.drawing-footer button:disabled { opacity: .4; cursor: default; }
+.drawing-footer button:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+
+@media (max-width: 640px) {
+  .toolbar { gap: 8px; padding: 8px; }
+  .toolbar button { min-height: 44px; padding: 6px 10px; }
+  .file-info { flex-basis: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .pages { align-items: flex-start; }
+  .page { align-self: flex-start; }
 }
 
 .pages canvas {
@@ -243,6 +365,23 @@
 
 .page.symbol-tool {
   cursor: crosshair;
+}
+
+.page.drawing-tool {
+  cursor: crosshair;
+  touch-action: none;
+}
+
+.page.drawing-tool .textbox {
+  pointer-events: none;
+}
+
+.stroke-layer {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  pointer-events: none;
 }
 
 .symbol-kind {
