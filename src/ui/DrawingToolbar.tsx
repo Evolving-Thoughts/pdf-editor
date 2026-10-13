@@ -98,9 +98,11 @@ export function DrawingToolbar({
         <svg width="18" height="22" viewBox="0 0 18 22" fill="currentColor" aria-hidden="true">
           {[5, 11, 17].flatMap((y) => [5, 13].map((x) => <circle key={`${x}-${y}`} cx={x} cy={y} r="1.7" />))}
         </svg>
+        Leiste ziehen
       </button>
-      {tool === 'pen' ? (
-        <>
+      <div className="drawing-options">
+        <span className="drawing-label">{tool === 'pen' ? 'Stift:' : 'Radierer'}</span>
+        {tool === 'pen' && (
           <div className="drawing-colors" role="group" aria-label="Stiftfarbe">
             {COLORS.map((option) => (
               <button key={option.value} type="button" aria-label={option.label} title={option.label}
@@ -111,27 +113,37 @@ export function DrawingToolbar({
               </button>
             ))}
           </div>
-          <select aria-label="Strichstärke" title="Strichstärke" value={width}
-            onChange={(event) => onWidth(Number(event.target.value))}>
-            {[1, 3, 6].map((value) => <option key={value} value={value}>{value} pt</option>)}
-          </select>
-        </>
-      ) : (
-        <>
-          <span className="drawing-label">Radierer</span>
-          <select aria-label="Radierergröße" title="Radierergröße (Durchmesser)" value={eraserRadius}
-            onChange={(event) => onEraserRadius(Number(event.target.value))}>
-            {[8, 16, 24].map((value) => <option key={value} value={value}>{value * 2} pt</option>)}
-          </select>
-        </>
-      )}
-      <button type="button" aria-label="Position zurücksetzen" title="Position zurücksetzen"
-        onClick={() => setPosition(bounded(HOME))}>
-        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor"
-          strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
-          <path d="M 4 10 A 8 8 0 1 1 5 17 M 4 4 V 10 H 10" />
-        </svg>
-      </button>
+        )}
+        <div className="drawing-line-controls">
+          {tool === 'pen' ? (
+            <div className="drawing-widths" role="group" aria-label="Strichstärke">
+              {[1, 3, 6].map((value, index) => (
+                <button key={value} type="button" aria-label={`${value} pt Strichstärke`}
+                  title={`${['Dünn', 'Mittel', 'Dick'][index]} · ${value} pt`}
+                  aria-pressed={width === value} onClick={() => onWidth(value)}>
+                  <svg width="30" height="18" viewBox="0 0 30 18" fill="none" aria-hidden="true">
+                    <path d={`M 4 ${value % 2 ? 9.5 : 9} H 26`}
+                      stroke={width === value ? 'var(--accent)' : 'currentColor'}
+                      strokeWidth={value} strokeLinecap="round" />
+                  </svg>
+                </button>
+              ))}
+            </div>
+          ) : (
+            <select aria-label="Radierergröße" title="Radierergröße (Durchmesser)" value={eraserRadius}
+              onChange={(event) => onEraserRadius(Number(event.target.value))}>
+              {[8, 16, 24].map((value) => <option key={value} value={value}>{value * 2} pt</option>)}
+            </select>
+          )}
+          <button type="button" aria-label="Position zurücksetzen" title="Position zurücksetzen"
+            onClick={() => setPosition(bounded(HOME))}>
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+              strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+              <path d="M 4 10 A 8 8 0 1 1 5 17 M 4 4 V 10 H 10" />
+            </svg>
+          </button>
+        </div>
+      </div>
     </div>
   )
 }

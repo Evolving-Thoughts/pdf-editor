@@ -2,7 +2,7 @@
 // Every state change goes through a reversible Command; no direct mutations
 // from the UI except store.preview() for transient gestures.
 import type { EditorState, Overlay, Stroke, Textbox } from './model'
-import { cloneOverlay, patchOverlay } from './model'
+import { cloneOverlay, isTextbox, patchOverlay } from './model'
 
 export interface Command {
   readonly label: string
@@ -85,7 +85,7 @@ export function addStroke(stroke: Stroke): Command {
   }
 }
 
-/** Replaces the overlay order atomically; used for one completed eraser gesture. */
+/** Replaces the overlay order atomically, e.g. for one completed eraser gesture. */
 export function replaceOverlays(before: Overlay[], after: Overlay[]): Command {
   const beforeSnapshot = before.map(cloneOverlay)
   const afterSnapshot = after.map(cloneOverlay)
@@ -97,6 +97,14 @@ export function replaceOverlays(before: Overlay[], after: Overlay[]): Command {
     revert: (s) => {
       s.overlays = beforeSnapshot.map(cloneOverlay)
     },
+  }
+}
+
+/** Removes only this document's freehand drawing as one undo step. */
+export function clearDrawing(overlays: Overlay[]): Command {
+  return {
+    ...replaceOverlays(overlays, overlays.filter(isTextbox)),
+    label: 'Clear drawing',
   }
 }
 

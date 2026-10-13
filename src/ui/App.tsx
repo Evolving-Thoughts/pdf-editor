@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useRef, useState, useSyncExternalStore } from 'react'
-import { nudgeTextbox, removeTextbox } from '../core/commands'
+import { clearDrawing, nudgeTextbox, removeTextbox } from '../core/commands'
 import { EditorStore } from '../core/editorStore'
-import { cloneOverlay, createId, isTextbox } from '../core/model'
+import { cloneOverlay, createId, isStroke, isTextbox } from '../core/model'
 import {
   deleteDraft,
   DRAFT_SIZE_WARN_BYTES,
@@ -509,6 +509,17 @@ export default function App() {
           ))}
         </div>
       </div>
+      {pdf && (
+        <footer className="drawing-footer">
+          <button type="button" disabled={!overlays.some(isStroke)}
+            title="Alle Freihandstriche in diesem Dokument löschen · Texte und PDF bleiben erhalten"
+            onClick={() => {
+              if (store.state.overlays.some(isStroke)) store.dispatch(clearDrawing(store.state.overlays))
+            }}>
+            Zeichnung löschen
+          </button>
+        </footer>
+      )}
     </div>
   )
 }
