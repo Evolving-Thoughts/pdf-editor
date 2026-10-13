@@ -67,6 +67,14 @@ async function rotateArc(page, delta, { shift = false, cancel = false, touch = f
     x: cx + Math.cos(angle + ((delta * Math.PI) / 180) * fraction) * radius,
     y: cy + Math.sin(angle + ((delta * Math.PI) / 180) * fraction) * radius,
   })
+  assert.equal(
+    await page.getByRole('button', { name: 'Form frei drehen', exact: true }).evaluate((el) => {
+      const r = el.getBoundingClientRect()
+      return document.elementFromPoint(r.x + r.width / 2, r.y + r.height / 2)?.closest('button') === el
+    }),
+    true,
+    'the rotation grip must be visible and not covered by the movable palette',
+  )
   if (touch) {
     const session = await page.context().newCDPSession(page)
     await session.send('Input.dispatchTouchEvent', { type: 'touchStart', touchPoints: [{ x, y }] })
@@ -374,13 +382,15 @@ try {
   await mobile.getByRole('button', { name: 'Rechteck', exact: true }).click()
   const mobilePage = await mobile.locator('.page').first().boundingBox(),
     session = await mobile.context().newCDPSession(mobile)
+  // The save status row reduces workspace height. Create higher up so the
+  // bottom-positioned floating palette leaves the grip unobstructed.
   await session.send('Input.dispatchTouchEvent', {
     type: 'touchStart',
-    touchPoints: [{ x: mobilePage.x + 100, y: mobilePage.y + 180 }],
+    touchPoints: [{ x: mobilePage.x + 100, y: mobilePage.y + 80 }],
   })
   await session.send('Input.dispatchTouchEvent', {
     type: 'touchMove',
-    touchPoints: [{ x: mobilePage.x + 280, y: mobilePage.y + 270 }],
+    touchPoints: [{ x: mobilePage.x + 280, y: mobilePage.y + 170 }],
   })
   await session.send('Input.dispatchTouchEvent', { type: 'touchEnd', touchPoints: [] })
   await mobile.waitForSelector('.shape-toolbar')

@@ -2,7 +2,7 @@ import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react
 import { moveTextbox, removeTextbox, updateTextbox } from '../core/commands'
 import type { EditorStore } from '../core/editorStore'
 import { isTextbox, patchOverlay, type OverlayFont, type Textbox } from '../core/model'
-import { TEXT_LINE_HEIGHT as LINE_HEIGHT, textLineBaseline } from '../core/textLayout'
+import { TEXT_LINE_HEIGHT as LINE_HEIGHT } from '../core/textLayout'
 import type { Tool } from './tools'
 
 interface FontCss {
@@ -40,17 +40,14 @@ function clampFontSize(raw: string): number | null {
 // enough across browsers, so we size the box explicitly from the content.
 let measureCtx: CanvasRenderingContext2D | null = null
 
-function measureText(text: string, css: FontCss, px: number): { width: number; lines: number; baseline: number } {
+function measureText(text: string, css: FontCss, px: number): { width: number; lines: number } {
   const lines = text.split('\n')
   if (!measureCtx) measureCtx = document.createElement('canvas').getContext('2d')
-  if (!measureCtx) return { width: text.length * px * 0.6, lines: Math.max(1, lines.length), baseline: textLineBaseline(px, px * .8, px * .2) }
+  if (!measureCtx) return { width: text.length * px * 0.6, lines: Math.max(1, lines.length) }
   measureCtx.font = `${css.fontStyle ?? 'normal'} ${css.fontWeight ?? 'normal'} ${px}px ${css.fontFamily}`
   let width = 0
   for (const line of lines) width = Math.max(width, measureCtx.measureText(line || ' ').width)
-  const metrics = measureCtx.measureText('Mg')
-  const ascent = Number.isFinite(metrics.fontBoundingBoxAscent) ? metrics.fontBoundingBoxAscent : px * .8
-  const descent = Number.isFinite(metrics.fontBoundingBoxDescent) ? metrics.fontBoundingBoxDescent : px * .2
-  return { width, lines: Math.max(1, lines.length), baseline: textLineBaseline(px, ascent, descent) }
+  return { width, lines: Math.max(1, lines.length) }
 }
 
 interface FontSizePickerProps {
@@ -163,6 +160,8 @@ export function TextboxView({ box, zoom, pageHeightPts, selected, tool, store, o
   const [focused, setFocused] = useState(false)
   const beforeEdit = useRef(box.text)
   const textareaRef = useRef<HTMLTextAreaElement>(null)
+  const baselineLineRef = useRef<HTMLSpanElement>(null)
+  const baselineMarkerRef = useRef<HTMLSpanElement>(null)
   const anchorRef = useRef<HTMLDivElement>(null)
   const dragFrom = useRef<{ pointerX: number; pointerY: number; x: number; y: number } | null>(null)
 
@@ -181,7 +180,7 @@ export function TextboxView({ box, zoom, pageHeightPts, selected, tool, store, o
     const el = textareaRef.current
     if (!el) return
     const px = box.fontSize * zoom
-    const { width, lines, baseline } = measureText(
+    const { width, lines } = measureText(
       displayText,
       {
         fontFamily: FONT_CSS[box.font],
@@ -193,7 +192,13 @@ export function TextboxView({ box, zoom, pageHeightPts, selected, tool, store, o
     el.style.width = `${Math.max(40, Math.ceil(width) + 10 + Math.ceil(px * 0.2))}px`
     el.style.height = `${Math.ceil(lines * px * LINE_HEIGHT) + 6}px`
     // CSS padding/border must not move glyphs away from the stored PDF origin.
-    // Use actual font metrics for the first baseline; keep chrome outside it.
+    // Canvas font bounds are not the CSS line-box baseline: their metrics and
+    // leading are rounded differently. Measure a zero-height inline baseline
+    // marker in the same inherited font/line-height as the textarea instead.
+    const line = baselineLineRef.current
+    const marker = baselineMarkerRef.current
+    if (!line || !marker) return
+    const baseline = marker.getBoundingClientRect().top - line.getBoundingClientRect().top
     const chrome = getComputedStyle(el)
     const insetX = parseFloat(chrome.paddingLeft) + parseFloat(chrome.borderLeftWidth)
     const insetY = parseFloat(chrome.paddingTop) + parseFloat(chrome.borderTopWidth)
@@ -268,6 +273,19 @@ export function TextboxView({ box, zoom, pageHeightPts, selected, tool, store, o
         onSelect(box.id)
       }}
     >
+      <span
+        ref={baselineLineRef}
+        aria-hidden="true"
+        style={{
+          position: 'absolute', visibility: 'hidden', pointerEvents: 'none',
+          whiteSpace: 'pre', lineHeight: LINE_HEIGHT,
+        }}
+      >
+        Mg<span
+          ref={baselineMarkerRef}
+          style={{ display: 'inline-block', width: 0, height: 0, verticalAlign: 'baseline' }}
+        />
+      </span>
       {selected && (
         <div className="minibar">
           {!isSymbol && (

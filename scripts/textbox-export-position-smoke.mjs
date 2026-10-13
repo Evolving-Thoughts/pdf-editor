@@ -43,14 +43,19 @@ async function glyphBounds(page, image) {
     return { left, top, right, bottom }
   }, image.toString('base64'))
 }
-async function capture(page, name, zoom = 1) {
+async function capture(page, name, zoom = 1, top = 360) {
   const r = await page.locator('.page').boundingBox()
   return page.screenshot({
     path: join(artifacts, name),
-    clip: { x: r.x + 175 * zoom, y: r.y + 360 * zoom, width: 220 * zoom, height: 80 * zoom },
+    clip: { x: r.x + 175 * zoom, y: r.y + top * zoom, width: 220 * zoom, height: 80 * zoom },
   })
 }
 const cases = [
+  { name: 'two-textboxes', font: 'helvetica', zoom: 1, second: true, text: 'testtesttesta asfasf' },
+  { name: 'two-textboxes-75', font: 'helvetica', zoom: 0.75, second: true, text: 'testtesttesta asfasf' },
+  { name: 'two-textboxes-125', font: 'helvetica', zoom: 1.25, second: true, text: 'testtesttesta asfasf' },
+  { name: 'fractional-small', font: 'helvetica', zoom: 1, size: 9.3, text: 'testtesttesta asfasf' },
+  { name: 'fractional-large', font: 'helvetica', zoom: 1, size: 13.7, text: 'testtesttesta asfasf' },
   { name: 'helvetica', font: 'helvetica', zoom: 1 },
   { name: 'zoom-half', font: 'helvetica', zoom: 0.5 },
   { name: 'zoom-double', font: 'helvetica', zoom: 2 },
@@ -94,6 +99,12 @@ try {
     await page.mouse.click(area.x + 200, area.y + 400)
     await page.locator('.textbox textarea').fill(test.text ?? 'HgE Korrektur')
     await page.locator('.textbox textarea').press('Escape')
+    if (test.size) {
+      await page.getByRole('button', { name: 'Schriftgröße', exact: true }).click()
+      const picker = page.getByRole('textbox', { name: 'Schriftgröße eingeben', exact: true })
+      await picker.fill(String(test.size))
+      await picker.press('Enter')
+    }
     await page.getByRole('combobox', { name: 'Schriftart', exact: true }).selectOption(test.font)
     if (test.bold) await page.getByRole('button', { name: 'Fett', exact: true }).click()
     if (test.italic) await page.getByRole('button', { name: 'Kursiv', exact: true }).click()
@@ -106,6 +117,15 @@ try {
     )
     await page.getByRole('button', { name: '⬚ Auswahl', exact: true }).click()
     await page.locator('.textbox .drag-surface').click()
+    if (test.second) {
+      await page.getByRole('button', { name: 'T Text', exact: true }).click()
+      const currentArea = await page.locator('.page').boundingBox()
+      await page.mouse.click(currentArea.x + 200 * test.zoom, currentArea.y + 250 * test.zoom)
+      await page.locator('.textbox textarea').last().fill('test')
+      await page.locator('.textbox textarea').last().press('Escape')
+      await page.getByRole('button', { name: '⬚ Auswahl', exact: true }).click()
+      await page.locator('.textbox .drag-surface').first().click()
+    }
     // Only glyph paint is compared; the edit minibar is outside document content.
     await page.addStyleTag({ content: '.minibar { visibility: hidden; }' })
     const before = await glyphBounds(page, await capture(page, test.name + '-editor-before.png', test.zoom))
@@ -118,24 +138,40 @@ try {
     assert.deepEqual(await glyphBounds(page, await capture(page, test.name + '-undo.png', test.zoom)), before)
     await page.getByRole('button', { name: 'Wiederholen', exact: true }).click()
     assert.deepEqual(await glyphBounds(page, await capture(page, test.name + '-redo.png', test.zoom)), editor)
-    await page.waitForTimeout(800)
-    await page.reload()
-    await page.getByRole('button', { name: /Entwürfe/ }).click()
-    await page
-      .getByRole('button', { name: /position.pdf/ })
+    // Check the native CSS baseline, independently of the implementation's probe.
+    const delta = await page
+      .locator('.textbox textarea')
       .first()
-      .click()
-    await page.waitForSelector('.textbox')
-    for (let i = 0; i < Math.abs(test.zoom - 1) / 0.25; i++)
-      await page.getByRole('button', { name: test.zoom < 1 ? '−' : '+', exact: true }).click()
-    await page.waitForFunction(
-      (zoom) => document.querySelector('.page canvas')?.width === 600 * zoom,
-      test.zoom,
+      .evaluate((el, zoom) => {
+        const css = getComputedStyle(el)
+        const line = document.createElement('div')
+        line.style.cssText = `position:absolute;visibility:hidden;white-space:pre;font:${css.font};line-height:${css.lineHeight}`
+        const marker = document.createElement('span')
+        marker.style.cssText =
+          'display:inline-block;width:0;height:0;padding:0;margin:0;vertical-align:baseline'
+        line.append('Mg', marker)
+        document.body.append(line)
+        const baseline = marker.getBoundingClientRect().top - line.getBoundingClientRect().top
+        line.remove()
+        const renderedBaseline =
+          el.getBoundingClientRect().top +
+          parseFloat(css.paddingTop) +
+          parseFloat(css.borderTopWidth) +
+          baseline
+        const expected = document.querySelector('.page').getBoundingClientRect().top + 395 * zoom
+        return renderedBaseline - expected
+      }, test.zoom)
+    assert.ok(
+      Math.abs(delta) <= 1 / 64,
+      `native CSS baseline differs from stored/exported baseline by ${delta}px`,
     )
-    assert.deepEqual(
-      await glyphBounds(page, await capture(page, test.name + '-restored.png', test.zoom)),
-      editor,
-    )
+    if (test.second) await page.locator('.textbox .drag-surface').last().click()
+    const live = await glyphBounds(page, await capture(page, test.name + '-live.png', test.zoom))
+    assert.deepEqual(live, editor, 'deselecting must not shift the lower correction')
+    const upper = test.second
+      ? await glyphBounds(page, await capture(page, test.name + '-upper-editor.png', test.zoom, 210))
+      : null
+    if (test.second) await page.screenshot({ path: join(artifacts, test.name + '-scene.png') })
     const pending = page.waitForEvent('download')
     await page.getByRole('button', { name: 'Exportieren', exact: true }).click()
     const output = join(artifacts, test.name + '-nudged.pdf')
@@ -152,13 +188,11 @@ try {
       /1 0 0 1 210 405 Tm/,
       'export contains the nudged model baseline, not the old coordinates',
     )
-    await page
-      .locator('input[accept="application/pdf"]')
-      .setInputFiles({
-        name: 'baked-position.pdf',
-        mimeType: 'application/pdf',
-        buffer: readFileSync(output),
-      })
+    await page.locator('input[accept="application/pdf"]').setInputFiles({
+      name: 'baked-position.pdf',
+      mimeType: 'application/pdf',
+      buffer: readFileSync(output),
+    })
     await page.getByText('baked-position.pdf · 1 Seite', { exact: true }).waitFor()
     await page.waitForFunction((zoom) => {
       const c = document.querySelector('.page canvas')
@@ -175,6 +209,33 @@ try {
     assert.ok(
       Math.abs(editor.bottom - baked.bottom) <= 1,
       `editor/export baseline differs: ${editor.bottom} vs ${baked.bottom}`,
+    )
+    if (upper) {
+      assert.match(stream, /1 0 0 1 200 550 Tm/, 'the upper textbox keeps its own baseline')
+      const upperBaked = await glyphBounds(
+        page,
+        await capture(page, test.name + '-upper-export.png', test.zoom, 210),
+      )
+      assert.ok(Math.abs(upper.left - upperBaked.left) <= 1, 'upper textbox x remains aligned')
+      assert.ok(Math.abs(upper.bottom - upperBaked.bottom) <= 1, 'upper textbox baseline remains aligned')
+    }
+    await page.waitForTimeout(800)
+    await page.reload()
+    await page.getByRole('button', { name: /Entwürfe/ }).click()
+    await page
+      .getByRole('button', { name: /^position\.pdf/ })
+      .first()
+      .click()
+    await page.waitForSelector('.textbox')
+    for (let i = 0; i < Math.abs(test.zoom - 1) / 0.25; i++)
+      await page.getByRole('button', { name: test.zoom < 1 ? '−' : '+', exact: true }).click()
+    await page.waitForFunction(
+      (zoom) => document.querySelector('.page canvas')?.width === 600 * zoom,
+      test.zoom,
+    )
+    assert.deepEqual(
+      await glyphBounds(page, await capture(page, test.name + '-restored.png', test.zoom)),
+      editor,
     )
     await page.close()
   }

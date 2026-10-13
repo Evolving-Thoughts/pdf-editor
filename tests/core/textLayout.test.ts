@@ -1,15 +1,12 @@
 import { expect, test } from 'vitest'
-import { TEXT_LINE_HEIGHT, textLineBaseline } from '../../src/core/textLayout'
+import { TEXT_LINE_HEIGHT } from '../../src/core/textLayout'
 import { PDFArray, PDFDocument, PDFRawStream, decodePDFRawStream } from 'pdf-lib'
 import { exportPdf } from '../../src/core/pdf/exportPdf'
 import { EditorStore } from '../../src/core/editorStore'
 import { addTextbox, nudgeTextbox } from '../../src/core/commands'
 import type { Textbox } from '../../src/core/model'
 
-test('CSS line baseline includes font metrics and evenly split leading, not a guessed em height', () => {
-  expect(textLineBaseline(14, 13, 3)).toBeCloseTo(13.4)
-  expect(textLineBaseline(28, 26, 6)).toBeCloseTo(26.8)
-  expect(textLineBaseline(7, 6.5, 1.5)).toBeCloseTo(6.7)
+test('editor and PDF text share 1.2× line spacing', () => {
   expect(TEXT_LINE_HEIGHT).toBe(1.2)
 })
 test('export retains keyboard-nudged baseline and uses the same multiline spacing as the editor', async () => {

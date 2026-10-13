@@ -18,6 +18,14 @@ async function draw(page, a, b, touch = false, cancel = false) {
   const r = await page.locator('.page').first().boundingBox()
   const start = { x: r.x + a[0], y: r.y + a[1] },
     end = { x: r.x + b[0], y: r.y + b[1] }
+  assert.equal(
+    await page.evaluate(
+      ({ x, y }) => Boolean(document.elementFromPoint(x, y)?.closest('.shape-toolbar')),
+      start,
+    ),
+    false,
+    'a creation gesture must start on the document, not on palette controls',
+  )
   if (touch) {
     const session = await page.context().newCDPSession(page)
     await session.send('Input.dispatchTouchEvent', { type: 'touchStart', touchPoints: [start] })
@@ -52,7 +60,9 @@ const tools = ['Rechteck', 'Ellipse', 'Linie', 'Pfeil', 'Textmarker']
 try {
   for (const [touch, viewport] of [
     [false, { width: 1280, height: 1000 }],
-    [true, { width: 390, height: 900 }],
+    // Leave enough vertical document space to park the approved palette below
+    // overlapping creation gestures; the save status row also occupies height.
+    [true, { width: 390, height: 1000 }],
   ]) {
     const context = await browser.newContext({ viewport, hasTouch: touch, isMobile: touch }),
       page = await context.newPage()

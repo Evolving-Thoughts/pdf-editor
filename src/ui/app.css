@@ -687,3 +687,17 @@
 /* Explicit grips remain editable; dragging any ordinary source/page area creates again. */
 .page.drawing-tool .shape-overlay .image-handle,
 .page.drawing-tool .shape-overlay .image-rotate-handle { pointer-events:auto; }
+
+/* Explicit save feedback remains visible without opening the drafts menu. */
+.draft-save-status {
+  padding: 8px 12px;
+  margin: 0;
+  font-size: 13px;
+  text-align: left;
+  border-bottom: 1px solid var(--border);
+  flex-shrink: 0;
+}
+.draft-save-status[role="alert"] { color: #b91c1c; }
+@media (prefers-color-scheme: dark) {
+  .draft-save-status[role="alert"] { color: #f87171; }
+}

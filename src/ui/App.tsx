@@ -26,6 +26,12 @@ import { SymbolPicker } from './SymbolPicker'
 import type { Tool } from './tools'
 import './app.css'
 
+interface ManualSave {
+  draftId: string
+  version: number
+  status: 'saving' | 'saved' | 'error'
+}
+
 interface ActiveDraft {
   id: string
   name: string
@@ -60,6 +66,9 @@ export default function App() {
   const [drafts, setDrafts] = useState<DraftSummary[]>([])
   const [draftsError, setDraftsError] = useState<string | null>(null)
   const [activeDraftId, setActiveDraftId] = useState<string | null>(null)
+  const [manualSave, setManualSave] = useState<ManualSave | null>(null)
+  const manualSaveRequestRef = useRef<object | null>(null)
+  const inputEpochRef = useRef(0)
   const [loadingDraftId, setLoadingDraftId] = useState<string | null>(null)
   // Current handle in a ref so destroy() runs outside React state updaters
   // (updaters must stay pure; StrictMode double-invokes them in dev).
@@ -123,7 +132,7 @@ export default function App() {
       saveTimerRef.current = null
     }
     const draft = draftRef.current
-    if (!draft) return
+    if (!draft) return null
     const generation = persistenceGenerationRef.current
     // Copy the overlays now: the record must describe this save point even if
     // the user keeps editing while the queued IndexedDB write is waiting.
@@ -143,7 +152,33 @@ export default function App() {
       rememberDraft(record)
       setDraftsError(null)
     }
+    return record
   }, [ensureDraftDb, queuePersistence, rememberDraft, store])
+
+  const onManualSave = useCallback(async () => {
+    const draft = draftRef.current
+    if (!draft || (manualSave?.draftId === draft.id && manualSave.status === 'saving')) return
+    const request = {}
+    manualSaveRequestRef.current = request
+    const generation = persistenceGenerationRef.current
+    const version = store.getVersion()
+    const inputEpoch = inputEpochRef.current
+    const stillCurrent = () => manualSaveRequestRef.current === request &&
+      draftRef.current?.id === draft.id && persistenceGenerationRef.current === generation
+    setManualSave({ draftId: draft.id, version, status: 'saving' })
+    try {
+      // A normal button click blurs the active textarea first, committing its
+      // text before persistActiveDraft snapshots and queues this save point.
+      const record = await persistActiveDraft()
+      if (!stillCurrent()) return
+      setManualSave(record && store.getVersion() === version && inputEpochRef.current === inputEpoch
+        ? { draftId: draft.id, version, status: 'saved' } : null)
+    } catch (problem) {
+      if (!stillCurrent()) return
+      reportDraftProblem(problem, 'Der Entwurf konnte nicht gespeichert werden. Bitte erneut versuchen.')
+      setManualSave({ draftId: draft.id, version, status: 'error' })
+    }
+  }, [manualSave, persistActiveDraft, reportDraftProblem, store])
 
   const refreshDrafts = useCallback(async () => {
     const list = await queuePersistence(async () => listDrafts(await ensureDraftDb()))
@@ -177,6 +212,8 @@ export default function App() {
       pdfRef.current = next
       draftRef.current = draft
       setActiveDraftId(draft.id)
+      setManualSave(null)
+      manualSaveRequestRef.current = null
       setSelectedId(null)
       setSizeWarning(draft.bytes.byteLength > DRAFT_SIZE_WARN_BYTES)
       setPdf(next)
@@ -253,6 +290,8 @@ export default function App() {
         // Pause auto-save while deleting; on failure it resumes and persists
         // any edits made during the confirmation/DB round trip.
         persistenceGenerationRef.current += 1
+        setManualSave(null)
+        manualSaveRequestRef.current = null
         if (saveTimerRef.current) {
           clearTimeout(saveTimerRef.current)
           saveTimerRef.current = null
@@ -432,8 +471,18 @@ export default function App() {
     setTimeout(() => URL.revokeObjectURL(url), 1000)
   }, [pdf, store])
 
+  const visibleSave = manualSave?.draftId === activeDraftId &&
+    (manualSave.status !== 'saved' || manualSave.version === store.getVersion()) ? manualSave : null
+  const saveMessage = visibleSave?.status === 'saving' ? 'Entwurf wird gespeichert …'
+    : visibleSave?.status === 'saved' ? '✓ Entwurf gespeichert · Nur auf diesem Gerät.'
+    : visibleSave?.status === 'error' ? 'Der Entwurf konnte nicht gespeichert werden. Bitte erneut versuchen.'
+    : 'Automatisches Speichern ist aktiv · Entwürfe bleiben auf diesem Gerät.'
+
   return (
-    <div className="app">
+    <div className="app" onChange={() => {
+      inputEpochRef.current += 1
+      setManualSave(current => current?.status === 'saved' ? null : current)
+    }}>
       <header className="toolbar">
         <input
           ref={fileInputRef}
@@ -469,6 +518,12 @@ export default function App() {
         />
         {pdf && (
           <>
+            <button type="button" aria-label="Speichern" title="Aktuellen Entwurf auf diesem Gerät speichern"
+              disabled={visibleSave?.status === 'saving'} onClick={() => void onManualSave()}>
+              <svg className="tool-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+                strokeWidth="1.7" aria-hidden="true"><path d="M4 3h13l3 3v15H4zM8 3v6h8V3M8 21v-8h8v8" /></svg>
+              {visibleSave?.status === 'saving' ? 'Speichert …' : 'Speichern'}
+            </button>
             <span className="file-info">
               {pdf.fileName} · {pdf.pageCount} {pdf.pageCount === 1 ? 'Seite' : 'Seiten'}
             </span>
@@ -558,6 +613,9 @@ export default function App() {
           </>
         )}
       </header>
+      {pdf && <p className="draft-save-status" role={visibleSave?.status === 'error' ? 'alert' : 'status'}>
+        {saveMessage}
+      </p>}
       {error && (
         <p role="alert" className="error">
           {error}
