@@ -233,3 +233,51 @@ test('arbitrary image angles survive draft save, reopen and geometry edits', asy
   await saveDraft(reopened, { ...sampleDraft('angle'), overlays: [{ ...rotated, rotation: 270, x: 150 }] })
   expect((await loadDraft(reopened, 'angle'))!.overlays).toEqual([{ ...rotated, rotation: 270, x: 150 }])
 })
+
+async function imageAssetKeys(db: IDBDatabase): Promise<IDBValidKey[]> {
+  const tx = db.transaction('image-assets', 'readonly')
+  const request = tx.objectStore('image-assets').getAllKeys()
+  return new Promise((resolve, reject) => {
+    tx.oncomplete = () => resolve(request.result)
+    tx.onerror = () => reject(tx.error)
+  })
+}
+
+test('autosave prunes deleted image assets only in this draft, retaining referenced and other-draft assets', async () => {
+  const db = await openDb()
+  const keep = { ...image, id: 'keep' }
+  await saveDraft(db, { ...sampleDraft('one'), overlays: [image, keep] })
+  await saveDraft(db, { ...sampleDraft('two'), overlays: [image] })
+  await saveDraft(db, { ...sampleDraft('one'), overlays: [keep] })
+  expect(await imageAssetKeys(db)).toEqual([['one', 'keep'], ['two', 'image']])
+  expect((await loadDraft(db, 'one'))!.overlays).toEqual([keep])
+  expect((await loadDraft(db, 'two'))!.overlays).toEqual([image])
+})
+
+import { EditorStore } from '../../../src/core/editorStore'
+import { removeImage } from '../../../src/core/commands'
+test('undo after a persisted deletion rewrites the pruned source and restores exact image geometry', async () => {
+  const db = await openDb(), store = new EditorStore()
+  const original = { ...image, rotation: 37.5 }
+  store.restore([original])
+  await saveDraft(db, { ...sampleDraft('undo'), overlays: store.state.overlays })
+  store.dispatch(removeImage(original))
+  await saveDraft(db, { ...sampleDraft('undo'), overlays: store.state.overlays })
+  expect(await imageAssetKeys(db)).toEqual([])
+  store.undo()
+  await saveDraft(db, { ...sampleDraft('undo'), overlays: store.state.overlays })
+  expect(await imageAssetKeys(db)).toEqual([['undo', 'image']])
+  db.close()
+  expect((await loadDraft(await openDb(), 'undo'))!.overlays).toEqual([original])
+})
+
+test('repeated add/delete/save cycles cannot accumulate orphaned image asset rows', async () => {
+  const db = await openDb()
+  for (let n = 0; n < 8; n++) {
+    await saveDraft(db, { ...sampleDraft('cycles'), overlays: [{ ...image, id: `image-${n}` }] })
+    expect(await imageAssetKeys(db)).toHaveLength(1)
+    await saveDraft(db, { ...sampleDraft('cycles'), overlays: [] })
+    expect(await imageAssetKeys(db)).toEqual([])
+  }
+  expect((await loadDraft(db, 'cycles'))!.overlays).toEqual([])
+})

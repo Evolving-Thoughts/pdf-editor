@@ -105,6 +105,17 @@ export async function saveDraft(db: IDBDatabase, draft: Omit<DraftRecord, 'updat
     }
     return { ...imageMetadata, imageAssetKey }
   })
+  // Prune only this draft, atomically with its new metadata. Key cursors avoid
+  // cloning large data URLs just to decide whether an asset is still referenced.
+  const referencedIds = new Set(overlays.filter(isImage).map(image => image.id))
+  const unusedAssets = assets.index('draftId').openKeyCursor(record.id)
+  unusedAssets.onsuccess = () => {
+    const cursor = unusedAssets.result
+    if (!cursor) return
+    const key = cursor.primaryKey as string[]
+    if (!referencedIds.has(key[1])) assets.delete(cursor.primaryKey)
+    cursor.continue()
+  }
   const stored: StoredDraft = { ...metadata, overlays: storedOverlays, sizeBytes: pdfBytes.byteLength }
   transaction.objectStore(STORE).put(stored)
   const bytesStore = transaction.objectStore(BYTES_STORE)

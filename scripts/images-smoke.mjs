@@ -30,6 +30,19 @@ async function importFile(page, file) {
 async function imageRect(page, index = 0) {
   return page.locator('.image-overlay').nth(index).evaluate(el => ({ x: parseFloat(el.style.left), y: parseFloat(el.style.top), w: parseFloat(el.style.width), h: parseFloat(el.style.height) }))
 }
+async function assetCount(page) {
+  return page.evaluate(() => new Promise((resolve, reject) => {
+    const request = indexedDB.open('pdf-editor-drafts')
+    request.onerror = () => reject(request.error)
+    request.onsuccess = () => {
+      const db = request.result
+      const tx = db.transaction('image-assets', 'readonly')
+      const keys = tx.objectStore('image-assets').getAllKeys()
+      tx.oncomplete = () => { db.close(); resolve(keys.result.length) }
+      tx.onerror = () => { db.close(); reject(tx.error) }
+    }
+  }))
+}
 async function drag(page, locator, dx, dy) {
   const rect = await locator.boundingBox()
   await page.mouse.move(rect.x + rect.width / 2, rect.y + rect.height / 2)
@@ -97,7 +110,11 @@ try {
   await page.locator('.image-overlay').click()
   await page.getByRole('button', { name: 'Bild löschen', exact: true }).click()
   assert.equal(await page.locator('.image-overlay').count(), 0)
+  await page.waitForTimeout(800)
+  assert.equal(await assetCount(page), 0, 'Autosave removes deleted image data')
   await page.getByRole('button', { name: 'Rückgängig', exact: true }).click()
+  await page.waitForTimeout(800)
+  assert.equal(await assetCount(page), 1, 'Undo rewrites the source on autosave')
   assert.equal(await page.locator('.image-overlay').count(), 1)
   console.log('PASS cancelled gesture, real PDF export, IndexedDB reopen and reversible deletion')
 
