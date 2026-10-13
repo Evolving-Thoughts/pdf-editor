@@ -83,9 +83,17 @@ export async function exportPdf(bytes: Uint8Array, overlays: Overlay[] = []): Pr
         images.set(overlay.dataUrl, embedded)
       }
       const space = displayedPageSpace(page)
-      const origin = space.toPdf(overlay.x, overlay.y)
+      // Browser clockwise rotation is negative in the PDF's y-up coordinates.
+      const rotation = overlay.rotation ?? 0
+      const angle = -rotation * Math.PI / 180
+      const centerX = overlay.x + overlay.width / 2
+      const centerY = overlay.y + overlay.height / 2
+      const origin = rotation === 0 ? space.toPdf(overlay.x, overlay.y) : space.toPdf(
+        centerX - Math.cos(angle) * overlay.width / 2 + Math.sin(angle) * overlay.height / 2,
+        centerY - Math.sin(angle) * overlay.width / 2 - Math.cos(angle) * overlay.height / 2,
+      )
       page.drawImage(embedded, { ...origin, width: overlay.width / space.unit,
-        height: overlay.height / space.unit, rotate: degrees(space.rotation) })
+        height: overlay.height / space.unit, rotate: degrees(space.rotation - rotation) })
       continue
     }
     if (overlay.text.trim().length === 0) continue

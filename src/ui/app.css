@@ -542,6 +542,7 @@
   touch-action: none;
   user-select: none;
   outline: none;
+  transform-origin: center;
 }
 .image-overlay img { width: 100%; height: 100%; display: block; pointer-events: none; }
 .image-overlay.selected { outline: 2px solid var(--accent); }
@@ -571,7 +572,7 @@
   position: fixed;
   visibility: hidden;
   z-index: 20;
-  width: 320px;
+  width: 510px;
   box-sizing: border-box;
   display: flex;
   gap: 8px;
@@ -613,3 +614,45 @@
 .image-options button[aria-pressed="true"] { border-color: var(--accent); background: var(--accent-bg); }
 .image-options svg { display: block; width: 20px; height: 20px; }
 .image-options :focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+
+.image-actions { display: flex; gap: 8px; align-self: flex-end; }
+.image-rotate-handle {
+  position: absolute;
+  left: calc(50% - 22px);
+  top: -58px;
+  width: 44px;
+  height: 44px;
+  min-height: 44px;
+  border: 0;
+  padding: 0;
+  background: transparent;
+  cursor: grab;
+  touch-action: none;
+}
+.image-rotate-handle::before {
+  content: '';
+  position: absolute;
+  width: 1px;
+  height: 14px;
+  bottom: -14px;
+  left: 21px;
+  background: var(--accent);
+}
+.image-rotate-handle span {
+  display: grid;
+  place-items: center;
+  position: absolute;
+  inset: 6px;
+  border: 1px solid var(--accent);
+  border-radius: 50%;
+  background: var(--bg);
+  color: var(--text-h);
+}
+.image-rotate-handle svg { width: 20px; height: 20px; }
+.image-rotate-handle:active { cursor: grabbing; }
+.image-rotate-handle:focus-visible { outline: 2px solid var(--accent); border-radius: 6px; }
+@media (max-width: 640px) {
+  .image-options { flex-wrap: wrap; }
+  .image-options label { min-width: 76px; }
+  .image-actions { flex-basis: 100%; justify-content: flex-end; }
+}

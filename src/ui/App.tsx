@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState, useSyncExternalStore } from 'react'
-import { addImage, clearDrawing, nudgeTextbox, removeImage, removeTextbox, updateImage } from '../core/commands'
+import { addImage, clearDrawing, nudgeImage, nudgeTextbox, removeImage, removeTextbox } from '../core/commands'
 import { EditorStore } from '../core/editorStore'
 import { cloneOverlay, createId, isImage, isStroke, isTextbox } from '../core/model'
 import {
@@ -374,7 +374,7 @@ export default function App() {
             event.key === 'ArrowLeft' ? -step : event.key === 'ArrowRight' ? step : 0,
             event.key === 'ArrowUp' ? step : event.key === 'ArrowDown' ? -step : 0,
             { width: element.clientWidth / zoom, height: element.clientHeight / zoom })
-          if (next.x !== box.x || next.y !== box.y) store.dispatch(updateImage(box.id, before, next))
+          if (next.x !== box.x || next.y !== box.y) store.dispatch(nudgeImage(box.id, before, next))
           return
         }
         const step = event.shiftKey ? 10 : 1

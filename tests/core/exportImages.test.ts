@@ -51,3 +51,25 @@ test('identical sources share the embedded PDF image but remain independently pl
   expect(new Set(refs).size).toBe(1)
   expect(contents(result, 0)).toContain('1 0 0 1 250 60 cm')
 })
+
+test('clockwise image rotation is centered, with the same source and dimensions', async () => {
+  const doc = await PDFDocument.create(); doc.addPage([600, 800])
+  const rotated = { ...image, x: 100, y: 200, width: 120, height: 60, rotation: 90 }
+  const result = await PDFDocument.load(await exportPdf(await doc.save(), [rotated]))
+  const stream = contents(result, 0)
+  // Center (160,230); rotated bottom-left is (130,290), clockwise 90°.
+  expect(stream).toContain('1 0 0 1 130 290 cm')
+  expect(stream).toMatch(/0\.\d+ -1 1 0\.\d+ 0 0 cm/)
+  expect(stream).toContain('120 0 0 60 0 0 cm')
+})
+
+test('a 30° clockwise image uses independently calculated origin and rotation operators', async () => {
+  const doc = await PDFDocument.create(); doc.addPage([600, 800])
+  const result = await PDFDocument.load(await exportPdf(await doc.save(), [{ ...image, x: 100, y: 200, width: 120, height: 60, rotation: 30 }]))
+  const stream = contents(result, 0)
+  const translation = /1 0 0 1 ([-\d.]+) ([-\d.]+) cm/.exec(stream)!
+  expect(Number(translation[1])).toBeCloseTo(93.03847577293368)
+  expect(Number(translation[2])).toBeCloseTo(234.01923788646684)
+  expect(stream).toContain('120 0 0 60 0 0 cm')
+  expect(stream).toMatch(/0\.866\d+ -0\.499\d+ 0\.499\d+ 0\.866\d+ 0 0 cm/)
+})

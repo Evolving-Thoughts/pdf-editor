@@ -175,7 +175,7 @@ export function nudgeTextbox(id: string, from: { x: number; y: number }, to: { x
 }
 
 /** Source data is immutable; edits only change geometry and proportion locking. */
-export type ImageChanges = Pick<ImageOverlay, 'x' | 'y' | 'width' | 'height' | 'lockAspectRatio'>
+export type ImageChanges = Pick<ImageOverlay, 'x' | 'y' | 'width' | 'height' | 'lockAspectRatio' | 'rotation'>
 
 export function addImage(image: ImageOverlay): Command {
   const snapshot = { ...image }
@@ -207,4 +207,30 @@ export function updateImage(id: string, before: ImageChanges, after: ImageChange
     if (image && isImage(image)) Object.assign(image, changes)
   }
   return { label: 'Edit image', apply: (s) => patch(s, to), revert: (s) => patch(s, from) }
+}
+
+export type ImageKeyboardAction = 'move' | 'rotate' | 'resize:nw' | 'resize:ne' | 'resize:sw' | 'resize:se'
+interface ImageNudgeData {
+  id: string
+  action: ImageKeyboardAction
+  before: ImageChanges
+  after: ImageChanges
+  time: number
+}
+
+/** Like textbox nudges: rapid repeats on one image/action form one undo step. */
+export function nudgeImage(id: string, before: ImageChanges, after: ImageChanges, action: ImageKeyboardAction = 'move'): Command {
+  const own: ImageNudgeData = { id, action, before: { ...before }, after: { ...after }, time: Date.now() }
+  const command: Command & { imageNudge: ImageNudgeData } = {
+    ...updateImage(id, own.before, own.after),
+    label: 'Keyboard edit image',
+    imageNudge: own,
+    merge(previous) {
+      const prev = (previous as Command & { imageNudge?: ImageNudgeData }).imageNudge
+      if (!prev || prev.id !== id || prev.action !== action || own.time - prev.time > NUDGE_MERGE_MS) return null
+      if (JSON.stringify(prev.after) !== JSON.stringify(own.before)) return null
+      return nudgeImage(id, prev.before, own.after, action)
+    },
+  }
+  return command
 }

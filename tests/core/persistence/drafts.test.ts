@@ -222,3 +222,14 @@ test('v2 text/stroke drafts migrate to v3 without data loss', async () => {
   await saveDraft(db, { ...legacy, overlays: [...legacy.overlays, stroke, image] })
   expect((await loadDraft(db, 'v2'))!.overlays).toEqual([...legacy.overlays, stroke, image])
 })
+
+test('arbitrary image angles survive draft save, reopen and geometry edits', async () => {
+  const db = await openDb()
+  const rotated = { ...image, rotation: 37.5 }
+  await saveDraft(db, { ...sampleDraft('angle'), overlays: [rotated] })
+  db.close()
+  const reopened = await openDb()
+  expect((await loadDraft(reopened, 'angle'))!.overlays).toEqual([rotated])
+  await saveDraft(reopened, { ...sampleDraft('angle'), overlays: [{ ...rotated, rotation: 270, x: 150 }] })
+  expect((await loadDraft(reopened, 'angle'))!.overlays).toEqual([{ ...rotated, rotation: 270, x: 150 }])
+})

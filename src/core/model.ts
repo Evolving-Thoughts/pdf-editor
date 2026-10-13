@@ -47,6 +47,8 @@ export interface ImageOverlay {
   y: number
   width: number
   height: number
+  /** Clockwise degrees around the rectangle center; missing in older drafts means 0°. */
+  rotation?: number
   lockAspectRatio: boolean
   name: string
   pixelWidth: number
