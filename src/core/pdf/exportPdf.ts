@@ -4,6 +4,7 @@ import {
   BlendMode, LineCapStyle, LineJoinStyle, PDFDocument, PDFName, PDFNumber, popGraphicsState, pushGraphicsState,
   degrees, rgb, setLineJoin, StandardFonts, type Color, type PDFFont, type PDFImage, type PDFPage,
 } from 'pdf-lib'
+import { TEXT_LINE_HEIGHT } from '../textLayout'
 import { strokeToSvgPath } from '../drawing'
 import { MARKER_OPACITY, shapeToSvgPath } from '../shapes'
 import { isImage, isShape, isStroke, type Overlay, type OverlayFont, type ShapeOverlay, type Stroke, type Textbox } from '../model'
@@ -47,7 +48,9 @@ const FONT_VARIANTS: Record<OverlayFont, { plain: StandardFonts; bold: StandardF
 function sanitizeFor(font: PDFFont, text: string, fontKey: OverlayFont): string {
   const fallback = fontKey === 'zapfdingbats' ? '' : '?'
   let out = ''
-  for (const char of text) {
+  for (const char of text.replace(/\r\n?/g, '\n')) {
+    // A line break is layout, not a font glyph; don't replace it with '?'.
+    if (char === '\n') { out += char; continue }
     try {
       font.encodeText(char)
       out += char
@@ -114,16 +117,21 @@ export async function exportPdf(bytes: Uint8Array, overlays: Overlay[] = []): Pr
     page.drawText(text, {
       ...space.toPdf(overlay.x, overlay.y),
       size: overlay.fontSize / space.unit,
+      lineHeight: overlay.fontSize * TEXT_LINE_HEIGHT / space.unit,
       rotate: degrees(space.rotation),
       font,
     })
     if (overlay.underline && overlay.font !== 'zapfdingbats') {
-      const width = font.widthOfTextAtSize(text, overlay.fontSize)
-      const lineY = overlay.y - overlay.fontSize * 0.12
-      page.drawLine({
-        start: space.toPdf(overlay.x, lineY),
-        end: space.toPdf(overlay.x + width, lineY),
-        thickness: Math.max(0.5, overlay.fontSize * 0.05) / space.unit,
+      const underlineFont = font
+      text.split('\n').forEach((line, index) => {
+        if (!line) return
+        const width = underlineFont.widthOfTextAtSize(line, overlay.fontSize)
+        const lineY = overlay.y - index * overlay.fontSize * TEXT_LINE_HEIGHT - overlay.fontSize * 0.12
+        page.drawLine({
+          start: space.toPdf(overlay.x, lineY),
+          end: space.toPdf(overlay.x + width, lineY),
+          thickness: Math.max(0.5, overlay.fontSize * 0.05) / space.unit,
+        })
       })
     }
   }

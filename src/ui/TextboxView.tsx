@@ -2,6 +2,7 @@ import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react
 import { moveTextbox, removeTextbox, updateTextbox } from '../core/commands'
 import type { EditorStore } from '../core/editorStore'
 import { isTextbox, patchOverlay, type OverlayFont, type Textbox } from '../core/model'
+import { TEXT_LINE_HEIGHT as LINE_HEIGHT, textLineBaseline } from '../core/textLayout'
 import type { Tool } from './tools'
 
 interface FontCss {
@@ -28,7 +29,6 @@ const FONT_OPTIONS: Array<{ value: OverlayFont; label: string }> = [
 const SIZE_PRESETS = [8, 10, 12, 14, 18, 24, 36]
 const MIN_FONT_SIZE = 4
 const MAX_FONT_SIZE = 200
-const LINE_HEIGHT = 1.2
 
 function clampFontSize(raw: string): number | null {
   const parsed = Number(raw)
@@ -40,14 +40,17 @@ function clampFontSize(raw: string): number | null {
 // enough across browsers, so we size the box explicitly from the content.
 let measureCtx: CanvasRenderingContext2D | null = null
 
-function measureText(text: string, css: FontCss, px: number): { width: number; lines: number } {
+function measureText(text: string, css: FontCss, px: number): { width: number; lines: number; baseline: number } {
   const lines = text.split('\n')
   if (!measureCtx) measureCtx = document.createElement('canvas').getContext('2d')
-  if (!measureCtx) return { width: text.length * px * 0.6, lines: Math.max(1, lines.length) }
+  if (!measureCtx) return { width: text.length * px * 0.6, lines: Math.max(1, lines.length), baseline: textLineBaseline(px, px * .8, px * .2) }
   measureCtx.font = `${css.fontStyle ?? 'normal'} ${css.fontWeight ?? 'normal'} ${px}px ${css.fontFamily}`
   let width = 0
   for (const line of lines) width = Math.max(width, measureCtx.measureText(line || ' ').width)
-  return { width, lines: Math.max(1, lines.length) }
+  const metrics = measureCtx.measureText('Mg')
+  const ascent = Number.isFinite(metrics.fontBoundingBoxAscent) ? metrics.fontBoundingBoxAscent : px * .8
+  const descent = Number.isFinite(metrics.fontBoundingBoxDescent) ? metrics.fontBoundingBoxDescent : px * .2
+  return { width, lines: Math.max(1, lines.length), baseline: textLineBaseline(px, ascent, descent) }
 }
 
 interface FontSizePickerProps {
@@ -160,6 +163,7 @@ export function TextboxView({ box, zoom, pageHeightPts, selected, tool, store, o
   const [focused, setFocused] = useState(false)
   const beforeEdit = useRef(box.text)
   const textareaRef = useRef<HTMLTextAreaElement>(null)
+  const anchorRef = useRef<HTMLDivElement>(null)
   const dragFrom = useRef<{ pointerX: number; pointerY: number; x: number; y: number } | null>(null)
 
   const displayText = focused ? draft : box.text
@@ -177,7 +181,7 @@ export function TextboxView({ box, zoom, pageHeightPts, selected, tool, store, o
     const el = textareaRef.current
     if (!el) return
     const px = box.fontSize * zoom
-    const { width, lines } = measureText(
+    const { width, lines, baseline } = measureText(
       displayText,
       {
         fontFamily: FONT_CSS[box.font],
@@ -188,7 +192,16 @@ export function TextboxView({ box, zoom, pageHeightPts, selected, tool, store, o
     )
     el.style.width = `${Math.max(40, Math.ceil(width) + 10 + Math.ceil(px * 0.2))}px`
     el.style.height = `${Math.ceil(lines * px * LINE_HEIGHT) + 6}px`
-  }, [displayText, box.font, box.bold, box.italic, box.fontSize, zoom])
+    // CSS padding/border must not move glyphs away from the stored PDF origin.
+    // Use actual font metrics for the first baseline; keep chrome outside it.
+    const chrome = getComputedStyle(el)
+    const insetX = parseFloat(chrome.paddingLeft) + parseFloat(chrome.borderLeftWidth)
+    const insetY = parseFloat(chrome.paddingTop) + parseFloat(chrome.borderTopWidth)
+    if (anchorRef.current) {
+      anchorRef.current.style.left = `${box.x * zoom - insetX}px`
+      anchorRef.current.style.top = `${(pageHeightPts - box.y) * zoom - baseline - insetY}px`
+    }
+  }, [displayText, box.font, box.bold, box.italic, box.fontSize, box.x, box.y, pageHeightPts, zoom])
 
   // Focus the textarea when a new (still empty) box gets selected.
   useEffect(() => {
@@ -247,6 +260,7 @@ export function TextboxView({ box, zoom, pageHeightPts, selected, tool, store, o
 
   return (
     <div
+      ref={anchorRef}
       className={`textbox${selected ? ' selected' : ''}`}
       style={{ left, top, ...fontCss, fontSize: box.fontSize * zoom }}
       onPointerDown={(event) => {
@@ -332,7 +346,7 @@ export function TextboxView({ box, zoom, pageHeightPts, selected, tool, store, o
         ref={textareaRef}
         // text-decoration does not propagate into the textarea's text (it is
         // a replaced element), so underline must be set on the element itself.
-        style={{ textDecoration: box.underline ? 'underline' : undefined }}
+        style={{ lineHeight: LINE_HEIGHT, textDecoration: box.underline ? 'underline' : undefined }}
         value={displayText}
         rows={1}
         placeholder={isSymbol ? undefined : 'Text …'}
