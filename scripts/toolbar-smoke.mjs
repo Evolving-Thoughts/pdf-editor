@@ -108,6 +108,39 @@ try {
   await draw(0, 350)
   assert.equal(await strokes.count(), 1)
   if (artifacts) await page.screenshot({ path: join(artifacts, 'toolbar-home.png') })
+  await page.getByRole('button', { name: 'Radierer', exact: true }).click()
+  const eraserSizes = page.getByRole('group', { name: 'Radierergröße', exact: true })
+  assert.equal(await eraserSizes.getByRole('button').count(), 3, 'Radierergröße hat drei Vorschau-Buttons')
+  assert.equal(await page.getByRole('combobox', { name: 'Radierergröße', exact: true }).count(), 0)
+  assert.equal(await page.getByRole('button', { name: '16 pt Radierergröße', exact: true }).getAttribute('aria-pressed'), 'true')
+  const originalPath = await strokes.getAttribute('d')
+  const eraserSheet = await page.locator('.page').first().boundingBox()
+  // Width 3 pt adds half its thickness to each eraser radius: 8, 16, 24 pt.
+  // Independent worked expectations for a cut centred at x=180.
+  for (const [diameter, leftEnd, rightStart] of [[16, 170.5, 189.5], [32, 162.5, 197.5], [48, 154.5, 205.5]]) {
+    const button = page.getByRole('button', { name: `${diameter} pt Radierergröße`, exact: true })
+    await button.focus()
+    await page.keyboard.press('Enter')
+    assert.equal(await button.getAttribute('aria-pressed'), 'true')
+    assert.equal(await eraserSizes.locator('[aria-pressed=true]').count(), 1)
+    assert.ok((await button.getAttribute('title')).includes(`${diameter} pt Durchmesser`))
+    await page.mouse.move(eraserSheet.x + 180, eraserSheet.y + 350)
+    await page.mouse.down()
+    assert.equal(await page.locator('.stroke-preview').getAttribute('stroke-width'), String(diameter),
+      'Die ausgewählte Größe wird an die Radiergeste weitergegeben')
+    await page.mouse.up()
+    assert.equal(await strokes.count(), 2)
+    const parts = await strokes.evaluateAll(paths => paths.map(path =>
+      path.getAttribute('d').match(/-?\d+(?:\.\d+)?/g).map(Number)))
+    assert.ok(Math.abs(parts[0].at(-2) - leftEnd) < 0.000001)
+    assert.ok(Math.abs(parts[1][0] - rightStart) < 0.000001)
+    await page.getByRole('button', { name: 'Rückgängig', exact: true }).click()
+    assert.equal(await strokes.getAttribute('d'), originalPath, 'Ein Undo stellt den Strich exakt wieder her')
+  }
+  await page.getByRole('button', { name: '32 pt Radierergröße', exact: true }).click()
+  if (artifacts) await bar.screenshot({ path: join(artifacts, 'eraser-detail.png') })
+  console.log('PASS Radiererbuttons: drei Größen, Tastatur, Vorschau, tatsächliche Radierbreite und Undo')
+  await page.getByRole('button', { name: 'Stift', exact: true }).click()
   await page.setViewportSize({ width: 390, height: 844 })
   await page.waitForTimeout(100)
   assert.ok(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth))
@@ -123,12 +156,21 @@ try {
   }
   if (artifacts) await page.screenshot({ path: join(artifacts, 'toolbar-mobile.png') })
   await page.getByRole('button', { name: 'Radierer', exact: true }).click()
+  assert.equal(await page.getByRole('button', { name: '32 pt Radierergröße', exact: true }).getAttribute('aria-pressed'), 'true',
+    'Werkzeugwechsel behält die Radierergröße')
+  for (const control of await bar.locator('button').all()) {
+    const box = await control.boundingBox()
+    assert.ok(box.width >= 44 && box.height >= 44)
+    assert.ok(box.x >= smallBar.x && box.x + box.width <= smallBar.x + smallBar.width)
+  }
   if (artifacts) await page.screenshot({ path: join(artifacts, 'toolbar-mobile-eraser.png') })
   await page.setViewportSize({ width: 1280, height: 900 })
   await page.emulateMedia({ colorScheme: 'dark' })
   await page.getByRole('button', { name: 'Stift', exact: true }).click()
   await reset.click()
   if (artifacts) await page.screenshot({ path: join(artifacts, 'toolbar-dark.png') })
+  await page.getByRole('button', { name: 'Radierer', exact: true }).click()
+  if (artifacts) await bar.screenshot({ path: join(artifacts, 'eraser-dark-detail.png') })
   assert.deepEqual(errors, [], 'Keine Laufzeitfehler')
   console.log('PASS Mobil: kein Overflow, Touchflächen und Radierer')
 } finally {

@@ -130,10 +130,18 @@ export function DrawingToolbar({
               ))}
             </div>
           ) : (
-            <select aria-label="Radierergröße" title="Radierergröße (Durchmesser)" value={eraserRadius}
-              onChange={(event) => onEraserRadius(Number(event.target.value))}>
-              {[8, 16, 24].map((value) => <option key={value} value={value}>{value * 2} pt</option>)}
-            </select>
+            <div className="drawing-eraser-sizes" role="group" aria-label="Radierergröße">
+              {[8, 16, 24].map((radius, index) => (
+                <button key={radius} type="button" aria-label={`${radius * 2} pt Radierergröße`}
+                  title={`${['Klein', 'Mittel', 'Groß'][index]} · ${radius * 2} pt Durchmesser`}
+                  aria-pressed={eraserRadius === radius} onClick={() => onEraserRadius(radius)}>
+                  <svg width="32" height="32" viewBox="0 0 54 54" fill="none" aria-hidden="true">
+                    <circle cx="27" cy="27" r={radius} strokeWidth="2.4"
+                      stroke={eraserRadius === radius ? 'var(--accent)' : 'currentColor'} />
+                  </svg>
+                </button>
+              ))}
+            </div>
           )}
           <button type="button" aria-label="Position zurücksetzen" title="Position zurücksetzen"
             onClick={() => setPosition(bounded(HOME))}>

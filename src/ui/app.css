@@ -214,10 +214,10 @@
   padding: 8px;
 }
 .drawing-colors,
-.drawing-widths { display: flex; gap: 4px; }
+.drawing-widths,
+.drawing-eraser-sizes { display: flex; gap: 4px; }
 .drawing-line-controls { display: flex; align-items: center; gap: 8px; }
-.drawing-toolbar button,
-.drawing-toolbar select {
+.drawing-toolbar button {
   min-height: 44px;
   min-width: 44px;
   font: inherit;
@@ -228,7 +228,6 @@
   border-radius: 6px;
   cursor: pointer;
 }
-.drawing-toolbar select { padding: 0 8px; }
 .drawing-toolbar button[aria-pressed="true"] {
   border-color: var(--accent);
   background: var(--accent-bg);
