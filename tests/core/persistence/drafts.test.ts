@@ -157,3 +157,127 @@ test('loadDraft returns null and deleteDraft removes for unknown ids', async () 
 test('the size warning threshold is 50 MB', () => {
   expect(DRAFT_SIZE_WARN_BYTES).toBe(50 * 1024 * 1024)
 })
+
+import type { ImageOverlay } from '../../../src/core/model'
+import { PNG_DATA_URL } from '../../imageFixtures.js'
+const image: ImageOverlay = { kind: 'image', id: 'image', pageIndex: 1, x: 40, y: 50, width: 120, height: 60,
+  lockAspectRatio: true, name: 'logo.png', pixelWidth: 120, pixelHeight: 60, dataUrl: PNG_DATA_URL }
+
+test('image source is stored outside draft listing metadata and restored after reopening', async () => {
+  const db = await openDb()
+  await saveDraft(db, { ...sampleDraft('images'), overlays: [image] })
+  const transaction = db.transaction('drafts', 'readonly')
+  const request = transaction.objectStore('drafts').get('images')
+  await new Promise<void>((resolve) => { transaction.oncomplete = () => resolve() })
+  expect(JSON.stringify(request.result)).not.toContain(PNG_DATA_URL)
+  db.close()
+  const reopened = await openDb()
+  expect((await loadDraft(reopened, 'images'))!.overlays).toEqual([image])
+  expect(await listDrafts(reopened)).toHaveLength(1)
+  await saveDraft(reopened, { ...sampleDraft('images'), overlays: [{ ...image, x: 200 }] })
+  expect((await loadDraft(reopened, 'images'))!.overlays[0]).toEqual({ ...image, x: 200 })
+})
+
+test('deleting one draft deletes only its image assets; missing assets fail rather than losing images', async () => {
+  const db = await openDb()
+  await saveDraft(db, { ...sampleDraft('one'), overlays: [image] })
+  await saveDraft(db, { ...sampleDraft('two'), overlays: [image] })
+  await deleteDraft(db, 'one')
+  expect((await loadDraft(db, 'two'))!.overlays).toEqual([image])
+  const tx = db.transaction('image-assets', 'readwrite')
+  const request = tx.objectStore('image-assets').getAll()
+  await new Promise<void>((resolve) => { tx.oncomplete = () => resolve() })
+  expect(request.result).toHaveLength(1)
+  expect(request.result[0].draftId).toBe('two')
+  const remove = db.transaction('image-assets', 'readwrite')
+  remove.objectStore('image-assets').clear()
+  await new Promise<void>((resolve) => { remove.oncomplete = () => resolve() })
+  await expect(loadDraft(db, 'two')).rejects.toThrow('Bilddaten')
+})
+
+test('v2 text/stroke drafts migrate to v3 without data loss', async () => {
+  const legacy = { ...sampleDraft('v2'), updatedAt: 123 }
+  const stroke = { id: 'line', pageIndex: 1, color: '#111111', width: 3, points: [{ x: 1, y: 2 }, { x: 3, y: 4 }] }
+  await new Promise<void>((resolve, reject) => {
+    const request = indexedDB.open('pdf-editor-drafts', 2)
+    request.onupgradeneeded = () => {
+      request.result.createObjectStore('drafts', { keyPath: 'id' })
+      request.result.createObjectStore('draft-bytes')
+    }
+    request.onsuccess = () => {
+      const db = request.result
+      const tx = db.transaction(['drafts', 'draft-bytes'], 'readwrite')
+      const { pdfBytes, ...metadata } = legacy
+      tx.objectStore('drafts').put({ ...metadata, sizeBytes: pdfBytes.byteLength, overlays: [...legacy.overlays, stroke] })
+      tx.objectStore('draft-bytes').put(pdfBytes, 'v2')
+      tx.oncomplete = () => { db.close(); resolve() }
+      tx.onerror = () => reject(tx.error)
+    }
+    request.onerror = () => reject(request.error)
+  })
+  const db = await openDb()
+  expect(db.version).toBe(3)
+  expect((await loadDraft(db, 'v2'))!.overlays).toEqual([...legacy.overlays, stroke])
+  expect((await loadDraft(db, 'v2'))!.pdfBytes).toEqual(legacy.pdfBytes)
+  await saveDraft(db, { ...legacy, overlays: [...legacy.overlays, stroke, image] })
+  expect((await loadDraft(db, 'v2'))!.overlays).toEqual([...legacy.overlays, stroke, image])
+})
+
+test('arbitrary image angles survive draft save, reopen and geometry edits', async () => {
+  const db = await openDb()
+  const rotated = { ...image, rotation: 37.5 }
+  await saveDraft(db, { ...sampleDraft('angle'), overlays: [rotated] })
+  db.close()
+  const reopened = await openDb()
+  expect((await loadDraft(reopened, 'angle'))!.overlays).toEqual([rotated])
+  await saveDraft(reopened, { ...sampleDraft('angle'), overlays: [{ ...rotated, rotation: 270, x: 150 }] })
+  expect((await loadDraft(reopened, 'angle'))!.overlays).toEqual([{ ...rotated, rotation: 270, x: 150 }])
+})
+
+async function imageAssetKeys(db: IDBDatabase): Promise<IDBValidKey[]> {
+  const tx = db.transaction('image-assets', 'readonly')
+  const request = tx.objectStore('image-assets').getAllKeys()
+  return new Promise((resolve, reject) => {
+    tx.oncomplete = () => resolve(request.result)
+    tx.onerror = () => reject(tx.error)
+  })
+}
+
+test('autosave prunes deleted image assets only in this draft, retaining referenced and other-draft assets', async () => {
+  const db = await openDb()
+  const keep = { ...image, id: 'keep' }
+  await saveDraft(db, { ...sampleDraft('one'), overlays: [image, keep] })
+  await saveDraft(db, { ...sampleDraft('two'), overlays: [image] })
+  await saveDraft(db, { ...sampleDraft('one'), overlays: [keep] })
+  expect(await imageAssetKeys(db)).toEqual([['one', 'keep'], ['two', 'image']])
+  expect((await loadDraft(db, 'one'))!.overlays).toEqual([keep])
+  expect((await loadDraft(db, 'two'))!.overlays).toEqual([image])
+})
+
+import { EditorStore } from '../../../src/core/editorStore'
+import { removeImage } from '../../../src/core/commands'
+test('undo after a persisted deletion rewrites the pruned source and restores exact image geometry', async () => {
+  const db = await openDb(), store = new EditorStore()
+  const original = { ...image, rotation: 37.5 }
+  store.restore([original])
+  await saveDraft(db, { ...sampleDraft('undo'), overlays: store.state.overlays })
+  store.dispatch(removeImage(original))
+  await saveDraft(db, { ...sampleDraft('undo'), overlays: store.state.overlays })
+  expect(await imageAssetKeys(db)).toEqual([])
+  store.undo()
+  await saveDraft(db, { ...sampleDraft('undo'), overlays: store.state.overlays })
+  expect(await imageAssetKeys(db)).toEqual([['undo', 'image']])
+  db.close()
+  expect((await loadDraft(await openDb(), 'undo'))!.overlays).toEqual([original])
+})
+
+test('repeated add/delete/save cycles cannot accumulate orphaned image asset rows', async () => {
+  const db = await openDb()
+  for (let n = 0; n < 8; n++) {
+    await saveDraft(db, { ...sampleDraft('cycles'), overlays: [{ ...image, id: `image-${n}` }] })
+    expect(await imageAssetKeys(db)).toHaveLength(1)
+    await saveDraft(db, { ...sampleDraft('cycles'), overlays: [] })
+    expect(await imageAssetKeys(db)).toEqual([])
+  }
+  expect((await loadDraft(db, 'cycles'))!.overlays).toEqual([])
+})

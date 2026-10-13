@@ -17,7 +17,7 @@ try {
   const page = await browser.newPage({ viewport: { width: 1280, height: 900 } })
   page.on('pageerror', e => errors.push(String(e)))
   await page.goto(process.env.SMOKE_URL ?? 'http://localhost:5201')
-  await page.locator('input[type=file]').setInputFiles(new URL('../tests/fixtures/zweiseitig.pdf', import.meta.url).pathname)
+  await page.locator('input[type=file][accept="application/pdf"]').setInputFiles(new URL('../tests/fixtures/zweiseitig.pdf', import.meta.url).pathname)
   await page.waitForSelector('.page canvas')
   await page.getByRole('button', { name: 'Stift', exact: true }).click()
   const bar = page.getByRole('group', { name: 'Zeichenoptionen', exact: true })

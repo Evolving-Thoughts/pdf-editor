@@ -2,10 +2,10 @@
 // selectable PDF text objects (see ADR-001 and the spec).
 import {
   LineCapStyle, LineJoinStyle, PDFDocument, PDFName, PDFNumber, popGraphicsState, pushGraphicsState,
-  rgb, setLineJoin, StandardFonts, type Color, type PDFFont, type PDFPage,
+  degrees, rgb, setLineJoin, StandardFonts, type Color, type PDFFont, type PDFImage, type PDFPage,
 } from 'pdf-lib'
 import { strokeToSvgPath } from '../drawing'
-import { isStroke, type Overlay, type OverlayFont, type Stroke, type Textbox } from '../model'
+import { isImage, isStroke, type Overlay, type OverlayFont, type Stroke, type Textbox } from '../model'
 
 // Bold/italic map to the matching PDF standard font; underline has no font
 // variant and is drawn as a line below the text.
@@ -68,10 +68,32 @@ function variantFor(overlay: Textbox): StandardFonts {
 export async function exportPdf(bytes: Uint8Array, overlays: Overlay[] = []): Promise<Uint8Array> {
   const doc = await PDFDocument.load(bytes)
   const fonts = new Map<StandardFonts, PDFFont>()
+  const images = new Map<string, PDFImage>()
   for (const overlay of overlays) {
     const page = doc.getPage(overlay.pageIndex)
     if (isStroke(overlay)) {
       drawStroke(page, overlay)
+      continue
+    }
+    if (isImage(overlay)) {
+      let embedded = images.get(overlay.dataUrl)
+      if (!embedded) {
+        embedded = overlay.dataUrl.startsWith('data:image/jpeg')
+          ? await doc.embedJpg(overlay.dataUrl) : await doc.embedPng(overlay.dataUrl)
+        images.set(overlay.dataUrl, embedded)
+      }
+      const space = displayedPageSpace(page)
+      // Browser clockwise rotation is negative in the PDF's y-up coordinates.
+      const rotation = overlay.rotation ?? 0
+      const angle = -rotation * Math.PI / 180
+      const centerX = overlay.x + overlay.width / 2
+      const centerY = overlay.y + overlay.height / 2
+      const origin = rotation === 0 ? space.toPdf(overlay.x, overlay.y) : space.toPdf(
+        centerX - Math.cos(angle) * overlay.width / 2 + Math.sin(angle) * overlay.height / 2,
+        centerY - Math.sin(angle) * overlay.width / 2 - Math.cos(angle) * overlay.height / 2,
+      )
+      page.drawImage(embedded, { ...origin, width: overlay.width / space.unit,
+        height: overlay.height / space.unit, rotate: degrees(space.rotation - rotation) })
       continue
     }
     if (overlay.text.trim().length === 0) continue
@@ -109,8 +131,7 @@ function colorFromHex(hex: string): Color {
   return rgb(((value >> 16) & 255) / 255, ((value >> 8) & 255) / 255, (value & 255) / 255)
 }
 
-function drawStroke(page: PDFPage, stroke: Stroke): void {
-  if (stroke.points.length === 0) return
+function displayedPageSpace(page: PDFPage) {
   // PDF.js shows the MediaBox/CropBox intersection after page rotation and
   // UserUnit scaling. Stored stroke points use that displayed bottom-left
   // origin; convert back before writing PDF operators.
@@ -127,14 +148,21 @@ function drawStroke(page: PDFPage, stroke: Stroke): void {
   const rawUnit = unitValue instanceof PDFNumber ? unitValue.asNumber() : 1
   const unit = rawUnit > 0 ? rawUnit : 1
   const rotation = ((page.getRotation().angle % 360) + 360) % 360
-  const points = stroke.points.map((point) => {
-    const x = point.x / unit
-    const y = point.y / unit
+  const toPdf = (displayX: number, displayY: number) => {
+    const x = displayX / unit
+    const y = displayY / unit
     if (rotation === 90) return { x: box.x + box.width - y, y: box.y + x }
     if (rotation === 180) return { x: box.x + box.width - x, y: box.y + box.height - y }
     if (rotation === 270) return { x: box.x + y, y: box.y + box.height - x }
     return { x: box.x + x, y: box.y + y }
-  })
+  }
+  return { unit, rotation, toPdf }
+}
+
+function drawStroke(page: PDFPage, stroke: Stroke): void {
+  if (stroke.points.length === 0) return
+  const { unit, toPdf } = displayedPageSpace(page)
+  const points = stroke.points.map((point) => toPdf(point.x, point.y))
   page.pushOperators(pushGraphicsState(), setLineJoin(LineJoinStyle.Round))
   page.drawSvgPath(strokeToSvgPath(points, page.getHeight()), {
     x: 0,

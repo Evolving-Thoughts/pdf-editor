@@ -534,3 +534,125 @@
 .textbox.selected .drag-surface:active {
   cursor: grabbing;
 }
+
+/* T6 / chosen variant A: options follow the selected image, not a sidebar. */
+.image-overlay {
+  position: absolute;
+  cursor: grab;
+  touch-action: none;
+  user-select: none;
+  outline: none;
+  transform-origin: center;
+}
+.image-overlay img { width: 100%; height: 100%; display: block; pointer-events: none; }
+.image-overlay.selected { outline: 2px solid var(--accent); }
+.image-overlay:focus-visible { outline: 2px dashed var(--accent); outline-offset: 4px; }
+.image-overlay:active { cursor: grabbing; }
+.page:not(.drawing-tool).text-tool .image-overlay,
+.page.symbol-tool .image-overlay,
+.page.drawing-tool .image-overlay { pointer-events: none; }
+.image-handle {
+  position: absolute;
+  width: 44px;
+  height: 44px;
+  padding: 0;
+  border: none;
+  background: transparent;
+  display: grid;
+  place-items: center;
+  touch-action: none;
+}
+.image-handle span { width: 8px; height: 8px; background: var(--bg); border: 2px solid var(--accent); box-sizing: border-box; }
+.image-handle.nw { left: -22px; top: -22px; cursor: nwse-resize; }
+.image-handle.ne { right: -22px; top: -22px; cursor: nesw-resize; }
+.image-handle.sw { left: -22px; bottom: -22px; cursor: nesw-resize; }
+.image-handle.se { right: -22px; bottom: -22px; cursor: nwse-resize; }
+.image-handle:focus-visible { outline: 2px solid var(--accent); border-radius: 4px; }
+.image-options {
+  position: fixed;
+  visibility: hidden;
+  z-index: 20;
+  width: 510px;
+  box-sizing: border-box;
+  display: flex;
+  gap: 8px;
+  align-items: flex-end;
+  padding: 8px;
+  color: var(--text);
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  box-shadow: 0 1px 2px rgba(0,0,0,.05), 0 4px 12px rgba(0,0,0,.08);
+  font-size: 14px;
+}
+.image-options label { flex: 1; min-width: 0; text-align: left; }
+.image-options input {
+  display: block;
+  width: 100%;
+  box-sizing: border-box;
+  min-height: 44px;
+  margin-top: 4px;
+  padding: 6px 8px;
+  font: inherit;
+  color: var(--text-h);
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+}
+.image-options button {
+  width: 44px;
+  min-width: 44px;
+  height: 44px;
+  padding: 10px;
+  color: var(--text-h);
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  cursor: pointer;
+  touch-action: manipulation;
+}
+.image-options button[aria-pressed="true"] { border-color: var(--accent); background: var(--accent-bg); }
+.image-options svg { display: block; width: 20px; height: 20px; }
+.image-options :focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+
+.image-actions { display: flex; gap: 8px; align-self: flex-end; }
+.image-rotate-handle {
+  position: absolute;
+  left: calc(50% - 22px);
+  top: -58px;
+  width: 44px;
+  height: 44px;
+  min-height: 44px;
+  border: 0;
+  padding: 0;
+  background: transparent;
+  cursor: grab;
+  touch-action: none;
+}
+.image-rotate-handle::before {
+  content: '';
+  position: absolute;
+  width: 1px;
+  height: 14px;
+  bottom: -14px;
+  left: 21px;
+  background: var(--accent);
+}
+.image-rotate-handle span {
+  display: grid;
+  place-items: center;
+  position: absolute;
+  inset: 6px;
+  border: 1px solid var(--accent);
+  border-radius: 50%;
+  background: var(--bg);
+  color: var(--text-h);
+}
+.image-rotate-handle svg { width: 20px; height: 20px; }
+.image-rotate-handle:active { cursor: grabbing; }
+.image-rotate-handle:focus-visible { outline: 2px solid var(--accent); border-radius: 6px; }
+@media (max-width: 640px) {
+  .image-options { flex-wrap: wrap; }
+  .image-options label { min-width: 76px; }
+  .image-actions { flex-basis: 100%; justify-content: flex-end; }
+}

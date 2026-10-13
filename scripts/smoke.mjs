@@ -19,7 +19,7 @@ page.on('console', (m) => m.type() === 'error' && errors.push(m.text()))
 
 const baseUrl = process.env.SMOKE_URL ?? 'http://localhost:5199'
 await page.goto(baseUrl)
-await page.locator('input[type=file]').setInputFiles(new URL('../tests/fixtures/zweiseitig.pdf', import.meta.url).pathname)
+await page.locator('input[type=file][accept="application/pdf"]').setInputFiles(new URL('../tests/fixtures/zweiseitig.pdf', import.meta.url).pathname)
 await page.waitForSelector('canvas')
 
 // 0. Empty-box cleanup: create with text tool, Escape without typing -> removed
@@ -203,7 +203,7 @@ await page.keyboard.press('Escape')
 check('Esc schließt Entwürfe-Menü', (await menu.count()) === 0)
 
 // 16. Multiple drafts: open a second PDF, edit it, then switch back
-await page.locator('input[type=file]').setInputFiles(new URL('../tests/fixtures/zweiseitig.pdf', import.meta.url).pathname)
+await page.locator('input[type=file][accept="application/pdf"]').setInputFiles(new URL('../tests/fixtures/zweiseitig.pdf', import.meta.url).pathname)
 await page.waitForFunction(() => document.querySelector('canvas') && !document.querySelector('.textbox'))
 check('Neue PDF startet ohne alte Boxen', (await page.locator('.textbox').count()) === 0)
 await page.getByRole('button', { name: /Text/ }).click()
