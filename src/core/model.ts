@@ -37,14 +37,36 @@ export interface Stroke {
   width: number
 }
 
-export type Overlay = Textbox | Stroke
+/** Immutable, locally decoded image source; no expiring blob URL in drafts. */
+export interface ImageOverlay {
+  kind: 'image'
+  id: string
+  pageIndex: number
+  /** Displayed page points, bottom-left origin, like strokes. */
+  x: number
+  y: number
+  width: number
+  height: number
+  lockAspectRatio: boolean
+  name: string
+  pixelWidth: number
+  pixelHeight: number
+  /** PNG normalized at import, including JPEG EXIF orientation. */
+  dataUrl: string
+}
+
+export type Overlay = Textbox | Stroke | ImageOverlay
+
+export function isImage(overlay: Overlay): overlay is ImageOverlay {
+  return 'kind' in overlay && overlay.kind === 'image'
+}
 
 export function isStroke(overlay: Overlay): overlay is Stroke {
   return 'points' in overlay
 }
 
 export function isTextbox(overlay: Overlay): overlay is Textbox {
-  return !isStroke(overlay)
+  return 'text' in overlay
 }
 
 export function cloneOverlay(overlay: Overlay): Overlay {

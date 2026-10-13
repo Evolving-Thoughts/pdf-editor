@@ -16,7 +16,7 @@ mkdirSync(artifactDir, { recursive: true })
 const baseUrl = process.env.SMOKE_URL ?? 'http://localhost:5199'
 try {
   await page.goto(baseUrl)
-  await page.locator('input[type=file]').setInputFiles(new URL('../tests/fixtures/zweiseitig.pdf', import.meta.url).pathname)
+  await page.locator('input[type=file][accept="application/pdf"]').setInputFiles(new URL('../tests/fixtures/zweiseitig.pdf', import.meta.url).pathname)
   await page.waitForSelector('.page canvas')
   const pen = page.getByRole('button', { name: 'Stift', exact: true })
   assert.equal(await pen.count(), 1, 'Freihand-Werkzeug ist erreichbar')
@@ -135,7 +135,7 @@ try {
   const touchPage = await touchContext.newPage()
   touchPage.on('pageerror', e => errors.push(String(e)))
   await touchPage.goto(baseUrl)
-  await touchPage.locator('input[type=file]').setInputFiles(new URL('../tests/fixtures/zweiseitig.pdf', import.meta.url).pathname)
+  await touchPage.locator('input[type=file][accept="application/pdf"]').setInputFiles(new URL('../tests/fixtures/zweiseitig.pdf', import.meta.url).pathname)
   await touchPage.waitForSelector('.page canvas')
   await touchPage.getByRole('button', { name: 'Stift', exact: true }).tap()
   const touchSheet = await touchPage.locator('.page').first().boundingBox()

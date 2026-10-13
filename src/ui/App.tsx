@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useRef, useState, useSyncExternalStore } from 'react'
-import { clearDrawing, nudgeTextbox, removeTextbox } from '../core/commands'
+import { addImage, clearDrawing, nudgeTextbox, removeImage, removeTextbox, updateImage } from '../core/commands'
 import { EditorStore } from '../core/editorStore'
-import { cloneOverlay, createId, isStroke, isTextbox } from '../core/model'
+import { cloneOverlay, createId, isImage, isStroke, isTextbox } from '../core/model'
 import {
   deleteDraft,
   DRAFT_SIZE_WARN_BYTES,
@@ -13,6 +13,8 @@ import {
   type DraftSummary,
 } from '../core/persistence/drafts'
 import { loadPdf, type PdfHandle } from '../core/pdf/loadPdf'
+import { importImage } from '../core/images/importImage'
+import { imageGeometry, initialImageGeometry, moveImage } from '../core/images/geometry'
 import { zoomIn, zoomOut } from '../core/viewerState'
 import { DraftsMenu } from './DraftsMenu'
 import { DrawingToolbar } from './DrawingToolbar'
@@ -60,6 +62,9 @@ export default function App() {
   const draftRef = useRef<ActiveDraft | null>(null)
   const dbRef = useRef<IDBDatabase | null>(null)
   const fileInputRef = useRef<HTMLInputElement>(null)
+  const imageInputRef = useRef<HTMLInputElement>(null)
+  const documentIntentRef = useRef(0)
+  const imageImportRef = useRef(0)
   const workspaceRef = useRef<HTMLDivElement>(null)
   const saveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
   const saveQueueRef = useRef<Promise<void>>(Promise.resolve())
@@ -149,6 +154,7 @@ export default function App() {
 
   const replaceDocument = useCallback(
     (next: PdfHandle, draft: ActiveDraft, nextOverlays: typeof store.state.overlays) => {
+      documentIntentRef.current += 1
       persistenceGenerationRef.current += 1
       if (saveTimerRef.current) {
         clearTimeout(saveTimerRef.current)
@@ -170,6 +176,7 @@ export default function App() {
 
   const onOpenFile = useCallback(
     async (file: File) => {
+      documentIntentRef.current += 1
       setError(null)
       try {
         await persistActiveDraft().catch((problem) =>
@@ -191,6 +198,7 @@ export default function App() {
   const onOpenDraft = useCallback(
     async (id: string) => {
       if (loadingDraftId) return
+      documentIntentRef.current += 1
       setError(null)
       setLoadingDraftId(id)
       try {
@@ -228,6 +236,7 @@ export default function App() {
       const isActive = id === activeDraftId
       const pausedDraft = isActive ? draftRef.current : null
       if (isActive) {
+        documentIntentRef.current += 1
         // Pause auto-save while deleting; on failure it resumes and persists
         // any edits made during the confirmation/DB round trip.
         persistenceGenerationRef.current += 1
@@ -272,7 +281,7 @@ export default function App() {
   }, [persistActiveDraft, refreshDrafts, reportDraftProblem])
 
   // Release the worker document when the app unmounts.
-  useEffect(() => () => void pdfRef.current?.destroy(), [])
+  useEffect(() => () => { documentIntentRef.current += 1; void pdfRef.current?.destroy() }, [])
 
   // Auto-save: every store change (edits, moves, deletes) persists the draft
   // to IndexedDB, debounced so gestures like dragging or typing coalesce.
@@ -294,6 +303,44 @@ export default function App() {
     }
   }, [persistActiveDraft, reportDraftProblem, store])
 
+  const onImportImage = useCallback(async (file: File, targetPage?: number, dropPoint?: { x: number; y: number }) => {
+    const handle = pdfRef.current
+    if (!handle) return
+    const intent = documentIntentRef.current
+    const request = ++imageImportRef.current
+    const stillCurrent = () => pdfRef.current === handle && documentIntentRef.current === intent && imageImportRef.current === request
+    setError(null)
+    try {
+      // Pick the page with the largest visible area, not always page one.
+      const workspace = workspaceRef.current!.getBoundingClientRect()
+      const pages = Array.from(workspaceRef.current!.querySelectorAll<HTMLElement>('[data-page-index]'))
+      const visibleArea = (element: HTMLElement) => {
+        const rect = element.getBoundingClientRect()
+        return Math.max(0, Math.min(rect.bottom, workspace.bottom) - Math.max(rect.top, workspace.top)) *
+          Math.max(0, Math.min(rect.right, workspace.right) - Math.max(rect.left, workspace.left))
+      }
+      const visiblePage = pages.sort((a, b) => visibleArea(b) - visibleArea(a))[0]
+      const pageIndex = targetPage ?? Number(visiblePage?.dataset.pageIndex ?? 0)
+      const element = pages.find(page => Number(page.dataset.pageIndex) === pageIndex)
+      const rect = element?.getBoundingClientRect()
+      const source = await importImage(file)
+      if (!stillCurrent()) return
+      const pageSize = await handle.getPageSize(pageIndex + 1)
+      if (!stillCurrent()) return
+      const center = dropPoint ?? (rect ? {
+        x: (Math.max(rect.left, workspace.left) + Math.min(rect.right, workspace.right)) / 2 / zoom - rect.left / zoom,
+        y: pageSize.height - ((Math.max(rect.top, workspace.top) + Math.min(rect.bottom, workspace.bottom)) / 2 - rect.top) / zoom,
+      } : { x: pageSize.width / 2, y: pageSize.height / 2 })
+      const image = { ...source, ...initialImageGeometry(source.pixelWidth, source.pixelHeight, pageSize, center),
+        kind: 'image' as const, id: createId(), pageIndex }
+      store.dispatch(addImage(image))
+      setTool('select')
+      setSelectedId(image.id)
+    } catch (problem) {
+      if (stillCurrent()) setError(problem instanceof Error ? problem.message : 'Das Bild konnte nicht geladen werden.')
+    }
+  }, [store, zoom])
+
   // Global shortcuts. While a textarea is focused, it keeps its own editing
   // keys (Escape blurs there, see TextboxView).
   useEffect(() => {
@@ -307,16 +354,29 @@ export default function App() {
       }
       if ((event.key === 'Delete' || event.key === 'Backspace') && selectedId) {
         const box = store.state.overlays.find((o) => o.id === selectedId)
-        if (box && isTextbox(box)) {
-          store.dispatch(removeTextbox(box))
+        if (box && (isTextbox(box) || isImage(box))) {
+          event.preventDefault()
+          store.dispatch(isImage(box) ? removeImage(box) : removeTextbox(box))
           setSelectedId(null)
         }
         return
       }
       if (selectedId && event.key.startsWith('Arrow')) {
         const box = store.state.overlays.find((o) => o.id === selectedId)
-        if (!box || !isTextbox(box)) return
+        if (!box || isStroke(box)) return
         event.preventDefault()
+        if (isImage(box)) {
+          const step = event.shiftKey ? 10 : 1
+          const element = workspaceRef.current?.querySelector<HTMLElement>(`[data-page-index="${box.pageIndex}"]`)
+          if (!element) return
+          const before = imageGeometry(box)
+          const next = moveImage(before,
+            event.key === 'ArrowLeft' ? -step : event.key === 'ArrowRight' ? step : 0,
+            event.key === 'ArrowUp' ? step : event.key === 'ArrowDown' ? -step : 0,
+            { width: element.clientWidth / zoom, height: element.clientHeight / zoom })
+          if (next.x !== box.x || next.y !== box.y) store.dispatch(updateImage(box.id, before, next))
+          return
+        }
         const step = event.shiftKey ? 10 : 1
         const dx = event.key === 'ArrowLeft' ? -step : event.key === 'ArrowRight' ? step : 0
         const dy = event.key === 'ArrowUp' ? step : event.key === 'ArrowDown' ? -step : 0
@@ -340,7 +400,7 @@ export default function App() {
     }
     window.addEventListener('keydown', onKeyDown)
     return () => window.removeEventListener('keydown', onKeyDown)
-  }, [store, selectedId])
+  }, [store, selectedId, zoom])
 
   const onExport = useCallback(async () => {
     if (!pdf) return
@@ -371,6 +431,12 @@ export default function App() {
             if (file) void onOpenFile(file)
           }}
         />
+        <input ref={imageInputRef} type="file" accept="image/png,image/jpeg" className="visually-hidden"
+          tabIndex={-1} aria-hidden="true" onChange={event => {
+            const file = event.target.files?.[0]
+            event.target.value = ''
+            if (file) void onImportImage(file)
+          }} />
         <button type="button" onClick={() => fileInputRef.current?.click()}>
           PDF öffnen
         </button>
@@ -397,6 +463,9 @@ export default function App() {
               +
             </button>
             <span className="separator" />
+            <button type="button" onClick={() => imageInputRef.current?.click()} title="PNG- oder JPG-Bild einfügen · auch per Drag & Drop">
+              + Bild einfügen
+            </button>
             <button
               type="button"
               className="tool"
@@ -505,6 +574,7 @@ export default function App() {
               store={store}
               selectedId={selectedId}
               onSelect={setSelectedId}
+              onImageDrop={(file, pageIndex, point) => void onImportImage(file, pageIndex, point)}
             />
           ))}
         </div>
@@ -512,7 +582,7 @@ export default function App() {
       {pdf && (
         <footer className="drawing-footer">
           <button type="button" disabled={!overlays.some(isStroke)}
-            title="Alle Freihandstriche in diesem Dokument löschen · Texte und PDF bleiben erhalten"
+            title="Alle Freihandstriche in diesem Dokument löschen · Texte, Bilder und PDF bleiben erhalten"
             onClick={() => {
               if (store.state.overlays.some(isStroke)) store.dispatch(clearDrawing(store.state.overlays))
             }}>

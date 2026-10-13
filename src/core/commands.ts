@@ -1,8 +1,8 @@
 // Command stack for unlimited undo/redo (ADR-002).
 // Every state change goes through a reversible Command; no direct mutations
 // from the UI except store.preview() for transient gestures.
-import type { EditorState, Overlay, Stroke, Textbox } from './model'
-import { cloneOverlay, isTextbox, patchOverlay } from './model'
+import type { EditorState, ImageOverlay, Overlay, Stroke, Textbox } from './model'
+import { cloneOverlay, isImage, isStroke, patchOverlay } from './model'
 
 export interface Command {
   readonly label: string
@@ -103,7 +103,7 @@ export function replaceOverlays(before: Overlay[], after: Overlay[]): Command {
 /** Removes only this document's freehand drawing as one undo step. */
 export function clearDrawing(overlays: Overlay[]): Command {
   return {
-    ...replaceOverlays(overlays, overlays.filter(isTextbox)),
+    ...replaceOverlays(overlays, overlays.filter((overlay) => !isStroke(overlay))),
     label: 'Clear drawing',
   }
 }
@@ -172,4 +172,39 @@ export function nudgeTextbox(id: string, from: { x: number; y: number }, to: { x
     },
   }
   return self
+}
+
+/** Source data is immutable; edits only change geometry and proportion locking. */
+export type ImageChanges = Pick<ImageOverlay, 'x' | 'y' | 'width' | 'height' | 'lockAspectRatio'>
+
+export function addImage(image: ImageOverlay): Command {
+  const snapshot = { ...image }
+  return {
+    label: 'Add image',
+    apply: (s) => { s.overlays.push({ ...snapshot }) },
+    revert: (s) => { s.overlays = s.overlays.filter((o) => o.id !== snapshot.id) },
+  }
+}
+
+export function removeImage(image: ImageOverlay): Command {
+  const snapshot = { ...image }
+  let index = -1
+  return {
+    label: 'Remove image',
+    apply: (s) => {
+      index = s.overlays.findIndex((o) => o.id === snapshot.id)
+      s.overlays = s.overlays.filter((o) => o.id !== snapshot.id)
+    },
+    revert: (s) => { s.overlays.splice(Math.max(0, index), 0, { ...snapshot }) },
+  }
+}
+
+export function updateImage(id: string, before: ImageChanges, after: ImageChanges): Command {
+  const from = { ...before }
+  const to = { ...after }
+  const patch = (state: EditorState, changes: ImageChanges) => {
+    const image = state.overlays.find((o) => o.id === id)
+    if (image && isImage(image)) Object.assign(image, changes)
+  }
+  return { label: 'Edit image', apply: (s) => patch(s, to), revert: (s) => patch(s, from) }
 }
