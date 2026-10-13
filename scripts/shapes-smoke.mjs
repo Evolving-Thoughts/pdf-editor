@@ -34,6 +34,8 @@ async function draw(p, label, a, b) {
   await p.mouse.up()
   await p.waitForSelector('.shape-overlay.selected', { state: 'attached' })
   await p.waitForSelector('.shape-toolbar')
+  // This legacy suite deliberately tests editing; creation itself now stays active.
+  await p.getByRole('button', { name: '⬚ Auswahl', exact: true }).click()
 }
 async function geometry(p) {
   return p.locator('.shape-overlay.selected').evaluate((e) => ({

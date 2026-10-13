@@ -17,7 +17,7 @@ import { importImage } from '../core/images/importImage'
 import { imageGeometry, initialImageGeometry, moveImage } from '../core/images/geometry'
 import { shapeGeometry, moveShape, type ShapeStyle } from '../core/shapes'
 import { ShapeToolbar } from './ShapeToolbar'
-import { SHAPE_TOOLS } from './tools'
+import { SHAPE_TOOLS, isShapeTool } from './tools'
 import { zoomIn, zoomOut } from '../core/viewerState'
 import { DraftsMenu } from './DraftsMenu'
 import { DrawingToolbar } from './DrawingToolbar'
@@ -578,7 +578,7 @@ export default function App() {
           <DrawingToolbar workspaceRef={workspaceRef} tool={tool} color={strokeColor} width={strokeWidth}
             eraserRadius={eraserRadius} onColor={setStrokeColor} onWidth={setStrokeWidth} onEraserRadius={setEraserRadius} />
         )}
-        {pdf && tool==='select' && selectedShape && isShape(selectedShape) && shapePageSize?.pdf===pdf && shapePageSize.pageIndex===shapePage && <ShapeToolbar
+        {pdf && (tool==='select' || isShapeTool(tool)) && selectedShape && isShape(selectedShape) && shapePageSize?.pdf===pdf && shapePageSize.pageIndex===shapePage && <ShapeToolbar
           key={activeDraftId} workspaceRef={workspaceRef} shape={selectedShape} pageSize={shapePageSize.size} store={store} onSelect={setSelectedId}
           onStyle={shape=>{const next={fill:shape.fill,strokeColor:shape.strokeColor,strokeWidth:shape.strokeWidth};if(shape.shape==='marker')setMarkerStyle(next);else setShapeStyle(next)}} />}
         <div className="pages">
@@ -596,7 +596,6 @@ export default function App() {
               eraserRadius={eraserRadius}
               shapeStyle={shapeStyle}
               markerStyle={markerStyle}
-              onTool={setTool}
               overlays={overlays}
               store={store}
               selectedId={selectedId}

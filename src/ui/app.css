@@ -683,3 +683,7 @@
 .page.drawing-tool .shape-hit, .page.text-tool .shape-hit, .page.symbol-tool .shape-hit { pointer-events:none; }
 
 .shape-angle button svg, .shape-actions button svg { width:20px; height:20px; }
+
+/* Explicit grips remain editable; dragging any ordinary source/page area creates again. */
+.page.drawing-tool .shape-overlay .image-handle,
+.page.drawing-tool .shape-overlay .image-rotate-handle { pointer-events:auto; }

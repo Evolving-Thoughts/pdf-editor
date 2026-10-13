@@ -26,7 +26,6 @@ interface PageViewProps {
   onImageDrop: (file: File, pageIndex: number, point: StrokePoint) => void
   shapeStyle: ShapeStyle
   markerStyle: ShapeStyle
-  onTool: (tool: Tool) => void
   eraserRadius?: number
 }
 
@@ -45,7 +44,7 @@ interface DrawingGesture {
 
 export function PageView({
   pdf, pageIndex, zoom, tool, symbol, overlays, store, selectedId, onSelect,
-  shapeStyle, markerStyle, onTool, onImageDrop, strokeColor = '#111111', strokeWidth = 3, eraserRadius = 8,
+  shapeStyle, markerStyle, onImageDrop, strokeColor = '#111111', strokeWidth = 3, eraserRadius = 8,
 }: PageViewProps) {
   const canvasRef = useRef<HTMLCanvasElement>(null)
   const wrapperRef = useRef<HTMLDivElement>(null)
@@ -86,7 +85,8 @@ export function PageView({
     const cssX = event.clientX - rect.left
     const cssY = event.clientY - rect.top
     if (drawing) {
-      onSelect(null)
+      // Keep the previous completed selection/options while painting another shape.
+      if (!isShapeTool(tool)) onSelect(null)
       gestureRef.current = {
         pointerId: event.pointerId, pdf, tool, zoom, version: store.getVersion(), style: { ...(tool === 'marker' ? markerStyle : shapeStyle) }, color: strokeColor,
         width: strokeWidth, radius: eraserRadius,
@@ -158,7 +158,7 @@ export function PageView({
       }))
     } else if (isShapeTool(gesture.tool)) {
       const shape = createShape(gesture.tool, gesture.points, pageIndex, gesture.style)
-      if (shape) { store.dispatch(addShape(shape)); onSelect(shape.id); onTool('select') }
+      if (shape) { store.dispatch(addShape(shape)); onSelect(shape.id) }
     } else {
       const before = store.state.overlays
       const after = eraseStrokes(before, pageIndex, gesture.points, gesture.radius)

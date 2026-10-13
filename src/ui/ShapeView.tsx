@@ -28,6 +28,7 @@ interface Props {
   onSelect: (id: string | null) => void
 }
 interface Gesture {
+  tool: Tool
   pointerId: number
   x: number
   y: number
@@ -51,11 +52,19 @@ const cornerNames: Record<Corner, string> = {
 export function ShapeView({ shape, zoom, pageSize, selected, tool, store, onSelect }: Props) {
   const anchor = useRef<HTMLDivElement>(null)
   const gesture = useRef<Gesture | null>(null)
-  const [preview, setPreview] = useState<{ geometry: ShapeChanges; zoom: number; version: number } | null>(
-    null,
-  )
-  const active = selected && tool === 'select'
-  const validGesture = preview && preview.zoom === zoom && preview.version === store.getVersion() && active
+  const [preview, setPreview] = useState<{
+    geometry: ShapeChanges
+    zoom: number
+    version: number
+    tool: Tool
+  } | null>(null)
+  const active = selected && (tool === 'select' || tool === shape.shape)
+  const validGesture =
+    preview &&
+    preview.tool === tool &&
+    preview.zoom === zoom &&
+    preview.version === store.getVersion() &&
+    active
   const geometry = validGesture && preview ? preview.geometry : shapeGeometry(shape)
   const commit = (next: ShapeChanges, keyboardAction?: ShapeKeyboardAction) => {
     const before = shapeGeometry(shape)
@@ -74,7 +83,9 @@ export function ShapeView({ shape, zoom, pageSize, selected, tool, store, onSele
     const corner = event.currentTarget.dataset.corner as Corner | undefined
     const endpoint = event.currentTarget.dataset.endpoint as 'start' | 'end' | undefined
     const rotating = event.currentTarget.dataset.rotate === 'true'
-    if (tool !== 'select' || !event.isPrimary || event.button !== 0 || gesture.current) return
+    // Creation stays active on the page; only explicit grips edit the selected source.
+    const canEdit = tool === 'select' || (active && !!(corner || endpoint || rotating))
+    if (!canEdit || !event.isPrimary || event.button !== 0 || gesture.current) return
     event.stopPropagation()
     event.preventDefault()
     onSelect(shape.id)
@@ -83,6 +94,7 @@ export function ShapeView({ shape, zoom, pageSize, selected, tool, store, onSele
     const centerX = rect.left + rect.width / 2
     const centerY = rect.top + rect.height / 2
     gesture.current = {
+      tool,
       pointerId: event.pointerId,
       x: event.clientX,
       y: event.clientY,
@@ -123,17 +135,23 @@ export function ShapeView({ shape, zoom, pageSize, selected, tool, store, onSele
     const current = gesture.current
     if (!current || current.pointerId !== event.pointerId) return
     event.stopPropagation()
-    if (current.zoom !== zoom || current.version !== store.getVersion() || !active) {
+    if (current.tool !== tool || current.zoom !== zoom || current.version !== store.getVersion() || !active) {
       cancel()
       return
     }
-    setPreview({ geometry: nextGeometry(event, current), zoom: current.zoom, version: current.version })
+    setPreview({
+      geometry: nextGeometry(event, current),
+      zoom: current.zoom,
+      version: current.version,
+      tool: current.tool,
+    })
   }
   const finish = (event: React.PointerEvent) => {
     const current = gesture.current
     if (!current || current.pointerId !== event.pointerId) return
     event.stopPropagation()
-    const valid = current.zoom === zoom && current.version === store.getVersion() && active
+    const valid =
+      current.tool === tool && current.zoom === zoom && current.version === store.getVersion() && active
     const next = nextGeometry(event, current)
     cancel()
     if (event.currentTarget.hasPointerCapture(event.pointerId))
