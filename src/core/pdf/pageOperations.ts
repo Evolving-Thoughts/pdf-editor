@@ -64,13 +64,13 @@ export async function composePages(
           page.unit === pages[index].unit &&
           page.rotation === pages[index].rotation,
       )
-    )
-      { const doc = await PDFDocument.load(original)
-        if (!Object.keys(formValues).length) return original.slice()
-        if (doc.catalog.lookupMaybe(PDFName.of('AcroForm'), PDFDict)?.has(PDFName.of('XFA'))) throw new Error('XFA-Formulare werden noch nicht unterstützt.')
-        if (applyFormValues(doc, 'original', formValues)) { await updateFormAppearances(doc); return doc.save({ updateFieldAppearances: false }) }
-        return original.slice()
-      }
+    ) {
+      if (!Object.keys(formValues).length) return original.slice()
+      const doc = await PDFDocument.load(original)
+      if (doc.catalog.lookupMaybe(PDFName.of('AcroForm'), PDFDict)?.has(PDFName.of('XFA'))) throw new Error('XFA-Formulare werden noch nicht unterstützt.')
+      if (applyFormValues(doc, 'original', formValues)) { await updateFormAppearances(doc); return doc.save({ updateFieldAppearances: false }) }
+      return original.slice()
+    }
   }
 
   const output = await PDFDocument.create()

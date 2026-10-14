@@ -1,4 +1,4 @@
-import { expect, test } from 'vitest'
+import { expect, test, vi } from 'vitest'
 import { PDFDict, PDFDocument, PDFName, PDFNumber, PDFString, StandardFonts, degrees } from 'pdf-lib'
 import { composePages, imagePageBytes, inspectPages, pageSize, preparePages, textPageBytes } from '../../src/core/pdf/pageOperations'
 import { exportPdf } from '../../src/core/pdf/exportPdf'
@@ -79,6 +79,18 @@ test('unchanged page plans preserve original document metadata and existing Acro
   const out = await PDFDocument.load(await composePages(bytes, [], plan))
   expect(out.getTitle()).toBe('Original metadata')
   expect(out.getForm().getTextField('name').getText()).toBe('Ada')
+})
+
+test('unchanged pages without native edits skip the additional PDF load and return independent original bytes', async () => {
+  const bytes = await original(), plan = await inspectPages(bytes, 'original')
+  const load = vi.spyOn(PDFDocument, 'load')
+  try {
+    const result = await composePages(bytes, [], plan)
+    // One load validates the original page plan; no second load is needed to write form edits.
+    expect(load).toHaveBeenCalledTimes(1)
+    expect(result).toEqual(bytes)
+    expect(result.buffer).not.toBe(bytes.buffer)
+  } finally { load.mockRestore() }
 })
 
 test('assembled form pages preserve editable fields, widget page references and links', async () => {
