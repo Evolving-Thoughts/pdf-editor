@@ -701,3 +701,84 @@
 @media (prefers-color-scheme: dark) {
   .draft-save-status[role="alert"] { color: #f87171; }
 }
+
+/* T7: dedicated page-management view (approved variant C). */
+.page-manager { display: flex; height: 100%; min-height: 0; }
+.page-manager-panel { width: 340px; flex-shrink: 0; min-height: 0; display: flex; flex-direction: column; overflow: hidden; padding: 14px; border-right: 1px solid var(--border); background: var(--bg); box-sizing: border-box; }
+.page-manager h2 { margin: 0 0 12px; font-size: 17px; }
+.page-manager h3 { margin: 8px 0; font-size: 16px; }
+.page-manager button, .page-insert-dialog button { font: inherit; color: var(--text-h); background: var(--bg); border: 1px solid var(--border); border-radius: 6px; min-height: 44px; padding: 8px; cursor: pointer; }
+.page-manager button:disabled, .page-insert-dialog button:disabled { opacity: .4; cursor: default; }
+.page-manager-actions { display: flex; gap: 8px; flex-wrap: wrap; margin: 10px 0; }
+.page-manager-actions button { flex: 1; }
+.page-manager-list { display: flex; flex-direction: column; flex: 1; min-height: 100px; overflow-y: auto; overflow-x: hidden; overscroll-behavior: contain; scrollbar-gutter: stable; gap: 8px; margin-top: 12px; padding-right: 4px; scrollbar-color: var(--text) var(--code-bg); }
+.page-manager-row { display: grid; flex-shrink: 0; grid-template-columns: 40px minmax(0,1fr) 40px; gap: 4px; border: 1px solid var(--border); border-radius: 7px; padding: 4px; }
+.page-manager-row.selected { border-color: var(--accent-border); background: var(--accent-bg); }
+.page-manager-select { display: flex; align-items: center; gap: 8px; text-align: left; border: 0 !important; background: transparent !important; min-width: 0; }
+.page-manager-select > span:last-child { min-width: 0; overflow-wrap: anywhere; }
+.page-manager-select small { display: block; font-size: 11px; }
+.page-miniature { display: block; width: 42px; height: 54px; overflow: hidden; flex-shrink: 0; pointer-events: none; background: white; }
+.page-manager-preview { flex: 1; min-width: 0; overflow: auto; display: flex; flex-direction: column; align-items: center; justify-content: safe center; padding: 24px; box-sizing: border-box; background: var(--code-bg); }
+.page-manager-preview > p { font-size: 13px; }
+.page-preview-paper { position: relative; flex-shrink: 0; box-shadow: var(--shadow); }
+.page-preview-paper > .page { overflow: hidden; width: 100%; height: 100%; }
+.page-miniature .page { overflow: hidden; }
+.page-crop-layer { position: absolute; inset: 0; pointer-events: none; }
+.page-crop-frame { position: absolute; border: 2px solid var(--accent-border); box-sizing: border-box; background: #9344ff0a; }
+.page-manager .page-crop-grip { position: absolute; width: 24px; height: 24px; min-height: 24px; padding: 0; background: white; border: 2px solid var(--accent-border); border-radius: 2px; transform: translate(-50%,-50%); touch-action: none; pointer-events: auto; }
+.page-crop-grip.tl { left: 0; top: 0; cursor: nwse-resize; }
+.page-crop-grip.tr { left: 100%; top: 0; cursor: nesw-resize; }
+.page-crop-grip.bl { left: 0; top: 100%; cursor: nesw-resize; }
+.page-crop-grip.br { left: 100%; top: 100%; cursor: nwse-resize; }
+.page-crop-fields { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+.page-crop-controls p,.page-crop-controls small,.page-manager-message { font-size: 13px; }
+.page-manager label,.page-insert-dialog label { display: block; font-size: 14px; }
+.page-manager input,.page-insert-dialog input,.page-insert-dialog select,.page-insert-dialog textarea { display: block; width: 100%; font: inherit; min-height: 44px; color: var(--text-h); background: var(--bg); border: 1px solid var(--border); border-radius: 6px; padding: 8px; box-sizing: border-box; }
+.page-insert-dialog { width: min(500px,calc(100vw - 32px)); max-height: 90svh; overflow: auto; border: 1px solid var(--border); border-radius: 9px; padding: 18px; background: var(--bg); color: var(--text); }
+.page-insert-dialog::backdrop { background: #0006; }
+.page-insert-dialog label { margin-top: 12px; }
+.page-insert-dialog textarea { min-height: 100px; }
+.page-insert-dialog p { font-size: 13px; }
+.page-manager-error { color: #c33; }
+.page-manager button:focus-visible,.page-manager input:focus-visible { outline: 2px solid #338aff; outline-offset: 2px; }
+@media(max-width:700px) {
+  .page-manager { flex-direction: column; overflow: auto; }
+  .page-manager-panel { width: 100%; height: min(720px, max(600px, calc(100svh - 20px))); flex-shrink: 0; border-right: 0; border-bottom: 1px solid var(--border); }
+  .page-manager-row { min-width: 0; }
+  .page-manager-preview { flex: none; min-height: 440px; overflow: visible; }
+}
+.page-manager-panel { text-align: left; }
+.page-insert-dialog { text-align: left; }
+
+/* A4 conversion retains each existing element's previously visible fragment. */
+.overlay-clip { position: absolute; inset: 0; pointer-events: none; }
+.overlay-clip > .textbox, .overlay-clip > .image-overlay, .overlay-clip > .shape-overlay { pointer-events: auto; }
+.page.drawing-tool .overlay-clip > .textbox, .page.drawing-tool .overlay-clip > .image-overlay, .page.drawing-tool .overlay-clip > .shape-overlay,
+.page.text-tool .overlay-clip > .image-overlay, .page.text-tool .overlay-clip > .shape-overlay,
+.page.symbol-tool .overlay-clip > .image-overlay, .page.symbol-tool .overlay-clip > .shape-overlay { pointer-events: none; }
+.page-a4-global { border-top: 1px solid var(--border); margin-top: 16px; padding-top: 12px; }
+.page-a4-global button { width: 100%; }
+.page-a4-global small { display: block; margin-top: 8px; }
+
+/* Only the page list scrolls; management actions retain their position. */
+.page-manager-controls { flex-shrink: 0; max-height: calc(100% - 120px); overflow-y: auto; }
+.page-selection-tools { display: flex; gap: 6px; flex-wrap: wrap; }
+.page-selection-tools button { flex: 1; font-size: 12px; }
+.page-selection-count { width: 100%; margin: 0 0 4px; padding: 7px; border: 1px solid var(--border); border-radius: 6px; background: var(--accent-bg); font-size: 12px; }
+.page-selection-help { display: block; font-size: 11px; color: var(--text); margin: 8px 0 0; }
+.page-manager .page-manager-check { display: flex; align-items: center; justify-content: center; cursor: pointer; }
+.page-manager .page-manager-check input { width: 19px; height: 19px; min-height: 19px; padding: 0; accent-color: var(--accent); cursor: pointer; }
+.page-manager-moves { display: flex; flex-direction: column; gap: 4px; }
+.page-manager .page-manager-moves button { min-height: 36px; height: 36px; padding: 2px; }
+.page-manager-row.previewed .page-manager-select > span:last-child { text-decoration: underline; text-decoration-color: var(--accent-border); text-underline-offset: 3px; }
+.page-manager-row.previewed small { text-decoration: none; }
+.page-delete-confirm { padding: 10px; border: 1px solid var(--accent-border); border-radius: 7px; margin: 10px 0; background: var(--accent-bg); font-size: 13px; }
+.page-manager-list:focus-visible { outline: 2px solid #338aff; outline-offset: -2px; }
+
+.page-manager-panel { font-size: 14px; }
+.page-form-info { margin: 8px 0; font-size: 12px; }
+.page-form-info summary { cursor: pointer; }
+.page-form-info p { font-size: 12px; }
+.page-a4-global { margin-top: 10px; padding-top: 8px; }
+.page-a4-global h3 { font-size: 13px; margin: 0 0 6px; }
+.page-a4-global small { font-size: 11px; margin-top: 4px; }

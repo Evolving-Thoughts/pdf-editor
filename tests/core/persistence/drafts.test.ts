@@ -292,3 +292,17 @@ test('shape drafts retain styles, rotation and independent normalized marker sam
   marker.markerPoints![0].x=.9
   const loaded=await loadDraft(db,'shapes'); expect(loaded!.overlays).toEqual(expected)
 })
+
+test('page order, crop, rotation and inserted PDF sources survive saving and reopening',async()=>{
+ const db=await openDb()
+ const original=sampleDraft('pages')
+ const page={id:'page',name:'Anlage',sourceId:'extra',sourceIndex:0,box:{x:10,y:20,width:100,height:150},unit:2,rotation:90}
+ await saveDraft(db,{...original,pages:[page],pageSources:[{id:'extra',bytes:new Uint8Array([1,2,3]).buffer}]})
+ const loaded=await loadDraft(db,'pages')
+ expect(loaded!.pages).toEqual([page])
+ expect(loaded!.pageSources).toEqual([{id:'extra',bytes:new Uint8Array([1,2,3]).buffer}])
+ // Metadata updates cannot replace immutable source bytes.
+ await saveDraft(db,{...original,pages:[{...page,rotation:180}],pageSources:[{id:'extra',bytes:new Uint8Array([9]).buffer}]})
+ expect((await loadDraft(db,'pages'))!.pageSources![0].bytes).toEqual(new Uint8Array([1,2,3]).buffer)
+ await deleteDraft(db,'pages');expect(await loadDraft(db,'pages')).toBeNull()
+})

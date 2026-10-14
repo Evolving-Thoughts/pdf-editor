@@ -1,3 +1,4 @@
+import { localizeOverlayClip, resolvedOverlayClips } from './overlayClipping'
 // Geometry for freehand strokes. Pure and framework-free (ADR-004).
 import { createId, isMarker, isStroke, type Overlay, type Stroke, type StrokePoint } from './model'
 
@@ -154,6 +155,7 @@ export function eraseStrokes(overlays: Overlay[], pageIndex: number, eraserPoint
       changed = true
       result.push(...(isMarker(overlay) ? remaining.flatMap(part => {
         const shape = createShape('marker', part.points, pageIndex, { fill: null, strokeColor: part.color, strokeWidth: part.width }, part.id)
+        if (shape && overlay.clips) shape.clips = resolvedOverlayClips(overlay).map(polygon => localizeOverlayClip(shape, polygon))
         return shape ? [shape] : []
       }) : remaining))
     }

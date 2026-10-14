@@ -1,9 +1,14 @@
+import type { DocumentPage, PageSource } from './pages'
 // Domain model for overlay elements. Pure data, no framework, no PDF libraries.
 
 /** 'zapfdingbats' = symbol font; the text then holds Unicode symbols (✓, ■, …). */
 export type OverlayFont = 'helvetica' | 'times' | 'courier' | 'zapfdingbats'
 
-export interface Textbox {
+/** Clipping polygons in element-local coordinates; strokes use page coordinates. */
+export interface OverlayClipping { clips?: StrokePoint[][] }
+export interface Textbox extends OverlayClipping {
+  /** Clockwise rotation of the text baseline; absent in older drafts means zero. */
+  rotation?: number
   id: string
   /** 0-based page index. */
   pageIndex: number
@@ -25,7 +30,7 @@ export interface StrokePoint {
   y: number
 }
 
-export interface Stroke {
+export interface Stroke extends OverlayClipping {
   id: string
   /** 0-based page index. */
   pageIndex: number
@@ -38,7 +43,7 @@ export interface Stroke {
 }
 
 /** Immutable, locally decoded image source; no expiring blob URL in drafts. */
-export interface ImageOverlay {
+export interface ImageOverlay extends OverlayClipping {
   kind: 'image'
   id: string
   pageIndex: number
@@ -60,7 +65,7 @@ export interface ImageOverlay {
 export type ShapeKind = 'rect' | 'ellipse' | 'line' | 'arrow' | 'marker'
 
 /** Editable vector shape in displayed page points, with a clockwise center rotation. */
-export interface ShapeOverlay {
+export interface ShapeOverlay extends OverlayClipping {
   kind: 'shape'
   shape: ShapeKind
   id: string
@@ -105,12 +110,15 @@ export function isTextbox(overlay: Overlay): overlay is Textbox {
 }
 
 export function cloneOverlay(overlay: Overlay): Overlay {
+  if (overlay.clips) overlay = { ...overlay, clips: overlay.clips.map(polygon => polygon.map(point => ({ ...point }))) }
   if (isShape(overlay) && overlay.markerPoints) return { ...overlay, markerPoints: overlay.markerPoints.map(point => ({ ...point })) }
   if (isStroke(overlay)) return { ...overlay, points: overlay.points.map((point) => ({ ...point })) }
   return { ...overlay }
 }
 
 export interface EditorState {
+  pages?: DocumentPage[]
+  pageSources?: PageSource[]
   overlays: Overlay[]
 }
 

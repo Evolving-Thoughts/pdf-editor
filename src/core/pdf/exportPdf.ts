@@ -2,8 +2,9 @@
 // selectable PDF text objects (see ADR-001 and the spec).
 import {
   BlendMode, LineCapStyle, LineJoinStyle, PDFDocument, PDFName, PDFNumber, popGraphicsState, pushGraphicsState,
-  degrees, rgb, setLineJoin, StandardFonts, type Color, type PDFFont, type PDFImage, type PDFPage,
+  clip, endPath, moveTo, lineTo, closePath, degrees, rgb, setLineJoin, StandardFonts, type Color, type PDFFont, type PDFImage, type PDFPage,
 } from 'pdf-lib'
+import { resolvedOverlayClips } from '../overlayClipping'
 import { TEXT_LINE_HEIGHT } from '../textLayout'
 import { strokeToSvgPath } from '../drawing'
 import { MARKER_OPACITY, shapeToSvgPath } from '../shapes'
@@ -75,65 +76,79 @@ export async function exportPdf(bytes: Uint8Array, overlays: Overlay[] = []): Pr
   const images = new Map<string, PDFImage>()
   for (const overlay of overlays) {
     const page = doc.getPage(overlay.pageIndex)
-    if (isStroke(overlay)) {
-      drawStroke(page, overlay)
-      continue
-    }
-    if (isImage(overlay)) {
-      let embedded = images.get(overlay.dataUrl)
-      if (!embedded) {
-        embedded = overlay.dataUrl.startsWith('data:image/jpeg')
-          ? await doc.embedJpg(overlay.dataUrl) : await doc.embedPng(overlay.dataUrl)
-        images.set(overlay.dataUrl, embedded)
-      }
+    const polygons = resolvedOverlayClips(overlay)
+    if (polygons.length) {
+      page.pushOperators(pushGraphicsState())
       const space = displayedPageSpace(page)
-      // Browser clockwise rotation is negative in the PDF's y-up coordinates.
-      const rotation = overlay.rotation ?? 0
-      const angle = -rotation * Math.PI / 180
-      const centerX = overlay.x + overlay.width / 2
-      const centerY = overlay.y + overlay.height / 2
-      const origin = rotation === 0 ? space.toPdf(overlay.x, overlay.y) : space.toPdf(
-        centerX - Math.cos(angle) * overlay.width / 2 + Math.sin(angle) * overlay.height / 2,
-        centerY - Math.sin(angle) * overlay.width / 2 - Math.cos(angle) * overlay.height / 2,
-      )
-      page.drawImage(embedded, { ...origin, width: overlay.width / space.unit,
-        height: overlay.height / space.unit, rotate: degrees(space.rotation - rotation) })
-      continue
+      for (const polygon of polygons) {
+        const points = polygon.map(p => space.toPdf(p.x, p.y))
+        page.pushOperators(moveTo(points[0].x, points[0].y), ...points.slice(1).map(p => lineTo(p.x, p.y)), closePath(), clip(), endPath())
+      }
     }
-    if (isShape(overlay)) {
-      drawShape(page, overlay)
-      continue
-    }
-    if (overlay.text.trim().length === 0) continue
-    const variant = variantFor(overlay)
-    let font = fonts.get(variant)
-    if (!font) {
-      font = await doc.embedFont(variant)
-      fonts.set(variant, font)
-    }
-    const text = sanitizeFor(font, overlay.text, overlay.font)
-    if (text.length === 0) continue
-    const space = displayedPageSpace(page)
-    page.drawText(text, {
-      ...space.toPdf(overlay.x, overlay.y),
-      size: overlay.fontSize / space.unit,
-      lineHeight: overlay.fontSize * TEXT_LINE_HEIGHT / space.unit,
-      rotate: degrees(space.rotation),
-      font,
-    })
-    if (overlay.underline && overlay.font !== 'zapfdingbats') {
-      const underlineFont = font
-      text.split('\n').forEach((line, index) => {
-        if (!line) return
-        const width = underlineFont.widthOfTextAtSize(line, overlay.fontSize)
-        const lineY = overlay.y - index * overlay.fontSize * TEXT_LINE_HEIGHT - overlay.fontSize * 0.12
-        page.drawLine({
-          start: space.toPdf(overlay.x, lineY),
-          end: space.toPdf(overlay.x + width, lineY),
-          thickness: Math.max(0.5, overlay.fontSize * 0.05) / space.unit,
-        })
+    try {
+      if (isStroke(overlay)) {
+        drawStroke(page, overlay)
+        continue
+      }
+      if (isImage(overlay)) {
+        let embedded = images.get(overlay.dataUrl)
+        if (!embedded) {
+          embedded = overlay.dataUrl.startsWith('data:image/jpeg')
+            ? await doc.embedJpg(overlay.dataUrl) : await doc.embedPng(overlay.dataUrl)
+          images.set(overlay.dataUrl, embedded)
+        }
+        const space = displayedPageSpace(page)
+        // Browser clockwise rotation is negative in the PDF's y-up coordinates.
+        const rotation = overlay.rotation ?? 0
+        const angle = -rotation * Math.PI / 180
+        const centerX = overlay.x + overlay.width / 2
+        const centerY = overlay.y + overlay.height / 2
+        const origin = rotation === 0 ? space.toPdf(overlay.x, overlay.y) : space.toPdf(
+          centerX - Math.cos(angle) * overlay.width / 2 + Math.sin(angle) * overlay.height / 2,
+          centerY - Math.sin(angle) * overlay.width / 2 - Math.cos(angle) * overlay.height / 2,
+        )
+        page.drawImage(embedded, { ...origin, width: overlay.width / space.unit,
+          height: overlay.height / space.unit, rotate: degrees(space.rotation - rotation) })
+        continue
+      }
+      if (isShape(overlay)) {
+        drawShape(page, overlay)
+        continue
+      }
+      if (overlay.text.trim().length === 0) continue
+      const variant = variantFor(overlay)
+      let font = fonts.get(variant)
+      if (!font) {
+        font = await doc.embedFont(variant)
+        fonts.set(variant, font)
+      }
+      const text = sanitizeFor(font, overlay.text, overlay.font)
+      if (text.length === 0) continue
+      const space = displayedPageSpace(page)
+      page.drawText(text, {
+        ...space.toPdf(overlay.x, overlay.y),
+        size: overlay.fontSize / space.unit,
+        lineHeight: overlay.fontSize * TEXT_LINE_HEIGHT / space.unit,
+        rotate: degrees(space.rotation - (overlay.rotation ?? 0)),
+        font,
       })
-    }
+      if (overlay.underline && overlay.font !== 'zapfdingbats') {
+        const underlineFont = font
+        text.split('\n').forEach((line, index) => {
+          if (!line) return
+          const width = underlineFont.widthOfTextAtSize(line, overlay.fontSize)
+          const localY = -index * overlay.fontSize * TEXT_LINE_HEIGHT - overlay.fontSize * 0.12
+          const angle = -(overlay.rotation ?? 0) * Math.PI / 180
+          const point = (x: number) => space.toPdf(overlay.x + Math.cos(angle) * x - Math.sin(angle) * localY,
+            overlay.y + Math.sin(angle) * x + Math.cos(angle) * localY)
+          page.drawLine({
+            start: point(0),
+            end: point(width),
+            thickness: Math.max(0.5, overlay.fontSize * 0.05) / space.unit,
+          })
+        })
+      }
+    } finally { if (polygons.length) page.pushOperators(popGraphicsState()) }
   }
   return doc.save()
 }

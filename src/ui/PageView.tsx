@@ -1,4 +1,5 @@
-import { useEffect, useRef, useState } from 'react'
+import { useEffect, useRef, useState, type ReactNode } from 'react'
+import { resolvedOverlayClips } from '../core/overlayClipping'
 import { addShape, addStroke, addTextbox, replaceOverlays } from '../core/commands'
 import { eraseStrokes, strokeToSvgPath } from '../core/drawing'
 import type { EditorStore } from '../core/editorStore'
@@ -13,6 +14,7 @@ import type { Tool } from './tools'
 
 interface PageViewProps {
   pdf: PdfHandle
+  readOnly?: boolean
   pageIndex: number
   zoom: number
   tool: Tool
@@ -43,7 +45,7 @@ interface DrawingGesture {
 }
 
 export function PageView({
-  pdf, pageIndex, zoom, tool, symbol, overlays, store, selectedId, onSelect,
+  pdf, readOnly = false, pageIndex, zoom, tool, symbol, overlays, store, selectedId, onSelect,
   shapeStyle, markerStyle, onImageDrop, strokeColor = '#111111', strokeWidth = 3, eraserRadius = 8,
 }: PageViewProps) {
   const canvasRef = useRef<HTMLCanvasElement>(null)
@@ -59,6 +61,9 @@ export function PageView({
     let cancelled = false
     void pdf.getPageSize(pageIndex + 1).then((size) => {
       if (!cancelled) setPageSize(size)
+    }).catch(error => {
+      // A superseded preview may be destroyed while its page size is loading.
+      if (!cancelled) console.warn(error)
     })
     return () => {
       cancelled = true
@@ -66,10 +71,11 @@ export function PageView({
   }, [pdf, pageIndex])
 
   useEffect(() => {
-    if (canvasRef.current) void pdf.renderPage(pageIndex + 1, canvasRef.current, zoom)
+    if (canvasRef.current) void pdf.renderPage(pageIndex + 1, canvasRef.current, zoom).catch(console.warn)
   }, [pdf, pageIndex, zoom])
 
   const onPagePointerDown = (event: React.PointerEvent<HTMLDivElement>) => {
+    if (readOnly) return
     if (!event.isPrimary || event.button !== 0 || gestureRef.current) return
     if ((event.target as HTMLElement).closest('.textbox, .image-overlay, .shape-overlay')) return
     if (tool === 'select') {
@@ -172,11 +178,13 @@ export function PageView({
       className={`page${tool === 'text' ? ' text-tool' : ''}${tool === 'symbol' ? ' symbol-tool' : ''}${drawing ? ' drawing-tool' : ''}`}
       ref={wrapperRef}
       data-page-index={pageIndex}
+      inert={readOnly}
+      style={{pointerEvents: readOnly ? 'none' : undefined, overflow: store.state.pages?.[pageIndex]?.cropped ? 'hidden' : undefined}}
       onDragOver={event => { if (event.dataTransfer.types.includes('Files')) event.preventDefault() }}
       onDrop={event => {
         event.preventDefault()
         const file = event.dataTransfer.files[0]
-        if (file && pageSize) onImageDrop(file, pageIndex, pointFrom(event.clientX, event.clientY))
+        if (!readOnly && file && pageSize) onImageDrop(file, pageIndex, pointFrom(event.clientX, event.clientY))
       }}
       onPointerDown={onPagePointerDown}
       onPointerMove={appendPoints}
@@ -188,7 +196,8 @@ export function PageView({
       {pageSize &&
         overlays
           .filter((overlay) => overlay.pageIndex === pageIndex)
-          .map((overlay) => isStroke(overlay) ? (
+          .map((overlay) => {
+            const element: ReactNode = isStroke(overlay) ? (
             <svg key={overlay.id} className="stroke-layer" viewBox={`0 0 ${pageSize.width} ${pageSize.height}`} aria-hidden="true">
               <path className="stroke" d={strokeToSvgPath(overlay.points, pageSize.height)} fill="none"
                 stroke={overlay.color} strokeWidth={overlay.width} strokeLinecap="round" strokeLinejoin="round" />
@@ -202,7 +211,11 @@ export function PageView({
           ) : (
             <TextboxView key={overlay.id} box={overlay} zoom={zoom} pageHeightPts={pageSize.height}
               selected={overlay.id === selectedId} tool={tool} store={store} onSelect={onSelect} />
-          ))}
+          )
+            return resolvedOverlayClips(overlay).reduceRight<ReactNode>((child, polygon, clipIndex) => (
+              <div key={`${overlay.id}-clip-${clipIndex}`} className="overlay-clip" style={{ clipPath: `polygon(${polygon.map(p => `${p.x * zoom}px ${(pageSize.height - p.y) * zoom}px`).join(',')})` }}>{child}</div>
+            ), element)
+          })}
       {pageSize && previewPoints.length > 0 && !isShapeTool(tool) && (
         <svg className="stroke-layer" viewBox={`0 0 ${pageSize.width} ${pageSize.height}`} aria-hidden="true">
           <path className="stroke-preview" d={strokeToSvgPath(previewPoints, pageSize.height)} fill="none"
