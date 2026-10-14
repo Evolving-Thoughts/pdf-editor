@@ -72,7 +72,6 @@ test('white correction is painted before later text, while an invisible shape em
 test('marker export has transparency and Multiply blending, and cubic ellipse/arrow are vector paths', async () => {
   const doc = await PDFDocument.create()
   doc.addPage([600, 800])
-  const { createShape } = await import('../../src/core/shapes')
   const marker = createShape(
     'marker',
     [
