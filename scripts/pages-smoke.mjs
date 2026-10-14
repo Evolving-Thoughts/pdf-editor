@@ -175,7 +175,7 @@ try {
   await button('Seiten verwalten').click()
   await settled()
   assert.equal(await p.locator('.page-manager-row').count(), 6)
-  await button('Seite löschen').click()
+  await button('Seite löschen').click(); await button('1 Seite löschen').click()
   await settled()
   assert.equal(await p.locator('.page-manager-row').count(), 5)
   await button('Rückgängig').click()

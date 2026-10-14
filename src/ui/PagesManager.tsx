@@ -1,3 +1,4 @@
+import { selectPages, type PageSelectionGesture } from '../core/pageSelection'
 import { downloadPdf } from '../core/pdf/downloadPdf'
 import { useEffect, useRef, useState } from 'react'
 import { EditorStore } from '../core/editorStore'
@@ -6,12 +7,12 @@ import {
   commonPreviewScale,
   replacePageDocument,
   cropPage,
-  deletePage,
+  deletePages,
   insertPages,
   insertionPageSize,
   movePage,
   pageSize,
-  rotatePage,
+  rotatePages,
   type CropMargins,
 } from '../core/pages'
 import { exportPageDocument, importPageFile, preparePages, textPageBytes } from '../core/pdf/pageOperations'
@@ -23,6 +24,7 @@ const MM = 72 / 25.4
 const zero = (): CropMargins => ({ left: 0, top: 0, right: 0, bottom: 0 })
 const labels = { left: 'Links', top: 'Oben', right: 'Rechts', bottom: 'Unten' }
 const noSelect = () => {}
+const pageCount = (count: number) => `${count} ${count === 1 ? 'Seite' : 'Seiten'}`
 function RotateIcon({ clockwise }: { clockwise: boolean }) {
   return (
     <svg
@@ -50,6 +52,11 @@ interface Props {
 export function PagesManager({ pdf, store, original, busy, onCropActive }: Props) {
   const pages = store.state.pages ?? []
   const [selected, setSelected] = useState(pages[0]?.id ?? '')
+  const [checkedIds, setCheckedIds] = useState<string[]>(pages[0] ? [pages[0].id] : [])
+  const anchor = useRef<string | null>(pages[0]?.id ?? null)
+  const checked = new Set(checkedIds)
+  const selection = pages.filter(page => checked.has(page.id)).map(page => page.id)
+  const [deletePending, setDeletePending] = useState<{ ids: string[]; version: number } | null>(null)
   const page = pages.find((p) => p.id === selected) ?? pages[0]
   const index = page ? pages.indexOf(page) : -1
   const [crop, setCrop] = useState<{ id: string; margins: CropMargins } | null>(null)
@@ -78,11 +85,11 @@ export function PagesManager({ pdf, store, original, busy, onCropActive }: Props
     size.width - m.left - m.right >= 20 * MM - 1e-6 &&
     size.height - m.top - m.bottom >= 20 * MM - 1e-6
   const frameMargins = activeCrop && marginsFit(activeCrop.margins) ? activeCrop.margins : zero()
-  const locked = busy || working || !!activeCrop || a4Open
+  const locked = busy || working || !!activeCrop || a4Open || !!deletePending
   useEffect(() => {
-    onCropActive(!!activeCrop || a4Open)
+    onCropActive(!!activeCrop || a4Open || !!deletePending)
     return () => onCropActive(false)
-  }, [activeCrop, a4Open, onCropActive])
+  }, [activeCrop, a4Open, deletePending, onCropActive])
   useEffect(() => () => { void a4Preview?.pdf.destroy().catch(() => {}) }, [a4Preview])
   useEffect(
     () => () => {
@@ -104,18 +111,19 @@ export function PagesManager({ pdf, store, original, busy, onCropActive }: Props
     return () => observer.disconnect()
   }, [])
   useEffect(() => {
-    if (!activeCrop && !a4Open) return
+    if (!activeCrop && !a4Open && !deletePending) return
     const escape = (e: KeyboardEvent) => {
       if (e.key === 'Escape') {
         setCrop(null)
+        setDeletePending(null)
         request.current++
         setA4Open(false); setA4Preview(null); setWorking(false)
-        setMessage(a4Open ? 'A4-Umstellung abgebrochen. Seiten unverändert.' : 'Zuschnitt abgebrochen. Seite unverändert.')
+        setMessage(deletePending ? 'Löschen abgebrochen. Seiten unverändert.' : a4Open ? 'A4-Umstellung abgebrochen. Seiten unverändert.' : 'Zuschnitt abgebrochen. Seite unverändert.')
       }
     }
     window.addEventListener('keydown', escape)
     return () => window.removeEventListener('keydown', escape)
-  }, [activeCrop, a4Open])
+  }, [activeCrop, a4Open, deletePending])
   function run(work: () => void, message: string) {
     try {
       work()
@@ -124,6 +132,18 @@ export function PagesManager({ pdf, store, original, busy, onCropActive }: Props
     } catch (e) {
       setProblem(e instanceof Error ? e.message : 'Die Seitenoperation ist fehlgeschlagen.')
     }
+  }
+  function choosePage(id: string, gesture: PageSelectionGesture = {}) {
+    if (busy || working || deletePending) return
+    setSelected(id)
+    setCrop(null)
+    setProblem(null)
+    if (!locked) {
+      const next = selectPages(pages.map(p => p.id), selection, anchor.current, id, gesture)
+      setCheckedIds(next.ids)
+      anchor.current = next.anchor
+    }
+    setMessage(activeCrop ? 'Offenen Zuschnitt verworfen.' : a4Open ? 'A4-Vorschau: Erst Anwenden verändert die Seiten.' : gesture.range || gesture.toggle || gesture.checked !== undefined ? 'Gemeinsame Seitenauswahl aktualisiert.' : 'Vorschau und Bereichsanker gewechselt; Auswahl unverändert.')
   }
   const pageProps = {
     pdf,
@@ -184,6 +204,7 @@ export function PagesManager({ pdf, store, original, busy, onCropActive }: Props
         throw new Error('Die Seiten haben sich inzwischen geändert. Bitte erneut einfügen.')
       store.dispatch(insertPages(store.state, gap, imported.pages, imported.source, imported.overlays))
       setSelected(imported.pages[0].id)
+      setCheckedIds([imported.pages[0].id]); anchor.current = imported.pages[0].id
       setInserting(false)
       setFile(null)
       setText('')
@@ -196,7 +217,8 @@ export function PagesManager({ pdf, store, original, busy, onCropActive }: Props
     }
   }
   async function extract() {
-    if (!page || locked) return
+    if (!selection.length || locked) return
+    const ids = [...selection]
     const token = ++request.current
     setWorking(true)
     setProblem(null)
@@ -206,11 +228,11 @@ export function PagesManager({ pdf, store, original, busy, onCropActive }: Props
         store.state.pageSources ?? [],
         pages,
         store.state.overlays,
-        page.id,
+        ids,
       )
       if (token !== request.current) return
-      downloadPdf(bytes, `Seite-${index + 1}.pdf`)
-      setMessage('Die ausgewählte Seite wurde als eigenes PDF gespeichert.')
+      downloadPdf(bytes, ids.length === 1 ? `Seite-${pages.findIndex(p => p.id === ids[0]) + 1}.pdf` : `Auswahl-${ids.length}-Seiten.pdf`)
+      setMessage(ids.length === 1 ? 'Die ausgewählte Seite wurde als eigenes PDF gespeichert.' : `${ids.length} ausgewählte Seiten wurden als eigenes PDF gespeichert.`)
     } catch (e) {
       if (token === request.current)
         setProblem(e instanceof Error ? e.message : 'Die Seite konnte nicht extrahiert werden.')
@@ -249,14 +271,32 @@ export function PagesManager({ pdf, store, original, busy, onCropActive }: Props
   return (
     <section className="page-manager" aria-label="Seiten verwalten">
       <aside className="page-manager-panel">
+        <div className="page-manager-controls">
         <h2>Seiten verwalten</h2>
+        {!activeCrop && !a4Open && <div className="page-selection-tools">
+          <p className="page-selection-count" role="status">{selection.length} von {pages.length} Seiten ausgewählt · Aktionen gelten für die Auswahl</p>
+          <button disabled={locked || !pages.length} onClick={() => setCheckedIds(pages.map(page => page.id))}>Alle auswählen</button>
+          <button disabled={locked || !selection.length} onClick={() => setCheckedIds([])}>Auswahl aufheben</button>
+        </div>}
         {pages.some((p) => p.hasForms) && (
-          <p className="page-manager-message">
-            Vorhandene PDF-Formularfelder bleiben im Export bearbeitbar. Das direkte Ausfüllen im Editor folgt
-            mit dem AcroForm-Modus. Die Originaldatei bleibt unverändert.
-          </p>
+          <details className="page-form-info">
+            <summary>PDF-Formularfelder bleiben im Export bearbeitbar</summary>
+            <p>Das direkte Ausfüllen im Editor folgt mit dem AcroForm-Modus. Die Originaldatei bleibt unverändert.</p>
+          </details>
         )}
-        {a4Open ? (
+        {deletePending ? (
+          <div className="page-delete-confirm">
+            <p>{deletePending.ids.length} ausgewählte {deletePending.ids.length === 1 ? 'Seite' : 'Seiten'} mit allen Inhalten löschen?</p>
+            <div className="page-manager-actions">
+              <button onClick={() => { setDeletePending(null); setMessage('Löschen abgebrochen. Seiten unverändert.') }}>Abbrechen</button>
+              <button onClick={() => run(() => {
+                if (store.getVersion() !== deletePending.version) throw new Error('Der Arbeitsstand hat sich geändert. Bitte erneut auswählen.')
+                store.dispatch(deletePages(store.state, deletePending.ids))
+                setDeletePending(null)
+              }, `${pageCount(deletePending.ids.length)} gelöscht. Rückgängig ist möglich.`)}>{pageCount(deletePending.ids.length)} löschen</button>
+            </div>
+          </div>
+        ) : a4Open ? (
           <div className="page-crop-controls">
             <h3>Alle Seiten auf A4</h3>
             <p>Hoch-/Querformat wird beibehalten.</p>
@@ -344,58 +384,52 @@ export function PagesManager({ pdf, store, original, busy, onCropActive }: Props
               ＋ Seiten einfügen
             </button>
             <button
-              disabled={!page || locked}
+              disabled={!selection.length || locked}
               aria-label="Seite gegen den Uhrzeigersinn drehen"
               onClick={() =>
-                run(() => store.dispatch(rotatePage(store.state, page!.id, false)), 'Seite um 90° gedreht.')
+                run(() => store.dispatch(rotatePages(store.state, selection, false)), `${pageCount(selection.length)} um 90° gedreht.`)
               }
             >
               <RotateIcon clockwise={false} /> 90°
             </button>
             <button
-              disabled={!page || locked}
+              disabled={!selection.length || locked}
               aria-label="Seite im Uhrzeigersinn drehen"
               onClick={() =>
-                run(() => store.dispatch(rotatePage(store.state, page!.id, true)), 'Seite um 90° gedreht.')
+                run(() => store.dispatch(rotatePages(store.state, selection, true)), `${pageCount(selection.length)} um 90° gedreht.`)
               }
             >
               <RotateIcon clockwise /> 90°
             </button>
             <button
-              disabled={!page || locked}
+              disabled={selection.length !== 1 || locked}
               onClick={() => {
+                setSelected(selection[0])
                 setProblem(null)
                 setMessage('Zuschnitt bearbeiten. Erst Anwenden verändert die Seite.')
-                setCrop({ id: page!.id, margins: zero() })
+                setCrop({ id: selection[0], margins: zero() })
               }}
             >
               Zuschneiden
             </button>
-            <button disabled={!page || locked} onClick={() => void extract()}>
+            <button disabled={!selection.length || locked} onClick={() => void extract()}>
               Extrahieren
             </button>
             <button
-              disabled={!page || locked}
+              disabled={!selection.length || locked}
               onClick={() => {
-                if (
-                  window.confirm(
-                    `Seite ${index + 1} mit ihren Elementen löschen? Rückgängig stellt sie wieder her.`,
-                  )
-                )
-                  run(
-                    () => store.dispatch(deletePage(store.state, page!.id)),
-                    'Seite gelöscht. Rückgängig ist möglich.',
-                  )
+                setProblem(null)
+                setDeletePending({ ids: [...selection], version: store.getVersion() })
               }}
             >
-              Seite löschen
+              {selection.length === 1 ? 'Seite löschen' : selection.length ? `${pageCount(selection.length)} löschen` : 'Seiten löschen'}
             </button>
           </div>
         )}
-        {!a4Open && !activeCrop && <div className="page-a4-global">
+        {!a4Open && !activeCrop && !deletePending && <div className="page-a4-global">
           <h3>Für alle Seiten</h3>
           <button disabled={locked || !pages.length} onClick={() => void openA4()}>Alle Seiten auf A4 …</button>
-          <small>Optional — das Format wird nicht automatisch geändert.</small>
+          <small>Optional · gilt für alle Seiten, nicht nur die Auswahl.</small>
         </div>}
         {problem && (
           <p className="page-manager-error" role="alert">
@@ -405,11 +439,13 @@ export function PagesManager({ pdf, store, original, busy, onCropActive }: Props
         <p className="page-manager-message" role="status">
           {busy ? 'Seitenansicht wird aktualisiert …' : working ? 'Datei wird verarbeitet …' : message}
         </p>
-        <div className="page-manager-list" aria-label="Seitenliste">
+        <small className="page-selection-help">Checkbox: auswählen · Klick: Vorschau/Anker.<br />Shift+Klick: Bereich · Strg/⌘+Klick: einzeln dazu/weg.</small>
+        </div>
+        <div className="page-manager-list" aria-label="Seitenliste" role="region" tabIndex={0}>
           {pages.map((p, i) => (
             <div
               key={p.id}
-              className={`page-manager-row${page?.id === p.id ? ' selected' : ''}`}
+              className={`page-manager-row${checked.has(p.id) ? ' selected' : ''}${page?.id === p.id ? ' previewed' : ''}`}
               draggable={!locked}
               onDragStart={(e) => {
                 dragId.current = p.id
@@ -429,16 +465,18 @@ export function PagesManager({ pdf, store, original, busy, onCropActive }: Props
                   run(() => store.dispatch(movePage(store.state, id, i)), 'Seite verschoben.')
               }}
             >
+              <label className="page-manager-check">
+                <input type="checkbox" aria-label={`Seite ${i + 1} auswählen`} checked={checked.has(p.id)} disabled={locked}
+                  onChange={event => {
+                    const native = event.nativeEvent as MouseEvent
+                    choosePage(p.id, { checked: event.target.checked, range: native.shiftKey, toggle: native.ctrlKey || native.metaKey })
+                  }} />
+              </label>
               <button
                 className="page-manager-select"
-                disabled={busy || working}
+                disabled={busy || working || !!deletePending}
                 aria-pressed={page?.id === p.id}
-                onClick={() => {
-                  setSelected(p.id)
-                  setCrop(null)
-                  setProblem(null)
-                  setMessage(activeCrop ? 'Offenen Zuschnitt verworfen.' : a4Open ? 'A4-Vorschau: Erst Anwenden verändert die Seiten.' : 'Seite ausgewählt.')
-                }}
+                onClick={event => choosePage(p.id, { range: event.shiftKey, toggle: event.ctrlKey || event.metaKey })}
               >
                 <span className="page-miniature" aria-hidden="true">
                   {!busy && (
@@ -457,6 +495,7 @@ export function PagesManager({ pdf, store, original, busy, onCropActive }: Props
                   </small>
                 </span>
               </button>
+              <span className="page-manager-moves">
               <button
                 disabled={locked || i === 0}
                 aria-label={`Seite ${i + 1} nach oben`}
@@ -475,6 +514,7 @@ export function PagesManager({ pdf, store, original, busy, onCropActive }: Props
               >
                 ↓
               </button>
+              </span>
             </div>
           ))}
         </div>
@@ -520,6 +560,7 @@ export function PagesManager({ pdf, store, original, busy, onCropActive }: Props
             </div>
             <p>
               {a4Open ? `A4-Vorschau · ${(shownSize.width / MM).toFixed(0)} × ${(shownSize.height / MM).toFixed(0)} mm · noch nicht angewendet · ` : ''}Seite {index + 1} · {page.name}
+              {!a4Open && <><br />{checked.has(page.id) ? 'Diese Seite ist Teil der Auswahl.' : 'Nur Vorschau; Aktionen betreffen die markierten Seiten.'}</>}
             </p>
           </>
         )}

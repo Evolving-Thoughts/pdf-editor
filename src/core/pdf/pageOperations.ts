@@ -159,15 +159,17 @@ export async function exportPageDocument(
   sources: PageSource[],
   pages: DocumentPage[],
   overlays: Overlay[],
-  pageId?: string,
+  pageId?: string | readonly string[],
 ) {
-  if (pageId) {
-    const index = pages.findIndex((p) => p.id === pageId)
-    if (index < 0) throw new Error('Seite nicht gefunden.')
-    return exportPdf(
-      await composePages(original, sources, [pages[index]]),
-      overlays.filter((o) => o.pageIndex === index).map((o) => ({ ...cloneOverlay(o), pageIndex: 0 })),
-    )
+  if (pageId !== undefined) {
+    const ids = new Set(typeof pageId === 'string' ? [pageId] : pageId), available = new Set(pages.map(page => page.id))
+    if (!ids.size || [...ids].some(id => !available.has(id)))
+      throw new Error('Bitte gültige Seiten zum Extrahieren auswählen.')
+    const chosen = pages.filter(page => ids.has(page.id))
+    const indices = new Map(chosen.map((page, index) => [page.id, index]))
+    const mapped = overlays.filter(overlay => indices.has(pages[overlay.pageIndex]?.id))
+      .map(overlay => ({ ...cloneOverlay(overlay), pageIndex: indices.get(pages[overlay.pageIndex].id)! }))
+    return exportPdf(await composePages(original, sources, chosen), mapped)
   }
   return exportPdf(await composePages(original, sources, pages), overlays)
 }

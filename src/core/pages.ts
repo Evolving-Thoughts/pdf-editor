@@ -70,16 +70,24 @@ export function movePage(state: EditorState, id: string, index: number): Command
       overlay.pageIndex = next.pages.findIndex((p) => p.id === old[overlay.pageIndex]?.id)
   })
 }
-export function deletePage(state: EditorState, id: string): Command {
-  const index = state.pages?.findIndex((p) => p.id === id) ?? -1
-  if (index < 0) throw new Error('Seite nicht gefunden.')
-  return pageCommand(state, 'Delete page', (next) => {
-    next.pages.splice(index, 1)
-    next.overlays = next.overlays.filter((o) => o.pageIndex !== index)
-    next.overlays.forEach((o) => {
-      if (o.pageIndex > index) o.pageIndex--
-    })
+function selectedPageIds(state: EditorState, ids: readonly string[]) {
+  const selected = new Set(ids), available = new Set(state.pages?.map(page => page.id))
+  if (!selected.size || [...selected].some(id => !available.has(id)))
+    throw new Error('Bitte gültige Seiten auswählen.')
+  return selected
+}
+export function deletePages(state: EditorState, ids: readonly string[]): Command {
+  const selected = selectedPageIds(state, ids)
+  return pageCommand(state, 'Delete pages', next => {
+    const old = [...next.pages]
+    next.pages = next.pages.filter(page => !selected.has(page.id))
+    const indices = new Map(next.pages.map((page, index) => [page.id, index]))
+    next.overlays = next.overlays.filter(overlay => indices.has(old[overlay.pageIndex]?.id))
+    next.overlays.forEach(overlay => { overlay.pageIndex = indices.get(old[overlay.pageIndex].id)! })
   })
+}
+export function deletePage(state: EditorState, id: string): Command {
+  return deletePages(state, [id])
 }
 export function insertPages(
   state: EditorState,
@@ -127,24 +135,25 @@ function transformOverlay(
   overlay.y = center.y - overlay.height / 2
   if (rotation) overlay.rotation = ((overlay.rotation ?? 0) + rotation + 360) % 360
 }
-export function rotatePage(state: EditorState, id: string, clockwise: boolean): Command {
-  const index = state.pages?.findIndex((p) => p.id === id) ?? -1
-  if (index < 0) throw new Error('Seite nicht gefunden.')
-  const size = pageSize(state.pages![index]),
-    delta = clockwise ? 90 : -90
-  return pageCommand(state, 'Rotate page', (next) => {
-    const page = next.pages[index]
-    page.rotation = (page.rotation + delta + 360) % 360
-    next.overlays
-      .filter((o) => o.pageIndex === index)
-      .forEach((o) =>
-        transformOverlay(
-          o,
-          clockwise ? (x, y) => ({ x: y, y: size.width - x }) : (x, y) => ({ x: size.height - y, y: x }),
-          delta,
-        ),
+export function rotatePages(state: EditorState, ids: readonly string[], clockwise: boolean): Command {
+  const selected = selectedPageIds(state, ids), delta = clockwise ? 90 : -90
+  const sizes = new Map(state.pages!.map((page, index) => [index, pageSize(page)]))
+  return pageCommand(state, 'Rotate pages', next => {
+    next.pages.forEach(page => {
+      if (selected.has(page.id)) page.rotation = (page.rotation + delta + 360) % 360
+    })
+    next.overlays.forEach(overlay => {
+      if (!selected.has(next.pages[overlay.pageIndex]?.id)) return
+      const size = sizes.get(overlay.pageIndex)!
+      transformOverlay(overlay,
+        clockwise ? (x, y) => ({ x: y, y: size.width - x }) : (x, y) => ({ x: size.height - y, y: x }),
+        delta,
       )
+    })
   })
+}
+export function rotatePage(state: EditorState, id: string, clockwise: boolean): Command {
+  return rotatePages(state, [id], clockwise)
 }
 export interface CropMargins {
   left: number

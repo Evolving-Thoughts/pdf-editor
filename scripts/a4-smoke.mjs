@@ -125,7 +125,7 @@ try {
   }, Array.from(readFileSync(join(out, 'cropped-a4.pdf'))))
   assert.equal(raster.marginInk, 0); assert.equal(raster.red, 0); assert.ok(raster.blue > 100)
   p.on('dialog', d => void d.accept())
-  await btn('Seite löschen').click()
+  await btn('Seite löschen').click(); await btn('1 Seite löschen').click()
   await p.waitForSelector('.page-manager-empty')
   assert.equal(await btn('Alle Seiten auf A4 …').isDisabled(), true)
   assert.deepEqual(errors, [])
