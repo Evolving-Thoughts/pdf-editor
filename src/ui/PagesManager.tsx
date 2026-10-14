@@ -19,6 +19,7 @@ import { exportPageDocument, importPageFile, preparePages, textPageBytes } from 
 import { loadPdf, type PdfHandle } from '../core/pdf/loadPdf'
 import { normalizeA4 } from '../core/pdf/normalizeA4'
 import { PageView } from './PageView'
+import { PageThumbnail } from './PageThumbnail'
 
 const MM = 72 / 25.4
 const zero = (): CropMargins => ({ left: 0, top: 0, right: 0, bottom: 0 })
@@ -478,7 +479,7 @@ export function PagesManager({ pdf, store, original, busy, onCropActive }: Props
                 aria-pressed={page?.id === p.id}
                 onClick={event => choosePage(p.id, { range: event.shiftKey, toggle: event.ctrlKey || event.metaKey })}
               >
-                <span className="page-miniature" aria-hidden="true">
+                <PageThumbnail>
                   {!busy && (
                     <PageView
                       {...pageProps}
@@ -486,7 +487,7 @@ export function PagesManager({ pdf, store, original, busy, onCropActive }: Props
                       zoom={Math.min(42 / pageSize(p).width, 54 / pageSize(p).height)}
                     />
                   )}
-                </span>
+                </PageThumbnail>
                 <span>
                   {i + 1} · {p.name}
                   <small>

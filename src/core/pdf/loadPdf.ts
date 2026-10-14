@@ -36,7 +36,8 @@ export async function loadPdf(fileName: string, bytes: Uint8Array): Promise<PdfH
   // concurrently, and cancel-then-register leaves a race window across the
   // getPage await (triggered e.g. by StrictMode double effects). Registering
   // the chain synchronously serializes all renders on the same canvas.
-  const renderQueues = new Map<HTMLCanvasElement, Promise<void>>()
+  // Offscreen thumbnails unmount their canvases; do not retain those canvases here.
+  const renderQueues = new WeakMap<HTMLCanvasElement, Promise<void>>()
   const sizeCache = new Map<number, PageSize>()
 
   return {
