@@ -6,6 +6,7 @@ import workerUrl from 'pdfjs-dist/build/pdf.worker.min.mjs?url'
 import type { Overlay, OverlayFont } from '../model'
 import type { Redaction } from '../redactions'
 import { exportPdf } from './exportPdf'
+import type { SearchFragment } from '../search'
 
 GlobalWorkerOptions.workerSrc = workerUrl
 
@@ -22,6 +23,8 @@ export interface PdfHandle {
   renderPage(pageNumber: number, canvas: HTMLCanvasElement, zoom: number): Promise<void>
   /** Page size in PDF points (1-based page number), cached after first call. */
   getPageSize(pageNumber: number): Promise<PageSize>
+  /** Text and geometry from PDF.js; raster/image pages return no text. */
+  getSearchText(pageNumber: number): Promise<SearchFragment[]>
   /** Exports the document with the given overlays baked in as real text. */
   exportBytes(overlays?: Overlay[]): Promise<Uint8Array>
   /** Lossless 300-dpi pixels with outward-rounded opaque masks; never returns source content. */
@@ -72,6 +75,29 @@ export async function loadPdf(fileName: string, bytes: Uint8Array): Promise<PdfH
       const size = { width: viewport.width, height: viewport.height }
       sizeCache.set(pageNumber, size)
       return size
+    },
+
+    async getSearchText(pageNumber) {
+      const page = await pdfDocument.getPage(pageNumber)
+      const viewport = page.getViewport({scale:1})
+      const content = await page.getTextContent()
+      const measure=document.createElement('canvas').getContext('2d')
+      return content.items.filter(item => 'str' in item && item.str.length > 0).map(item => {
+        if (!('str' in item)) throw new Error('Ungültiges Textelement')
+        const [a,b,c,d,x,y] = item.transform
+        const advance = Math.hypot(a,b) || 1
+        const style = content.styles[item.fontName]
+        const ascent = style?.ascent ?? .8, descent = style?.descent ?? -.2
+        let advances:number[]|undefined
+        if(measure && item.str.length){
+          measure.font=`${Math.hypot(c,d)||item.height||12}px ${style?.fontFamily??'sans-serif'}`
+          const width=measure.measureText(item.str).width
+          if(width>0)advances=Array.from({length:item.str.length+1},(_,i)=>measure.measureText(item.str.slice(0,i)).width/width)
+        }
+        const corners = [[x+c*ascent,y+d*ascent],[x+a/advance*item.width+c*ascent,y+b/advance*item.width+d*ascent],
+          [x+a/advance*item.width+c*descent,y+b/advance*item.width+d*descent],[x+c*descent,y+d*descent]]
+        return {text:item.str,breakAfter:item.hasEOL,advances,quad:corners.map(([px,py])=>{const [x,y]=viewport.convertToViewportPoint(px,py);return {x,y}})}
+      })
     },
 
     async rasterizePage(pageNumber, marks) {

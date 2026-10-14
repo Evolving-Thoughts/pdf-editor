@@ -1,3 +1,4 @@
+import type { SearchHit } from '../core/search'
 import { RedactionView } from './RedactionView'
 import { createRedaction,replaceRedactions,type Redaction } from '../core/redactions'
 import type { NativeWidget } from '../core/forms'
@@ -17,6 +18,9 @@ import { TextboxView } from './TextboxView'
 import type { Tool } from './tools'
 
 interface PageViewProps {
+  searchHits?: SearchHit[]
+  activeSearchHit?: SearchHit
+
   redactionFill?: Redaction['fill']
   nativeWidgets?: NativeWidget[]
   highlightFields?: boolean
@@ -53,7 +57,7 @@ interface DrawingGesture {
 }
 
 export function PageView({
-  redactionFill = 'black', nativeWidgets = [], highlightFields = false, onFormError,
+  searchHits = [], activeSearchHit, redactionFill = 'black', nativeWidgets = [], highlightFields = false, onFormError,
   pdf, readOnly = false, pageIndex, zoom, tool, symbol, overlays, store, selectedId, onSelect,
   shapeStyle, markerStyle, onImageDrop, strokeColor = '#111111', strokeWidth = 3, eraserRadius = 8,
 }: PageViewProps) {
@@ -197,6 +201,7 @@ export function PageView({
       onDrop={event => {
         event.preventDefault()
         const file = event.dataTransfer.files[0]
+        if (file && (file.type==='application/pdf' || /\.pdf$/i.test(file.name))) return
         if (!readOnly && file && pageSize) onImageDrop(file, pageIndex, pointFrom(event.clientX, event.clientY))
       }}
       onPointerDown={onPagePointerDown}
@@ -206,6 +211,9 @@ export function PageView({
       onLostPointerCapture={cancelDrawing}
     >
       <canvas ref={canvasRef} />
+      {pageSize && !!searchHits.length && <svg className="search-highlights" viewBox={`0 0 ${pageSize.width} ${pageSize.height}`} aria-hidden="true">
+        {searchHits.flatMap((hit,index)=>hit.polygons.map((polygon,part)=><polygon key={`${index}-${part}`} data-search-active={hit===activeSearchHit?'true':undefined} points={polygon.map(p=>`${p.x},${p.y}`).join(' ')} className={hit===activeSearchHit?'active':''}/>))}
+      </svg>}
       {pageSize && nativeWidgets.some(field => field.pageIndex === pageIndex) && <NativeFormLayer fields={nativeWidgets.filter(field => field.pageIndex === pageIndex)} store={store} interactive={!readOnly && (tool === 'select' || tool === 'text')} highlight={highlightFields} zoom={zoom} onSelect={onSelect} onError={onFormError} />}
       {pageSize &&
         overlays
