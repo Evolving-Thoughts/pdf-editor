@@ -1,3 +1,4 @@
+import type { Redaction } from '../redactions'
 import type { FormValues } from '../forms'
 import type { DocumentPage, PageSource } from '../pages'
 // Draft persistence in IndexedDB (framework-free, ADR-004). A draft holds the
@@ -6,6 +7,8 @@ import type { DocumentPage, PageSource } from '../pages'
 import { isImage, type ImageOverlay, type Overlay } from '../model'
 
 export interface DraftRecord {
+  redactionApplied?: boolean
+  redactions?: Redaction[]
   formValues?: FormValues
   id: string
   /** Display name, usually the original file name. */
@@ -184,6 +187,8 @@ export async function loadDraft(db: IDBDatabase, id: string): Promise<DraftRecor
         updatedAt: stored.updatedAt,
         overlays,
         formValues: stored.formValues,
+        redactionApplied: stored.redactionApplied,
+        redactions: stored.redactions,
         pages: stored.pages,
         pageSources: [...sourceRequests].map(([id,request])=>({id,bytes:request.result!})),
         pdfBytes: (bytesRequest.result as ArrayBuffer | undefined) ?? new ArrayBuffer(0),

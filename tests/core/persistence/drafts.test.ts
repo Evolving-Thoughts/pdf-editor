@@ -315,3 +315,17 @@ test('stores native form values and overlays together and reads older drafts wit
   expect(loaded?.formValues).toEqual(values); expect(loaded?.overlays).toEqual(draft.overlays)
   await saveDraft(db, sampleDraft('old-format')); expect((await loadDraft(db, 'old-format'))?.formValues).toBeUndefined()
 })
+
+test('drafts restore pending redaction geometry without treating it as an exported overlay',async()=>{
+ const db=await openDb(),draft=sampleDraft('pending-redaction'),redactions=[{id:'r',pageId:'p',x:10,y:20,width:30,height:40,fill:'white' as const}]
+ await saveDraft(db,{...draft,redactions})
+ expect((await loadDraft(db,draft.id))?.redactions).toEqual(redactions)
+})
+
+test('secure export mode survives saving even after all rasterized pages were deleted',async()=>{
+ const db=await openDb(),draft=sampleDraft('applied-redaction')
+ await saveDraft(db,{...draft,redactionApplied:true,pages:[],pageSources:[],redactions:[]})
+ expect((await loadDraft(db,draft.id))?.redactionApplied).toBe(true)
+ await saveDraft(db,{...draft,redactionApplied:undefined})
+ expect((await loadDraft(db,draft.id))?.redactionApplied).toBeUndefined()
+})

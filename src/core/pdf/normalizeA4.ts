@@ -9,9 +9,9 @@ import { clipAnnotation } from './clipAnnotation'
 import { composePages, preparePages } from './pageOperations'
 
 /** Normalize a derived source, never the user's original bytes or live state. */
-export async function normalizeA4(original: Uint8Array, sources: PageSource[], pages: DocumentPage[], overlays: Overlay[], formValues: FormValues = {}) {
+export async function normalizeA4(original: Uint8Array, sources: PageSource[], pages: DocumentPage[], overlays: Overlay[], formValues: FormValues = {}, secure = pages.some(page=>page.redacted)) {
   if (pages.some(page => page.hasXfa)) throw new Error('XFA-Formulare werden bei Seitenoperationen noch nicht unterstützt.')
-  const bytes = await composePages(original, sources, pages, formValues)
+  const bytes = await composePages(original, sources, pages, formValues, secure)
   const doc = await PDFDocument.load(bytes)
   if (doc.catalog.lookupMaybe(PDFName.of('AcroForm'), PDFDict)?.has(PDFName.of('XFA')))
     throw new Error('XFA-Formulare werden bei Seitenoperationen noch nicht unterstützt.')
@@ -71,7 +71,7 @@ export async function normalizeA4(original: Uint8Array, sources: PageSource[], p
     if (text) field.acroField.setDefaultAppearance(text.replace(/([\d.+-]+)\s+Tf\b/g, (_, value) => `${scales.every(s => Math.abs(s - scales[0]) < 1e-8) ? Number(value) * scales[0] : 0} Tf`))
   }
   const prepared = await preparePages(await doc.save({ updateFieldAppearances: false }), 'A4')
-  return { ...prepared, pages: prepared.pages.map((p, i) => ({ ...p, id: pages[i].id, name: pages[i].name })), overlays: mapped }
+  return { ...prepared, pages: prepared.pages.map((p, i) => ({ ...p, id: pages[i].id, name: pages[i].name, redacted: pages[i].redacted })), overlays: mapped }
 }
 function transformArray(value: unknown, factor: number, x: number, y: number) {
   if (!(value instanceof PDFArray)) return

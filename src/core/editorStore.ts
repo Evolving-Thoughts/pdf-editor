@@ -1,3 +1,4 @@
+import type { Redaction } from './redactions'
 import type { FormValues } from './forms'
 import type { DocumentPage, PageSource } from './pages'
 // Central editor store: holds the document overlay state and the command
@@ -49,6 +50,8 @@ export class EditorStore {
 
   /** Clears all overlays and history, e.g. when a new document is loaded. */
   reset(): void {
+    this.state.redactionApplied = undefined
+    this.state.redactions = undefined
     this.state.formValues = undefined
     this.state.overlays = []
     this.state.pages = undefined
@@ -58,7 +61,9 @@ export class EditorStore {
   }
 
   /** Replaces overlays with a stored draft's state and clears history. */
-  restore(overlays: Overlay[], pages?: DocumentPage[], sources?: PageSource[], formValues?: FormValues): void {
+  restore(overlays: Overlay[], pages?: DocumentPage[], sources?: PageSource[], formValues?: FormValues, redactions?: Redaction[], redactionApplied?: boolean): void {
+    this.state.redactionApplied = redactionApplied
+    this.state.redactions = redactions ? structuredClone(redactions) : undefined
     this.state.formValues = formValues ? structuredClone(formValues) : undefined
     this.state.overlays = overlays.map(cloneOverlay)
     this.state.pages = pages ? structuredClone(pages) : undefined
