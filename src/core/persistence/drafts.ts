@@ -1,3 +1,4 @@
+import type { DocumentPage, PageSource } from '../pages'
 // Draft persistence in IndexedDB (framework-free, ADR-004). A draft holds the
 // original PDF bytes plus the full overlay state, so closing the tab and
 // reopening restores everything. Multiple drafts live side by side.
@@ -11,6 +12,8 @@ export interface DraftRecord {
   updatedAt: number
   pdfBytes: ArrayBuffer
   overlays: Overlay[]
+  pages?: DocumentPage[]
+  pageSources?: PageSource[]
 }
 
 /** Draft metadata for the menu list; the heavy bytes stay outside this record. */
@@ -33,7 +36,7 @@ const DB_VERSION = 3
 
 type StoredImage = Omit<ImageOverlay, 'dataUrl'> & { imageAssetKey: string[] }
 type StoredOverlay = Exclude<Overlay, ImageOverlay> | StoredImage
-type StoredDraft = Omit<DraftRecord, 'pdfBytes' | 'overlays'> & { sizeBytes: number; overlays: StoredOverlay[] }
+type StoredDraft = Omit<DraftRecord, 'pdfBytes' | 'overlays' | 'pageSources'> & { sizeBytes: number; overlays: StoredOverlay[]; pageSourceIds?: string[] }
 interface ImageAsset { key: string[]; draftId: string; dataUrl: string }
 const isStoredImage = (overlay: StoredOverlay): overlay is StoredImage => 'imageAssetKey' in overlay
 
@@ -91,7 +94,7 @@ function transactionDone(transaction: IDBTransaction): Promise<void> {
 
 export async function saveDraft(db: IDBDatabase, draft: Omit<DraftRecord, 'updatedAt'>): Promise<DraftRecord> {
   const record: DraftRecord = { ...draft, updatedAt: Date.now() }
-  const { pdfBytes, overlays, ...metadata } = record
+  const { pdfBytes, overlays, pageSources, ...metadata } = record
   const transaction = db.transaction([STORE, BYTES_STORE, ASSETS_STORE], 'readwrite')
   const assets = transaction.objectStore(ASSETS_STORE)
   const storedOverlays: StoredOverlay[] = overlays.map((overlay) => {
@@ -116,7 +119,10 @@ export async function saveDraft(db: IDBDatabase, draft: Omit<DraftRecord, 'updat
     if (!referencedIds.has(key[1])) assets.delete(cursor.primaryKey)
     cursor.continue()
   }
-  const stored: StoredDraft = { ...metadata, overlays: storedOverlays, sizeBytes: pdfBytes.byteLength }
+  const activeSources=(pageSources??[]).filter(source=>metadata.pages?.some(p=>p.sourceId===source.id))
+  const stored: StoredDraft = { ...metadata, overlays: storedOverlays,
+    pageSourceIds: activeSources.map(s=>s.id),
+    sizeBytes: pdfBytes.byteLength + activeSources.reduce((total,s)=>total+s.bytes.byteLength,0) }
   transaction.objectStore(STORE).put(stored)
   const bytesStore = transaction.objectStore(BYTES_STORE)
   const existingBytesKey = bytesStore.getKey(record.id)
@@ -124,6 +130,15 @@ export async function saveDraft(db: IDBDatabase, draft: Omit<DraftRecord, 'updat
     // PDF bytes are immutable for a draft ID. Autosave therefore updates the
     // lightweight metadata record only after the first write.
     if (existingBytesKey.result === undefined) bytesStore.put(pdfBytes, record.id)
+  }
+  for(const source of activeSources){
+    const key=[record.id,source.id], existing=bytesStore.getKey(key)
+    existing.onsuccess=()=>{if(existing.result===undefined)bytesStore.put(source.bytes,key)}
+  }
+  const sourceCursor=bytesStore.openKeyCursor(IDBKeyRange.bound([record.id],[record.id,[]]))
+  sourceCursor.onsuccess=()=>{const c=sourceCursor.result;if(!c)return
+    if(!activeSources.some(s=>s.id===(c.primaryKey as string[])[1]))bytesStore.delete(c.primaryKey)
+    c.continue()
   }
   await transactionDone(transaction)
   return record
@@ -133,9 +148,11 @@ export async function loadDraft(db: IDBDatabase, id: string): Promise<DraftRecor
   const transaction = db.transaction([STORE, BYTES_STORE, ASSETS_STORE], 'readonly')
   const storedRequest = transaction.objectStore(STORE).get(id)
   const bytesRequest = transaction.objectStore(BYTES_STORE).get(id)
+  const sourceRequests = new Map<string, IDBRequest<ArrayBuffer | undefined>>()
   const assetRequests = new Map<string, IDBRequest<ImageAsset | undefined>>()
   storedRequest.onsuccess = () => {
     const stored = storedRequest.result as StoredDraft | undefined
+    for(const id of stored?.pageSourceIds??[])sourceRequests.set(id,transaction.objectStore(BYTES_STORE).get([stored!.id,id]))
     for (const overlay of stored?.overlays ?? []) {
       if (isStoredImage(overlay)) assetRequests.set(overlay.id, transaction.objectStore(ASSETS_STORE).get(overlay.imageAssetKey))
     }
@@ -151,6 +168,7 @@ export async function loadDraft(db: IDBDatabase, id: string): Promise<DraftRecor
         reject(new Error('Bilddaten im Entwurf fehlen.'))
         return
       }
+      if([...sourceRequests.values()].some(r=>!r.result)) { reject(new Error('Quelldaten einer Seite im Entwurf fehlen.'));return }
       const overlays: Overlay[] = stored.overlays.map((overlay) => {
         if (!isStoredImage(overlay)) return overlay
         const { imageAssetKey, ...imageMetadata } = overlay
@@ -163,6 +181,8 @@ export async function loadDraft(db: IDBDatabase, id: string): Promise<DraftRecor
         createdAt: stored.createdAt,
         updatedAt: stored.updatedAt,
         overlays,
+        pages: stored.pages,
+        pageSources: [...sourceRequests].map(([id,request])=>({id,bytes:request.result!})),
         pdfBytes: (bytesRequest.result as ArrayBuffer | undefined) ?? new ArrayBuffer(0),
       })
     }
@@ -198,6 +218,8 @@ export async function deleteDraft(db: IDBDatabase, id: string): Promise<void> {
   const transaction = db.transaction([STORE, BYTES_STORE, ASSETS_STORE], 'readwrite')
   transaction.objectStore(STORE).delete(id)
   transaction.objectStore(BYTES_STORE).delete(id)
+  const sources=transaction.objectStore(BYTES_STORE).openKeyCursor(IDBKeyRange.bound([id],[id,[]]))
+  sources.onsuccess=()=>{const c=sources.result;if(c){transaction.objectStore(BYTES_STORE).delete(c.primaryKey);c.continue()}}
   const cursorRequest = transaction.objectStore(ASSETS_STORE).index('draftId').openCursor(IDBKeyRange.only(id))
   cursorRequest.onsuccess = () => {
     const cursor = cursorRequest.result

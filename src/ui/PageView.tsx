@@ -13,6 +13,7 @@ import type { Tool } from './tools'
 
 interface PageViewProps {
   pdf: PdfHandle
+  readOnly?: boolean
   pageIndex: number
   zoom: number
   tool: Tool
@@ -43,7 +44,7 @@ interface DrawingGesture {
 }
 
 export function PageView({
-  pdf, pageIndex, zoom, tool, symbol, overlays, store, selectedId, onSelect,
+  pdf, readOnly = false, pageIndex, zoom, tool, symbol, overlays, store, selectedId, onSelect,
   shapeStyle, markerStyle, onImageDrop, strokeColor = '#111111', strokeWidth = 3, eraserRadius = 8,
 }: PageViewProps) {
   const canvasRef = useRef<HTMLCanvasElement>(null)
@@ -66,10 +67,11 @@ export function PageView({
   }, [pdf, pageIndex])
 
   useEffect(() => {
-    if (canvasRef.current) void pdf.renderPage(pageIndex + 1, canvasRef.current, zoom)
+    if (canvasRef.current) void pdf.renderPage(pageIndex + 1, canvasRef.current, zoom).catch(console.warn)
   }, [pdf, pageIndex, zoom])
 
   const onPagePointerDown = (event: React.PointerEvent<HTMLDivElement>) => {
+    if (readOnly) return
     if (!event.isPrimary || event.button !== 0 || gestureRef.current) return
     if ((event.target as HTMLElement).closest('.textbox, .image-overlay, .shape-overlay')) return
     if (tool === 'select') {
@@ -172,11 +174,13 @@ export function PageView({
       className={`page${tool === 'text' ? ' text-tool' : ''}${tool === 'symbol' ? ' symbol-tool' : ''}${drawing ? ' drawing-tool' : ''}`}
       ref={wrapperRef}
       data-page-index={pageIndex}
+      inert={readOnly}
+      style={{pointerEvents: readOnly ? 'none' : undefined, overflow: store.state.pages?.[pageIndex]?.cropped ? 'hidden' : undefined}}
       onDragOver={event => { if (event.dataTransfer.types.includes('Files')) event.preventDefault() }}
       onDrop={event => {
         event.preventDefault()
         const file = event.dataTransfer.files[0]
-        if (file && pageSize) onImageDrop(file, pageIndex, pointFrom(event.clientX, event.clientY))
+        if (!readOnly && file && pageSize) onImageDrop(file, pageIndex, pointFrom(event.clientX, event.clientY))
       }}
       onPointerDown={onPagePointerDown}
       onPointerMove={appendPoints}

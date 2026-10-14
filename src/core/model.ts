@@ -1,9 +1,12 @@
+import type { DocumentPage, PageSource } from './pages'
 // Domain model for overlay elements. Pure data, no framework, no PDF libraries.
 
 /** 'zapfdingbats' = symbol font; the text then holds Unicode symbols (✓, ■, …). */
 export type OverlayFont = 'helvetica' | 'times' | 'courier' | 'zapfdingbats'
 
 export interface Textbox {
+  /** Clockwise rotation of the text baseline; absent in older drafts means zero. */
+  rotation?: number
   id: string
   /** 0-based page index. */
   pageIndex: number
@@ -111,6 +114,8 @@ export function cloneOverlay(overlay: Overlay): Overlay {
 }
 
 export interface EditorState {
+  pages?: DocumentPage[]
+  pageSources?: PageSource[]
   overlays: Overlay[]
 }
 

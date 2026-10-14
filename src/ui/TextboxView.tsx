@@ -198,6 +198,7 @@ export function TextboxView({ box, zoom, pageHeightPts, selected, tool, store, o
     const line = baselineLineRef.current
     const marker = baselineMarkerRef.current
     if (!line || !marker) return
+    if (anchorRef.current) anchorRef.current.style.transform = 'none'
     const baseline = marker.getBoundingClientRect().top - line.getBoundingClientRect().top
     const chrome = getComputedStyle(el)
     const insetX = parseFloat(chrome.paddingLeft) + parseFloat(chrome.borderLeftWidth)
@@ -205,8 +206,10 @@ export function TextboxView({ box, zoom, pageHeightPts, selected, tool, store, o
     if (anchorRef.current) {
       anchorRef.current.style.left = `${box.x * zoom - insetX}px`
       anchorRef.current.style.top = `${(pageHeightPts - box.y) * zoom - baseline - insetY}px`
+      anchorRef.current.style.transformOrigin = `${insetX}px ${baseline + insetY}px`
+      anchorRef.current.style.transform = `rotate(${box.rotation ?? 0}deg)`
     }
-  }, [displayText, box.font, box.bold, box.italic, box.fontSize, box.x, box.y, pageHeightPts, zoom])
+  }, [displayText, box.font, box.bold, box.italic, box.fontSize, box.x, box.y, box.rotation, pageHeightPts, zoom])
 
   // Focus the textarea when a new (still empty) box gets selected.
   useEffect(() => {

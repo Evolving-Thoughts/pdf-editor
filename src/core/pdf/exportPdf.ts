@@ -118,7 +118,7 @@ export async function exportPdf(bytes: Uint8Array, overlays: Overlay[] = []): Pr
       ...space.toPdf(overlay.x, overlay.y),
       size: overlay.fontSize / space.unit,
       lineHeight: overlay.fontSize * TEXT_LINE_HEIGHT / space.unit,
-      rotate: degrees(space.rotation),
+      rotate: degrees(space.rotation - (overlay.rotation ?? 0)),
       font,
     })
     if (overlay.underline && overlay.font !== 'zapfdingbats') {
@@ -126,10 +126,13 @@ export async function exportPdf(bytes: Uint8Array, overlays: Overlay[] = []): Pr
       text.split('\n').forEach((line, index) => {
         if (!line) return
         const width = underlineFont.widthOfTextAtSize(line, overlay.fontSize)
-        const lineY = overlay.y - index * overlay.fontSize * TEXT_LINE_HEIGHT - overlay.fontSize * 0.12
+        const localY = -index * overlay.fontSize * TEXT_LINE_HEIGHT - overlay.fontSize * 0.12
+        const angle = -(overlay.rotation ?? 0) * Math.PI / 180
+        const point = (x: number) => space.toPdf(overlay.x + Math.cos(angle) * x - Math.sin(angle) * localY,
+          overlay.y + Math.sin(angle) * x + Math.cos(angle) * localY)
         page.drawLine({
-          start: space.toPdf(overlay.x, lineY),
-          end: space.toPdf(overlay.x + width, lineY),
+          start: point(0),
+          end: point(width),
           thickness: Math.max(0.5, overlay.fontSize * 0.05) / space.unit,
         })
       })

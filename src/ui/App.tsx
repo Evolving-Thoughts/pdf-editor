@@ -22,6 +22,10 @@ import { zoomIn, zoomOut } from '../core/viewerState'
 import { DraftsMenu } from './DraftsMenu'
 import { DrawingToolbar } from './DrawingToolbar'
 import { PageView } from './PageView'
+import { PagesManager } from './PagesManager'
+import { downloadPdf } from '../core/pdf/downloadPdf'
+import { composePages, exportPageDocument, inspectPages } from '../core/pdf/pageOperations'
+import type { DocumentPage, PageSource } from '../core/pages'
 import { SymbolPicker } from './SymbolPicker'
 import type { Tool } from './tools'
 import './app.css'
@@ -44,12 +48,17 @@ function draftSummary(record: DraftRecord): DraftSummary {
     id: record.id,
     name: record.name,
     updatedAt: record.updatedAt,
-    sizeBytes: record.pdfBytes.byteLength,
+    sizeBytes: record.pdfBytes.byteLength + (record.pageSources ?? []).filter(source => record.pages?.some(page => page.sourceId === source.id)).reduce((size, source) => size + source.bytes.byteLength, 0),
     overlayCount: record.overlays.length,
   }
 }
 
 export default function App() {
+  const [pageManagerOpen, setPageManagerOpen] = useState(false)
+  const [renderedPages, setRenderedPages] = useState<DocumentPage[] | undefined>(undefined)
+  const [originalBytes, setOriginalBytes] = useState<ArrayBuffer | null>(null)
+  const [cropActive, setCropActive] = useState(false)
+  const pdfPagesRef = useRef<DocumentPage[] | undefined>(undefined)
   const [pdf, setPdf] = useState<PdfHandle | null>(null)
   const [zoom, setZoom] = useState(1)
   const [tool, setTool] = useState<Tool>('select')
@@ -90,6 +99,27 @@ export default function App() {
   const [store] = useState(() => new EditorStore())
   useSyncExternalStore(store.subscribe, store.getVersion)
   const overlays = store.state.overlays
+  const documentPages = store.state.pages
+  const pageBusy = !!documentPages?.length && renderedPages !== documentPages
+  useEffect(() => {
+    if (!documentPages || !draftRef.current || pdfPagesRef.current === documentPages) return
+    const draft = draftRef.current, sources = [...(store.state.pageSources ?? [])]
+    let cancelled = false
+    if (!documentPages.length) {
+      pdfPagesRef.current = documentPages
+      return
+    }
+    void composePages(new Uint8Array(draft.bytes), sources, documentPages).then(bytes => loadPdf(draft.name, bytes)).then(next => {
+      if (cancelled || draftRef.current !== draft) { void next.destroy(); return }
+      const old = pdfRef.current
+      pdfRef.current = next; pdfPagesRef.current = documentPages
+      setPdf(next); setRenderedPages(documentPages)
+      void old?.destroy()
+    }).catch(problem => {
+      if (!cancelled) {setError(problem instanceof Error ? problem.message : 'Die Seiten konnten nicht aktualisiert werden.')}
+    })
+    return () => {cancelled = true}
+  }, [documentPages, store])
   const selectedShape = overlays.find(o=>o.id===selectedId && isShape(o))
   const shapePage = selectedShape?.pageIndex
   useEffect(()=>{
@@ -137,6 +167,8 @@ export default function App() {
     // Copy the overlays now: the record must describe this save point even if
     // the user keeps editing while the queued IndexedDB write is waiting.
     const overlaysSnapshot = store.state.overlays.map(cloneOverlay)
+    const pagesSnapshot = store.state.pages ? structuredClone(store.state.pages) : undefined
+    const sourcesSnapshot = [...(store.state.pageSources ?? [])]
     const record = await queuePersistence(async () => {
       if (generation !== persistenceGenerationRef.current) return null
       const db = await ensureDraftDb()
@@ -146,6 +178,8 @@ export default function App() {
         createdAt: draft.createdAt,
         pdfBytes: draft.bytes,
         overlays: overlaysSnapshot,
+        pages: pagesSnapshot,
+        pageSources: sourcesSnapshot,
       })
     })
     if (record) {
@@ -201,7 +235,7 @@ export default function App() {
   }, [ensureDraftDb, queuePersistence, reportDraftProblem])
 
   const replaceDocument = useCallback(
-    (next: PdfHandle, draft: ActiveDraft, nextOverlays: typeof store.state.overlays) => {
+    (next: PdfHandle, draft: ActiveDraft, nextOverlays: typeof store.state.overlays, pages: DocumentPage[], sources: PageSource[] = []) => {
       documentIntentRef.current += 1
       persistenceGenerationRef.current += 1
       if (saveTimerRef.current) {
@@ -215,10 +249,14 @@ export default function App() {
       setManualSave(null)
       manualSaveRequestRef.current = null
       setSelectedId(null)
+      setPageManagerOpen(false)
+      setCropActive(false)
+      setOriginalBytes(draft.bytes)
       setSizeWarning(draft.bytes.byteLength > DRAFT_SIZE_WARN_BYTES)
       setPdf(next)
-      if (nextOverlays.length === 0) store.reset()
-      else store.restore(nextOverlays)
+      store.restore(nextOverlays, pages, sources)
+      pdfPagesRef.current = store.state.pages
+      setRenderedPages(store.state.pages)
       void previous?.destroy()
     },
     [store],
@@ -233,8 +271,9 @@ export default function App() {
           reportDraftProblem(problem, 'Der bisherige Entwurf konnte nicht gespeichert werden.'),
         )
         const buffer = await file.arrayBuffer()
+        const pages = await inspectPages(new Uint8Array(buffer), file.name)
         const next = await loadPdf(file.name, new Uint8Array(buffer))
-        replaceDocument(next, { id: createId(), name: file.name, createdAt: Date.now(), bytes: buffer }, [])
+        replaceDocument(next, { id: createId(), name: file.name, createdAt: Date.now(), bytes: buffer }, [], pages)
         void persistActiveDraft().catch((problem) =>
           reportDraftProblem(problem, 'Der neue Entwurf konnte nicht gespeichert werden.'),
         )
@@ -262,11 +301,15 @@ export default function App() {
           return
         }
         const bytes = record.pdfBytes.slice(0)
-        const next = await loadPdf(record.name, new Uint8Array(bytes))
+        const pages = record.pages ?? await inspectPages(new Uint8Array(bytes), record.name)
+        const sources = record.pageSources ?? []
+        const base = pages.length ? await composePages(new Uint8Array(bytes), sources, pages) : new Uint8Array(bytes)
+        const next = await loadPdf(record.name, base)
         replaceDocument(
           next,
           { id: record.id, name: record.name, createdAt: record.createdAt, bytes },
           record.overlays.map(cloneOverlay),
+          pages, sources,
         )
       } catch {
         setError('Der Entwurf konnte nicht geöffnet werden.')
@@ -398,6 +441,7 @@ export default function App() {
   useEffect(() => {
     const onKeyDown = (event: KeyboardEvent) => {
       const target = event.target as HTMLElement
+      if (pageBusy || (pageManagerOpen && cropActive)) return
       if (target.closest('textarea, input, select, [contenteditable]')) return
       if (event.key === 'Escape') {
         setSelectedId(null)
@@ -456,20 +500,16 @@ export default function App() {
     }
     window.addEventListener('keydown', onKeyDown)
     return () => window.removeEventListener('keydown', onKeyDown)
-  }, [store, selectedId, zoom])
+  }, [store, selectedId, zoom, pageBusy, pageManagerOpen, cropActive])
 
   const onExport = useCallback(async () => {
-    if (!pdf) return
-    const bytes = await pdf.exportBytes(store.state.overlays)
-    const url = URL.createObjectURL(new Blob([new Uint8Array(bytes)], { type: 'application/pdf' }))
-    const link = document.createElement('a')
-    link.href = url
-    link.download = pdf.fileName
-    link.click()
-    // Defer revocation: Firefox/Safari may abort the download if the URL
-    // is revoked in the same tick as the click.
-    setTimeout(() => URL.revokeObjectURL(url), 1000)
-  }, [pdf, store])
+    const draft = draftRef.current
+    if (!draft || !store.state.pages?.length || pageBusy) return
+    try {
+      const bytes = await exportPageDocument(new Uint8Array(draft.bytes), store.state.pageSources ?? [], store.state.pages, store.state.overlays.map(cloneOverlay))
+      downloadPdf(bytes, draft.name)
+    } catch (problem) {setError(problem instanceof Error ? problem.message : 'Das PDF konnte nicht exportiert werden.')}
+  }, [store, pageBusy])
 
   const visibleSave = manualSave?.draftId === activeDraftId &&
     (manualSave.status !== 'saved' || manualSave.version === store.getVersion()) ? manualSave : null
@@ -525,8 +565,12 @@ export default function App() {
               {visibleSave?.status === 'saving' ? 'Speichert …' : 'Speichern'}
             </button>
             <span className="file-info">
-              {pdf.fileName} · {pdf.pageCount} {pdf.pageCount === 1 ? 'Seite' : 'Seiten'}
+              {pdf.fileName} · {documentPages?.length ?? pdf.pageCount} {(documentPages?.length ?? pdf.pageCount) === 1 ? 'Seite' : 'Seiten'}
             </span>
+            <button type="button" aria-pressed={pageManagerOpen} disabled={pageBusy} onClick={() => {setSelectedId(null);setCropActive(false);setPageManagerOpen(open => !open)}}>
+              {pageManagerOpen ? 'Zur Dokumentbearbeitung' : 'Seiten verwalten'}
+            </button>
+            {!pageManagerOpen && <>
             <button type="button" onClick={() => setZoom((z) => zoomOut(z))}>
               −
             </button>
@@ -600,14 +644,15 @@ export default function App() {
               aria-pressed={tool===option.tool} onClick={()=>{setSelectedId(null);setTool(option.tool)}}>
               <svg className="tool-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7" aria-hidden="true"><path d={option.path} /></svg>{option.label}
             </button>)}
+            </>}
             <span className="separator" />
-            <button type="button" aria-label="Rückgängig" disabled={!store.canUndo} onClick={() => store.undo()} title="Rückgängig (Strg+Z)">
+            <button type="button" aria-label="Rückgängig" disabled={!store.canUndo || pageBusy || cropActive} onClick={() => store.undo()} title="Rückgängig (Strg+Z)">
               ↩︎
             </button>
-            <button type="button" aria-label="Wiederholen" disabled={!store.canRedo} onClick={() => store.redo()} title="Wiederholen (Strg+Y)">
+            <button type="button" aria-label="Wiederholen" disabled={!store.canRedo || pageBusy || cropActive} onClick={() => store.redo()} title="Wiederholen (Strg+Y)">
               ↪︎
             </button>
-            <button type="button" onClick={() => void onExport()}>
+            <button type="button" disabled={pageBusy || cropActive || !documentPages?.length} onClick={() => void onExport()}>
               Exportieren
             </button>
           </>
@@ -632,18 +677,21 @@ export default function App() {
         </p>
       )}
       <div className="workspace" ref={workspaceRef}>
-        {pdf && (
+        {pdf && pageManagerOpen && originalBytes && <PagesManager key={activeDraftId} pdf={pdf} store={store} original={originalBytes} busy={pageBusy} onCropActive={setCropActive} />}
+        {!pageManagerOpen && <>
+        {pageBusy && <p role="status" className="hint">Seitenansicht wird aktualisiert …</p>}
+        {pdf && !pageBusy && (
           <DrawingToolbar workspaceRef={workspaceRef} tool={tool} color={strokeColor} width={strokeWidth}
             eraserRadius={eraserRadius} onColor={setStrokeColor} onWidth={setStrokeWidth} onEraserRadius={setEraserRadius} />
         )}
-        {pdf && (tool==='select' || isShapeTool(tool)) && selectedShape && isShape(selectedShape) && shapePageSize?.pdf===pdf && shapePageSize.pageIndex===shapePage && <ShapeToolbar
+        {pdf && !pageBusy && (tool==='select' || isShapeTool(tool)) && selectedShape && isShape(selectedShape) && shapePageSize?.pdf===pdf && shapePageSize.pageIndex===shapePage && <ShapeToolbar
           key={activeDraftId} workspaceRef={workspaceRef} shape={selectedShape} pageSize={shapePageSize.size} store={store} onSelect={setSelectedId}
           onStyle={shape=>{const next={fill:shape.fill,strokeColor:shape.strokeColor,strokeWidth:shape.strokeWidth};if(shape.shape==='marker')setMarkerStyle(next);else setShapeStyle(next)}} />}
         <div className="pages">
-        {pdf &&
-          Array.from({ length: pdf.pageCount }, (_, index) => (
+        {pdf && !pageBusy &&
+          (documentPages ?? Array.from({length:pdf.pageCount},(_,index)=>({id:String(index)}))).map((page,index) => (
             <PageView
-              key={`${activeDraftId}-${index}`}
+              key={`${activeDraftId}-${page.id}`}
               pdf={pdf}
               pageIndex={index}
               zoom={zoom}
@@ -662,8 +710,9 @@ export default function App() {
             />
           ))}
         </div>
+        </>}
       </div>
-      {pdf && (
+      {pdf && !pageManagerOpen && !pageBusy && (
         <footer className="drawing-footer">
           <button type="button" disabled={!overlays.some(o=>isStroke(o)||isMarker(o))}
             title="Freihandstriche und Textmarker löschen · Formen, Texte, Bilder und PDF bleiben erhalten"

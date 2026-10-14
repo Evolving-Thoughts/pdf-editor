@@ -1,3 +1,4 @@
+import type { DocumentPage, PageSource } from './pages'
 // Central editor store: holds the document overlay state and the command
 // stack (ADR-002). Framework-free; the UI subscribes and re-renders.
 import { CommandStack, type Command } from './commands'
@@ -48,13 +49,17 @@ export class EditorStore {
   /** Clears all overlays and history, e.g. when a new document is loaded. */
   reset(): void {
     this.state.overlays = []
+    this.state.pages = undefined
+    this.state.pageSources = undefined
     this.stack = new CommandStack(this.state)
     this.notify()
   }
 
   /** Replaces overlays with a stored draft's state and clears history. */
-  restore(overlays: Overlay[]): void {
+  restore(overlays: Overlay[], pages?: DocumentPage[], sources?: PageSource[]): void {
     this.state.overlays = overlays.map(cloneOverlay)
+    this.state.pages = pages ? structuredClone(pages) : undefined
+    this.state.pageSources = sources ? [...sources] : undefined
     this.stack = new CommandStack(this.state)
     this.notify()
   }
