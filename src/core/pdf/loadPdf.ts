@@ -3,7 +3,8 @@
 // (core/UI boundary, ADR-004).
 import { getDocument, GlobalWorkerOptions } from 'pdfjs-dist'
 import workerUrl from 'pdfjs-dist/build/pdf.worker.min.mjs?url'
-import type { Overlay } from '../model'
+import type { Overlay, OverlayFont } from '../model'
+import type { Redaction } from '../redactions'
 import { exportPdf } from './exportPdf'
 
 GlobalWorkerOptions.workerSrc = workerUrl
@@ -13,6 +14,7 @@ export interface PageSize {
   height: number
 }
 
+export interface RasterizedPage { png: Uint8Array; replacements: {markId:string;x:number;y:number;fontSize:number;font:OverlayFont;rotation:number}[] }
 export interface PdfHandle {
   readonly fileName: string
   readonly pageCount: number
@@ -22,6 +24,8 @@ export interface PdfHandle {
   getPageSize(pageNumber: number): Promise<PageSize>
   /** Exports the document with the given overlays baked in as real text. */
   exportBytes(overlays?: Overlay[]): Promise<Uint8Array>
+  /** Lossless 300-dpi pixels with outward-rounded opaque masks; never returns source content. */
+  rasterizePage(pageNumber:number, marks:Redaction[]):Promise<RasterizedPage>
   /** Releases worker resources; call when switching or closing documents. */
   destroy(): Promise<void>
 }
@@ -68,6 +72,46 @@ export async function loadPdf(fileName: string, bytes: Uint8Array): Promise<PdfH
       const size = { width: viewport.width, height: viewport.height }
       sizeCache.set(pageNumber, size)
       return size
+    },
+
+    async rasterizePage(pageNumber, marks) {
+      const page=await pdfDocument.getPage(pageNumber),view=page.getViewport({scale:1}),scale=300/72
+      const viewport=page.getViewport({scale}),width=Math.ceil(viewport.width),height=Math.ceil(viewport.height)
+      if(!Number.isFinite(width*height)||width*height>32_000_000)throw new Error('Die Seite ist für eine sichere Rasterung mit 300 dpi zu groß. Der Stand bleibt unverändert.')
+      if(!marks.length||marks.some(mark=>![mark.x,mark.y,mark.width,mark.height].every(Number.isFinite)||mark.x<0||mark.y<0||mark.width<2||mark.height<2||mark.x+mark.width>view.width+1e-6||mark.y+mark.height>view.height+1e-6||!['black','white'].includes(mark.fill)))throw new Error('Ungültiger Schwärzungsbereich.')
+      const canvas=document.createElement('canvas');canvas.width=width;canvas.height=height
+      const context=canvas.getContext('2d',{alpha:false})
+      if(!context)throw new Error('Die Seite konnte nicht gerastert werden.')
+      try {
+        await page.render({canvas,viewport,background:'rgb(255,255,255)'}).promise
+        // Masks must be opaque regardless of the renderer's last graphics state.
+        context.setTransform(1,0,0,1,0,0);context.globalAlpha=1;context.globalCompositeOperation='source-over';context.filter='none';context.shadowBlur=0;context.shadowColor='transparent'
+        for(const mark of marks) {
+          const left=Math.max(0,Math.floor(mark.x/view.width*width)),top=Math.max(0,Math.floor((view.height-mark.y-mark.height)/view.height*height))
+          const right=Math.min(width,Math.ceil((mark.x+mark.width)/view.width*width)),bottom=Math.min(height,Math.ceil((view.height-mark.y)/view.height*height))
+          context.fillStyle=mark.fill==='white'?'#ffffff':'#000000';context.fillRect(left,top,right-left,bottom-top)
+        }
+        const replacements:RasterizedPage['replacements']=[]
+        if(marks.some(mark=>mark.fill==='white')) {
+          const content=await page.getTextContent()
+          for(const mark of marks.filter(mark=>mark.fill==='white')) {
+            let suggestion={markId:mark.id,x:mark.x,y:mark.y+Math.max(2,mark.height*.2),fontSize:Math.min(14,mark.height*.75),font:'helvetica' as OverlayFont,rotation:0}
+            for(const item of content.items) {
+              if(!('str' in item)||!item.str.trim())continue
+              const [a,b,c,d,x,y]=item.transform,size=Math.hypot(a,b)||1,height=Math.hypot(c,d)||item.height
+              const corners=[[x,y],[x+a/size*item.width,y+b/size*item.width],[x+c,y+d],[x+a/size*item.width+c,y+b/size*item.width+d]].map(([px,py])=>view.convertToViewportPoint(px,py))
+              const left=Math.min(...corners.map(p=>p[0])),right=Math.max(...corners.map(p=>p[0])),bottom=view.height-Math.max(...corners.map(p=>p[1])),top=view.height-Math.min(...corners.map(p=>p[1]))
+              if(right<=mark.x||left>=mark.x+mark.width||top<=mark.y||bottom>=mark.y+mark.height)continue
+              const baseline=view.convertToViewportPoint(x,y),end=view.convertToViewportPoint(x+a,y+b),rotation=Math.atan2(end[1]-baseline[1],end[0]-baseline[0])*180/Math.PI,family=content.styles[item.fontName]?.fontFamily??''
+              suggestion={markId:mark.id,x:Math.max(mark.x,Math.min(mark.x+mark.width-2,baseline[0])),y:Math.max(mark.y,Math.min(mark.y+mark.height-2,view.height-baseline[1])),fontSize:Math.max(4,Math.min(200,height*page.userUnit)),rotation,font:/mono/i.test(family)?'courier':/serif/i.test(family)&&!/sans/i.test(family)?'times':'helvetica'}
+              break
+            }
+            replacements.push(suggestion)
+          }
+        }
+        const blob=await new Promise<Blob>((resolve,reject)=>canvas.toBlob(blob=>blob?resolve(blob):reject(new Error('Die Rasterseite konnte nicht gespeichert werden.')),'image/png'))
+        return {png:new Uint8Array(await blob.arrayBuffer()),replacements}
+      } finally {canvas.width=1;canvas.height=1;page.cleanup()}
     },
 
     exportBytes: (overlays) => exportPdf(bytes, overlays),

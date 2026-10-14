@@ -1,3 +1,6 @@
+import { applyRedactionResult,replaceRedactions,type Redaction } from '../core/redactions'
+import { prepareRedaction } from '../core/pdf/redactDocument'
+import { RedactionBar } from './RedactionBar'
 import type { FormValues, NativeWidget } from '../core/forms'
 import { inspectNativeForms, needsNativeFormInspection } from '../core/pdf/acroForm'
 import { useCallback, useEffect, useRef, useState, useSyncExternalStore } from 'react'
@@ -56,6 +59,8 @@ function draftSummary(record: DraftRecord): DraftSummary {
 }
 
 export default function App() {
+  const [redactionFill,setRedactionFill]=useState<Redaction['fill']>('black')
+  const [redactionBusy,setRedactionBusy]=useState(false)
   const [highlightFields, setHighlightFields] = useState(true)
   const [formInfo, setFormInfo] = useState<{ pages: DocumentPage[]; widgets: NativeWidget[]; unsupported: string[] } | null>(null)
   const [pageManagerOpen, setPageManagerOpen] = useState(false)
@@ -102,6 +107,7 @@ export default function App() {
   // React re-renders on store notifications.
   const [store] = useState(() => new EditorStore())
   useSyncExternalStore(store.subscribe, store.getVersion)
+  const redactions = store.state.redactions ?? []
   const overlays = store.state.overlays
   const documentPages = store.state.pages
   const documentSources = store.state.pageSources
@@ -123,7 +129,7 @@ export default function App() {
       pdfPagesRef.current = documentPages
       return
     }
-    void composePages(new Uint8Array(draft.bytes), sources, documentPages).then(bytes => loadPdf(draft.name, bytes)).then(next => {
+    void composePages(new Uint8Array(draft.bytes), sources, documentPages, undefined, store.state.redactionApplied||documentPages.some(page=>page.redacted)).then(bytes => loadPdf(draft.name, bytes)).then(next => {
       if (cancelled || draftRef.current !== draft) { void next.destroy(); return }
       const old = pdfRef.current
       pdfRef.current = next; pdfPagesRef.current = documentPages
@@ -181,6 +187,8 @@ export default function App() {
     // Copy the overlays now: the record must describe this save point even if
     // the user keeps editing while the queued IndexedDB write is waiting.
     const overlaysSnapshot = store.state.overlays.map(cloneOverlay)
+    const redactionAppliedSnapshot = store.state.redactionApplied
+    const redactionSnapshot = structuredClone(store.state.redactions ?? [])
     const formSnapshot = store.state.formValues ? structuredClone(store.state.formValues) : undefined
     const pagesSnapshot = store.state.pages ? structuredClone(store.state.pages) : undefined
     const sourcesSnapshot = [...(store.state.pageSources ?? [])]
@@ -196,6 +204,8 @@ export default function App() {
         pages: pagesSnapshot,
         pageSources: sourcesSnapshot,
         formValues: formSnapshot,
+        redactionApplied: redactionAppliedSnapshot,
+        redactions: redactionSnapshot,
       })
     })
     if (record) {
@@ -251,7 +261,7 @@ export default function App() {
   }, [ensureDraftDb, queuePersistence, reportDraftProblem])
 
   const replaceDocument = useCallback(
-    (next: PdfHandle, draft: ActiveDraft, nextOverlays: typeof store.state.overlays, pages: DocumentPage[], sources: PageSource[] = [], formValues?: FormValues) => {
+    (next: PdfHandle, draft: ActiveDraft, nextOverlays: typeof store.state.overlays, pages: DocumentPage[], sources: PageSource[] = [], formValues?: FormValues, pendingRedactions?: Redaction[], redactionApplied?: boolean) => {
       documentIntentRef.current += 1
       persistenceGenerationRef.current += 1
       if (saveTimerRef.current) {
@@ -265,12 +275,14 @@ export default function App() {
       setManualSave(null)
       manualSaveRequestRef.current = null
       setSelectedId(null)
+      setTool('select')
+      setRedactionFill('black')
       setPageManagerOpen(false)
       setCropActive(false)
       setOriginalBytes(draft.bytes)
       setSizeWarning(draft.bytes.byteLength > DRAFT_SIZE_WARN_BYTES)
       setPdf(next)
-      store.restore(nextOverlays, pages, sources, formValues)
+      store.restore(nextOverlays, pages, sources, formValues, pendingRedactions, redactionApplied)
       pdfPagesRef.current = store.state.pages
       setRenderedPages(store.state.pages)
       void previous?.destroy()
@@ -319,13 +331,13 @@ export default function App() {
         const bytes = record.pdfBytes.slice(0)
         const pages = record.pages ?? await inspectPages(new Uint8Array(bytes), record.name)
         const sources = record.pageSources ?? []
-        const base = pages.length ? await composePages(new Uint8Array(bytes), sources, pages) : new Uint8Array(bytes)
+        const base = pages.length ? await composePages(new Uint8Array(bytes), sources, pages, undefined, record.redactionApplied||pages.some(page=>page.redacted)) : new Uint8Array(bytes)
         const next = await loadPdf(record.name, base)
         replaceDocument(
           next,
           { id: record.id, name: record.name, createdAt: record.createdAt, bytes },
           record.overlays.map(cloneOverlay),
-          pages, sources, record.formValues,
+          pages, sources, record.formValues, record.redactions, record.redactionApplied,
         )
       } catch {
         setError('Der Entwurf konnte nicht geöffnet werden.')
@@ -457,7 +469,7 @@ export default function App() {
   useEffect(() => {
     const onKeyDown = (event: KeyboardEvent) => {
       const target = event.target as HTMLElement
-      if (pageBusy || (pageManagerOpen && cropActive)) return
+      if (redactionBusy || pageBusy || (pageManagerOpen && cropActive)) return
       if (target.closest('textarea, input, select, [contenteditable]')) return
       if (event.key === 'Escape') {
         setSelectedId(null)
@@ -465,6 +477,8 @@ export default function App() {
         return
       }
       if ((event.key === 'Delete' || event.key === 'Backspace') && selectedId) {
+        const mark=store.state.redactions?.find(m=>m.id===selectedId)
+        if(mark){event.preventDefault();store.dispatch(replaceRedactions(store.state,store.state.redactions!.filter(m=>m.id!==mark.id)));setSelectedId(null);return}
         const box = store.state.overlays.find((o) => o.id === selectedId)
         if (box && (isTextbox(box) || isImage(box) || isShape(box))) {
           event.preventDefault()
@@ -516,16 +530,30 @@ export default function App() {
     }
     window.addEventListener('keydown', onKeyDown)
     return () => window.removeEventListener('keydown', onKeyDown)
-  }, [store, selectedId, zoom, pageBusy, pageManagerOpen, cropActive])
+  }, [store, selectedId, zoom, pageBusy, pageManagerOpen, cropActive, redactionBusy])
 
   const onExport = useCallback(async () => {
     const draft = draftRef.current
     if (!draft || !store.state.pages?.length || pageBusy) return
     try {
-      const bytes = await exportPageDocument(new Uint8Array(draft.bytes), store.state.pageSources ?? [], store.state.pages, store.state.overlays.map(cloneOverlay), undefined, store.state.formValues)
+      if(store.state.redactions?.length)throw new Error('Vorgemerkte Schwärzungen zuerst anwenden oder verwerfen; sie sind noch nicht sicher entfernt.')
+      const bytes = await exportPageDocument(new Uint8Array(draft.bytes), store.state.pageSources ?? [], store.state.pages, store.state.overlays.map(cloneOverlay), undefined, store.state.formValues, store.state.redactionApplied||store.state.pages.some(page=>page.redacted))
       downloadPdf(bytes, draft.name)
     } catch (problem) {setError(problem instanceof Error ? problem.message : 'Das PDF konnte nicht exportiert werden.')}
   }, [store, pageBusy])
+
+  const onApplyRedactions = async () => {
+    const draft=draftRef.current,version=store.getVersion(),intent=documentIntentRef.current
+    if(!draft||redactionBusy||pageBusy||!store.state.redactions?.length)return
+    setError(null);setRedactionBusy(true)
+    try {
+      const prepared=await prepareRedaction(new Uint8Array(draft.bytes),store.state)
+      if(store.getVersion()!==version||draftRef.current!==draft||documentIntentRef.current!==intent)throw new Error('Der Stand hat sich geändert. Schwärzung bitte erneut prüfen und anwenden.')
+      store.dispatch(applyRedactionResult(store.state,prepared.source,prepared.replacements,prepared.newText))
+      setSelectedId(prepared.newText[0]?.id??null);setTool(prepared.newText.length?'text':'select')
+    } catch(problem) {if(draftRef.current===draft)setError(problem instanceof Error?problem.message:'Die Schwärzung konnte nicht angewendet werden. Der Stand bleibt unverändert.')}
+    finally {setRedactionBusy(false)}
+  }
 
   const visibleSave = manualSave?.draftId === activeDraftId &&
     (manualSave.status !== 'saved' || manualSave.version === store.getVersion()) ? manualSave : null
@@ -539,7 +567,7 @@ export default function App() {
       inputEpochRef.current += 1
       setManualSave(current => current?.status === 'saved' ? null : current)
     }}>
-      <header className="toolbar">
+      <header className="toolbar" inert={redactionBusy}>
         <input
           ref={fileInputRef}
           type="file"
@@ -583,7 +611,7 @@ export default function App() {
             <span className="file-info">
               {pdf.fileName} · {documentPages?.length ?? pdf.pageCount} {(documentPages?.length ?? pdf.pageCount) === 1 ? 'Seite' : 'Seiten'}
             </span>
-            <button type="button" aria-pressed={pageManagerOpen} disabled={pageBusy} onClick={() => {setSelectedId(null);setCropActive(false);setPageManagerOpen(open => !open)}}>
+            <button type="button" aria-pressed={pageManagerOpen} disabled={pageBusy || redactions.length>0} onClick={() => {setSelectedId(null);setCropActive(false);setPageManagerOpen(open => !open)}}>
               {pageManagerOpen ? 'Zur Dokumentbearbeitung' : 'Seiten verwalten'}
             </button>
             {!pageManagerOpen && <>
@@ -616,6 +644,7 @@ export default function App() {
             >
               T Text
             </button>
+            <button type="button" className="tool" aria-pressed={tool==='redact'} onClick={()=>{setSelectedId(null);setTool('redact')}}>Schwärzen</button>
             {nativeWidgets.length > 0 && <label className="native-highlight-toggle"><input type="checkbox" checked={highlightFields} onChange={event => setHighlightFields(event.target.checked)} /> Felder hervorheben</label>}
             <SymbolPicker
               value={symbol}
@@ -669,7 +698,7 @@ export default function App() {
             <button type="button" aria-label="Wiederholen" disabled={!store.canRedo || pageBusy || cropActive} onClick={() => store.redo()} title="Wiederholen (Strg+Y)">
               ↪︎
             </button>
-            <button type="button" disabled={pageBusy || cropActive || !documentPages?.length} onClick={() => void onExport()}>
+            <button type="button" disabled={pageBusy || cropActive || redactions.length>0 || !documentPages?.length} onClick={() => void onExport()}>
               Exportieren
             </button>
           </>
@@ -678,6 +707,9 @@ export default function App() {
       {pdf && <p className="draft-save-status" role={visibleSave?.status === 'error' ? 'alert' : 'status'}>
         {saveMessage}
       </p>}
+      {pdf&&!pageManagerOpen&&(tool==='redact'||redactions.length>0)&&<RedactionBar marks={redactions} fill={redactions.find(m=>m.id===selectedId)?.fill??redactionFill} onFill={fill=>{setRedactionFill(fill);const mark=redactions.find(m=>m.id===selectedId);if(mark)store.dispatch(replaceRedactions(store.state,redactions.map(m=>m.id===mark.id?{...m,fill}:m)))}} selected={selectedId} onRemove={()=>{store.dispatch(replaceRedactions(store.state,redactions.filter(m=>m.id!==selectedId)));setSelectedId(null)}} onClear={()=>{store.dispatch(replaceRedactions(store.state,[]));setSelectedId(null);setTool('select')}} onApply={()=>void onApplyRedactions()} busy={redactionBusy||pageBusy}/>}
+      {redactionBusy&&<p role="status" className="redaction-notice">Seiten werden sicher gerastert und neu aufgebaut …</p>}
+      {pdf&&(redactions.length>0||documentPages?.some(p=>p.redacted))&&<p className="redaction-notice">Originaldatei und lokale Entwürfe können vertrauliche Inhalte enthalten. Nur das geprüfte Export-PDF weitergeben. Gerasterte Seiten sind nicht mehr durchsuchbar; neue Textboxen bleiben echter Text.</p>}
       {error && (
         <p role="alert" className="error">
           {error}
@@ -693,7 +725,7 @@ export default function App() {
           Wähle eine PDF-Datei – oder öffne über <b>Entwürfe&nbsp;▾</b> einen früheren Stand.
         </p>
       )}
-      <div className="workspace" ref={workspaceRef}>
+      <div className="workspace" ref={workspaceRef} inert={redactionBusy}>
         {pdf && pageManagerOpen && originalBytes && <PagesManager nativeWidgets={nativeWidgets} key={activeDraftId} pdf={pdf} store={store} original={originalBytes} busy={pageBusy} onCropActive={setCropActive} />}
         {!pageManagerOpen && <>
         {pageBusy && <p role="status" className="hint">Seitenansicht wird aktualisiert …</p>}
@@ -711,6 +743,7 @@ export default function App() {
             <PageView
               key={`${activeDraftId}-${page.id}`}
               pdf={pdf}
+              redactionFill={redactionFill}
               nativeWidgets={nativeWidgets}
               highlightFields={highlightFields}
               onFormError={setError}
@@ -734,7 +767,7 @@ export default function App() {
         </>}
       </div>
       {pdf && !pageManagerOpen && !pageBusy && (
-        <footer className="drawing-footer">
+        <footer className="drawing-footer" inert={redactionBusy}>
           <button type="button" disabled={!overlays.some(o=>isStroke(o)||isMarker(o))}
             title="Freihandstriche und Textmarker löschen · Formen, Texte, Bilder und PDF bleiben erhalten"
             onClick={() => {

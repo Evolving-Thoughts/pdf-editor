@@ -14,6 +14,8 @@ export interface DocumentPage {
   unit: number
   rotation: number
   cropped?: boolean
+  /** Rebuilt solely from masked pixels; the original source remains only in local drafts/history. */
+  redacted?: boolean
   /** Source contains native AcroForm fields; preserved on page operations/export. */
   hasForms?: boolean
   /** XFA is not supported by pdf-lib; refuse page edits rather than lose it. */
@@ -36,6 +38,8 @@ export function insertionPageSize(pages: DocumentPage[], index: number) {
 }
 function snapshot(state: EditorState) {
   return {
+    redactionApplied: state.redactionApplied,
+    redactions: structuredClone(state.redactions),
     formValues: state.formValues ? structuredClone(state.formValues) : undefined,
     pages: structuredClone(state.pages ?? []),
     overlays: state.overlays.map(cloneOverlay),
@@ -47,12 +51,15 @@ function pageCommand(
   label: string,
   mutate: (next: EditorState & { pages: DocumentPage[] }) => void,
 ): Command {
+  if(state.redactions?.length)throw new Error('Vorgemerkte Schwärzungen zuerst anwenden oder verwerfen.')
   if (state.pages?.some(p => p.hasXfa))
     throw new Error('XFA-Formulare werden bei Seitenoperationen noch nicht unterstützt.')
   const before = snapshot(state),
     after = snapshot(state)
   mutate(after)
   const assign = (target: EditorState, value: typeof before) => {
+    target.redactionApplied = value.redactionApplied
+    target.redactions = structuredClone(value.redactions)
     target.formValues = value.formValues ? structuredClone(value.formValues) : undefined
     target.pages = structuredClone(value.pages)
     target.overlays = value.overlays.map(cloneOverlay)

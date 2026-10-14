@@ -167,7 +167,7 @@ export function PagesManager({ nativeWidgets = [], pdf, store, original, busy, o
     const token = ++request.current, version = store.getVersion()
     setA4Open(true); setWorking(true); setProblem(null)
     try {
-      const prepared = await normalizeA4(new Uint8Array(original), store.state.pageSources ?? [], pages, store.state.overlays, store.state.formValues)
+      const prepared = await normalizeA4(new Uint8Array(original), store.state.pageSources ?? [], pages, store.state.overlays, store.state.formValues, store.state.redactionApplied||pages.some(page=>page.redacted))
       if (request.current !== token) return
       const previewPdf = await loadPdf('A4-Vorschau', new Uint8Array(prepared.source.bytes))
       if (request.current !== token) { await previewPdf.destroy(); return }
@@ -233,7 +233,7 @@ export function PagesManager({ nativeWidgets = [], pdf, store, original, busy, o
         pages,
         store.state.overlays,
         ids,
-        store.state.formValues,
+        store.state.formValues, store.state.redactionApplied||pages.some(page=>page.redacted),
       )
       if (token !== request.current) return
       downloadPdf(bytes, ids.length === 1 ? `Seite-${pages.findIndex(p => p.id === ids[0]) + 1}.pdf` : `Auswahl-${ids.length}-Seiten.pdf`)

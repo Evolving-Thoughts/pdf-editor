@@ -1,3 +1,4 @@
+import { sanitizeRedactedSource } from './redactionSafety'
 import type { FormValues } from '../forms'
 import { applyFormValues, updateFormAppearances } from './acroForm'
 import { PDFDict, PDFDocument, PDFName, PDFNumber, PDFObjectCopier, PDFPage, PDFPageLeaf, StandardFonts, degrees } from 'pdf-lib'
@@ -50,11 +51,12 @@ export async function composePages(
   sources: PageSource[],
   pages: DocumentPage[],
   formValues: FormValues = {},
+  secure = pages.some(page => page.redacted),
 ): Promise<Uint8Array> {
   if (!pages.length) throw new Error('Ein PDF muss mindestens eine Seite enthalten.')
   // An ordinary overlay edit must not rebuild the page tree: preserve forms,
   // metadata, outlines and other document-level structures when no page changed.
-  if (pages.every((page, index) => page.sourceId === 'original' && page.sourceIndex === index)) {
+  if (!secure && pages.every((page, index) => page.sourceId === 'original' && page.sourceIndex === index)) {
     const initial = await inspectPages(original, 'original')
     if (
       initial.length === pages.length &&
@@ -84,7 +86,9 @@ export async function composePages(
       if (doc.catalog.lookupMaybe(PDFName.of('AcroForm'), PDFDict)?.has(PDFName.of('XFA')))
         throw new Error('XFA-Formulare werden bei Seitenoperationen noch nicht unterstützt. Die Originaldatei bleibt unverändert.')
       if (applyFormValues(doc, page.sourceId, formValues)) await updateFormAppearances(doc)
-      retainPageWidgets(doc, new Set(pages.filter(p => p.sourceId === page.sourceId).map(p => p.sourceIndex)))
+      const indices = new Set(pages.filter(p => p.sourceId === page.sourceId).map(p => p.sourceIndex))
+      retainPageWidgets(doc, indices)
+      if (secure) sanitizeRedactedSource(doc, indices)
       namespaceFormResources(doc, `Source${loaded.size}`)
       source = { doc, copier: PDFObjectCopier.for(doc.context, output.context) }
       loaded.set(page.sourceId, source)
@@ -170,6 +174,7 @@ export async function exportPageDocument(
   overlays: Overlay[],
   pageId?: string | readonly string[],
   formValues: FormValues = {},
+  secure = pages.some(page => page.redacted),
 ) {
   if (pageId !== undefined) {
     const ids = new Set(typeof pageId === 'string' ? [pageId] : pageId), available = new Set(pages.map(page => page.id))
@@ -179,7 +184,7 @@ export async function exportPageDocument(
     const indices = new Map(chosen.map((page, index) => [page.id, index]))
     const mapped = overlays.filter(overlay => indices.has(pages[overlay.pageIndex]?.id))
       .map(overlay => ({ ...cloneOverlay(overlay), pageIndex: indices.get(pages[overlay.pageIndex].id)! }))
-    return exportPdf(await composePages(original, sources, chosen, formValues), mapped)
+    return exportPdf(await composePages(original, sources, chosen, formValues, secure), mapped)
   }
-  return exportPdf(await composePages(original, sources, pages, formValues), overlays)
+  return exportPdf(await composePages(original, sources, pages, formValues, secure), overlays)
 }

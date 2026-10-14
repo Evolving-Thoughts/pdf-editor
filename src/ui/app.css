@@ -793,3 +793,24 @@
 .native-widget :focus-visible { outline:2px solid #338aff; outline-offset:-2px; }
 .native-highlight-toggle { display:flex; align-items:center; gap:6px; font-size:13px; white-space:nowrap; }
 .native-highlight-toggle input { width:18px; height:18px; accent-color:var(--accent); }
+
+/* T10: pending regions are visibly distinct from ordinary opaque rectangles. */
+.redaction-bar{display:flex;align-items:center;flex-wrap:wrap;gap:8px;padding:8px 12px;background:var(--accent-bg);border-bottom:1px solid var(--border);flex-shrink:0}
+.redaction-bar>div{flex:1 1 260px}.redaction-bar small{display:block;font-size:12px}.redaction-bar label{display:flex;align-items:center;gap:6px;font-size:13px}
+.redaction-bar button,.redaction-bar select,.redaction-confirm button{font:inherit;font-size:14px;min-height:44px;padding:6px 10px;border:1px solid var(--border);border-radius:6px;background:var(--bg);color:var(--text-h)}
+.redaction-bar button:disabled{opacity:.5}.redaction-primary{background:#7132c1!important;color:#fff!important;border-color:#7132c1!important}
+.redaction-confirm{max-width:min(540px,calc(100vw - 24px));max-height:85svh;overflow:auto;padding:20px;background:var(--bg);color:var(--text);border:1px solid var(--border);border-radius:8px;box-shadow:var(--shadow)}
+.redaction-confirm::backdrop{background:#211c3070}.redaction-confirm h2{font-size:20px}.redaction-confirm>div{display:flex;gap:8px}.redaction-confirm p{font-size:14px;line-height:1.5}.redaction-confirm button{flex:1}
+.redaction-overlay{position:absolute;box-sizing:border-box;border:2px dashed #9b43d5;background:#1118;touch-action:none;cursor:move;z-index:4}
+.redaction-overlay.white{background:#ffffffba}.redaction-overlay.selected{outline:1px solid #a65cff}.redaction-overlay.preview{border-style:solid}
+.redaction-grip{position:absolute;width:22px;height:22px;min-height:0;padding:0;border:2px solid #a65cff;background:white;border-radius:2px;touch-action:none}
+.redaction-grip.nw{left:-12px;top:-12px;cursor:nwse-resize}.redaction-grip.ne{right:-12px;top:-12px;cursor:nesw-resize}.redaction-grip.sw{left:-12px;bottom:-12px;cursor:nesw-resize}.redaction-grip.se{right:-12px;bottom:-12px;cursor:nwse-resize}
+.page.redact-tool .textbox,.page.redact-tool .textbox *,.page.redact-tool .image-overlay,.page.redact-tool .image-overlay *,.page.redact-tool .shape-overlay,.page.redact-tool .shape-overlay *{pointer-events:none!important}
+.redaction-notice{font-size:12px;padding:6px 12px;margin:0;background:var(--accent-bg);flex-shrink:0}
+
+/* The wrapped mobile toolbar must not squeeze the document down to a few pixels. */
+@media (max-width: 640px) {
+  .app:has(.redaction-bar) { height: auto; min-height: 100svh; }
+  .app:has(.redaction-bar) .toolbar { position: static; }
+  .app:has(.redaction-bar) .workspace { flex: none; height: 60svh; min-height: 320px; }
+}
