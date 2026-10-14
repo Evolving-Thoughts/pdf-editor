@@ -1,3 +1,4 @@
+import { confirmDefaultExport } from './export-smoke-helper.mjs'
 import { PNG_DATA_URL } from '../tests/imageFixtures.js'
 import { chromium } from 'playwright'
 import { PDFDocument } from 'pdf-lib'
@@ -27,7 +28,7 @@ async function settled() {
 }
 async function download(name, file) {
   const pending = p.waitForEvent('download')
-  await button(name).click()
+  await button(name).click(); if (name === 'Exportieren') await confirmDefaultExport(p)
   const d = await pending
   await d.saveAs(`${out}/${file}`)
   return new Uint8Array(readFileSync(`${out}/${file}`))

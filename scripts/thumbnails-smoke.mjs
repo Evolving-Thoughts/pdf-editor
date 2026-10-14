@@ -1,3 +1,4 @@
+import { confirmDefaultExport } from './export-smoke-helper.mjs'
 // T8: real PDF thumbnails, native HTML drag/drop, export and draft ordering.
 import { chromium } from 'playwright'
 import { PDFDocument, StandardFonts, rgb } from 'pdf-lib'
@@ -24,7 +25,7 @@ async function parsed(bytes) {
   }, Array.from(bytes))
 }
 async function exportOrder(file) {
-  const pending = p.waitForEvent('download'); await btn('Exportieren').click(); await (await pending).saveAs(join(out, file))
+  const pending = p.waitForEvent('download'); await btn('Exportieren').click(); await confirmDefaultExport(p); await (await pending).saveAs(join(out, file))
   return parsed(readFileSync(join(out, file)))
 }
 const thumbnailColor = canvas => canvas.evaluate(el => Array.from(el.getContext('2d').getImageData(5, 5, 1, 1).data).slice(0, 3))

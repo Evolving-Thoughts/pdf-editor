@@ -1,3 +1,4 @@
+import { confirmDefaultExport } from './export-smoke-helper.mjs'
 // Real UI/command/export boundaries; isolated browser data, no fixture store injection.
 import { chromium } from 'playwright'
 import assert from 'node:assert/strict'
@@ -227,7 +228,7 @@ try {
   await page.waitForSelector('.shape-overlay')
   assert.equal(await page.locator('.shape-overlay').count(), 5)
   const download = page.waitForEvent('download')
-  await page.getByRole('button', { name: 'Exportieren', exact: true }).click()
+  await page.getByRole('button', { name: 'Exportieren', exact: true }).click(); await confirmDefaultExport(page)
   await (await download).saveAs(join(artifacts, 'shapes-export.pdf'))
   // Capture selected rectangle, then narrow light/dark controls with unchanged layout.
   await page.locator('.shape-overlay').first().focus()
@@ -266,7 +267,7 @@ try {
     await input.press('Enter')
     const placed = await geometry(exported)
     const downloaded = exported.waitForEvent('download')
-    await exported.getByRole('button', { name: 'Exportieren', exact: true }).click()
+    await exported.getByRole('button', { name: 'Exportieren', exact: true }).click(); await confirmDefaultExport(exported)
     const path = join(artifacts, `shape-page-${rotation}.pdf`)
     await (await downloaded).saveAs(path)
     await exported.locator('input[accept="application/pdf"]').setInputFiles({
@@ -343,7 +344,7 @@ try {
   await draw(exported, 'Textmarker', [100, 330], [300, 330])
   const markerR = await geometry(exported)
   const download2 = exported.waitForEvent('download')
-  await exported.getByRole('button', { name: 'Exportieren', exact: true }).click()
+  await exported.getByRole('button', { name: 'Exportieren', exact: true }).click(); await confirmDefaultExport(exported)
   const baked = join(artifacts, 'correction-marker.pdf')
   await (await download2).saveAs(baked)
   await exported

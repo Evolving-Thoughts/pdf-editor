@@ -1,3 +1,4 @@
+import { confirmDefaultExport } from './export-smoke-helper.mjs'
 // Real local files and UI: matching sheet sizes, editable image overlay, native PDF widgets.
 import { chromium } from 'playwright'
 import { PDFDocument, PDFArray, PDFName, PDFRawStream, decodePDFRawStream } from 'pdf-lib'
@@ -16,7 +17,7 @@ p.on('dialog', d => void d.accept())
 const btn = name => p.getByRole('button', { name, exact: true })
 const settled = () => p.waitForFunction(() => !document.querySelector('.page-manager-message')?.textContent.includes('aktualisiert') && document.querySelector('.page-manager-preview canvas')?.width > 0)
 async function download(name, path) {
-  const pending = p.waitForEvent('download'); await btn(name).click(); await (await pending).saveAs(join(out, path))
+  const pending = p.waitForEvent('download'); await btn(name).click(); if (name === 'Exportieren') await confirmDefaultExport(p); await (await pending).saveAs(join(out, path))
   return PDFDocument.load(readFileSync(join(out, path)))
 }
 const geometry = () => p.locator('.image-overlay').evaluate(el => ({ left: el.style.left, top: el.style.top, width: el.style.width, height: el.style.height, transform: el.style.transform }))

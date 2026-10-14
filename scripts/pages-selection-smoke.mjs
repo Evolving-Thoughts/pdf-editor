@@ -1,3 +1,4 @@
+import { confirmDefaultExport } from './export-smoke-helper.mjs'
 // Approved sidebar: independently scrollable list + checkbox/Shift/Ctrl selection.
 import { chromium } from 'playwright'
 import { PDFDocument, StandardFonts } from 'pdf-lib'
@@ -23,7 +24,7 @@ async function rotationNames(count) {
   }
 }
 const checkbox = index => p.getByRole('checkbox', { name: `Seite ${index} auswählen`, exact: true })
-async function download(name, file) { const event = p.waitForEvent('download'); await btn(name).click(); await (await event).saveAs(join(out, file)); return PDFDocument.load(readFileSync(join(out, file))) }
+async function download(name, file) { const event = p.waitForEvent('download'); await btn(name).click(); if (name === 'Exportieren') await confirmDefaultExport(p); await (await event).saveAs(join(out, file)); return PDFDocument.load(readFileSync(join(out, file))) }
 async function textPages(bytes) {
   return p.evaluate(async data => {
     const { getDocument, GlobalWorkerOptions } = await import('/node_modules/pdfjs-dist/build/pdf.mjs')
