@@ -1,3 +1,5 @@
+import type { FormValues, NativeWidget } from '../core/forms'
+import { inspectNativeForms } from '../core/pdf/acroForm'
 import { useCallback, useEffect, useRef, useState, useSyncExternalStore } from 'react'
 import { addImage, clearDrawing, nudgeImage, nudgeShape, nudgeTextbox, removeImage, removeShape, removeTextbox } from '../core/commands'
 import { EditorStore } from '../core/editorStore'
@@ -54,6 +56,8 @@ function draftSummary(record: DraftRecord): DraftSummary {
 }
 
 export default function App() {
+  const [highlightFields, setHighlightFields] = useState(true)
+  const [formInfo, setFormInfo] = useState<{ pages: DocumentPage[]; widgets: NativeWidget[]; unsupported: string[] } | null>(null)
   const [pageManagerOpen, setPageManagerOpen] = useState(false)
   const [renderedPages, setRenderedPages] = useState<DocumentPage[] | undefined>(undefined)
   const [originalBytes, setOriginalBytes] = useState<ArrayBuffer | null>(null)
@@ -100,6 +104,16 @@ export default function App() {
   useSyncExternalStore(store.subscribe, store.getVersion)
   const overlays = store.state.overlays
   const documentPages = store.state.pages
+  const documentSources = store.state.pageSources
+  const nativeWidgets = formInfo?.pages === documentPages ? formInfo?.widgets ?? [] : []
+  useEffect(() => {
+    if (!originalBytes || !documentPages) return
+    let cancelled = false
+    void inspectNativeForms(new Uint8Array(originalBytes), documentSources ?? [], documentPages).then(result => {
+      if (!cancelled) setFormInfo({ pages: documentPages, ...result })
+    }).catch(problem => { if (!cancelled) setError(problem instanceof Error ? problem.message : 'Formularfelder konnten nicht erkannt werden.') })
+    return () => { cancelled = true }
+  }, [originalBytes, documentPages, documentSources])
   const pageBusy = !!documentPages?.length && renderedPages !== documentPages
   useEffect(() => {
     if (!documentPages || !draftRef.current || pdfPagesRef.current === documentPages) return
@@ -167,6 +181,7 @@ export default function App() {
     // Copy the overlays now: the record must describe this save point even if
     // the user keeps editing while the queued IndexedDB write is waiting.
     const overlaysSnapshot = store.state.overlays.map(cloneOverlay)
+    const formSnapshot = store.state.formValues ? structuredClone(store.state.formValues) : undefined
     const pagesSnapshot = store.state.pages ? structuredClone(store.state.pages) : undefined
     const sourcesSnapshot = [...(store.state.pageSources ?? [])]
     const record = await queuePersistence(async () => {
@@ -180,6 +195,7 @@ export default function App() {
         overlays: overlaysSnapshot,
         pages: pagesSnapshot,
         pageSources: sourcesSnapshot,
+        formValues: formSnapshot,
       })
     })
     if (record) {
@@ -235,7 +251,7 @@ export default function App() {
   }, [ensureDraftDb, queuePersistence, reportDraftProblem])
 
   const replaceDocument = useCallback(
-    (next: PdfHandle, draft: ActiveDraft, nextOverlays: typeof store.state.overlays, pages: DocumentPage[], sources: PageSource[] = []) => {
+    (next: PdfHandle, draft: ActiveDraft, nextOverlays: typeof store.state.overlays, pages: DocumentPage[], sources: PageSource[] = [], formValues?: FormValues) => {
       documentIntentRef.current += 1
       persistenceGenerationRef.current += 1
       if (saveTimerRef.current) {
@@ -254,7 +270,7 @@ export default function App() {
       setOriginalBytes(draft.bytes)
       setSizeWarning(draft.bytes.byteLength > DRAFT_SIZE_WARN_BYTES)
       setPdf(next)
-      store.restore(nextOverlays, pages, sources)
+      store.restore(nextOverlays, pages, sources, formValues)
       pdfPagesRef.current = store.state.pages
       setRenderedPages(store.state.pages)
       void previous?.destroy()
@@ -309,7 +325,7 @@ export default function App() {
           next,
           { id: record.id, name: record.name, createdAt: record.createdAt, bytes },
           record.overlays.map(cloneOverlay),
-          pages, sources,
+          pages, sources, record.formValues,
         )
       } catch {
         setError('Der Entwurf konnte nicht geöffnet werden.')
@@ -506,7 +522,7 @@ export default function App() {
     const draft = draftRef.current
     if (!draft || !store.state.pages?.length || pageBusy) return
     try {
-      const bytes = await exportPageDocument(new Uint8Array(draft.bytes), store.state.pageSources ?? [], store.state.pages, store.state.overlays.map(cloneOverlay))
+      const bytes = await exportPageDocument(new Uint8Array(draft.bytes), store.state.pageSources ?? [], store.state.pages, store.state.overlays.map(cloneOverlay), undefined, store.state.formValues)
       downloadPdf(bytes, draft.name)
     } catch (problem) {setError(problem instanceof Error ? problem.message : 'Das PDF konnte nicht exportiert werden.')}
   }, [store, pageBusy])
@@ -600,6 +616,7 @@ export default function App() {
             >
               T Text
             </button>
+            {nativeWidgets.length > 0 && <label className="native-highlight-toggle"><input type="checkbox" checked={highlightFields} onChange={event => setHighlightFields(event.target.checked)} /> Felder hervorheben</label>}
             <SymbolPicker
               value={symbol}
               active={tool === 'symbol'}
@@ -677,7 +694,7 @@ export default function App() {
         </p>
       )}
       <div className="workspace" ref={workspaceRef}>
-        {pdf && pageManagerOpen && originalBytes && <PagesManager key={activeDraftId} pdf={pdf} store={store} original={originalBytes} busy={pageBusy} onCropActive={setCropActive} />}
+        {pdf && pageManagerOpen && originalBytes && <PagesManager nativeWidgets={nativeWidgets} key={activeDraftId} pdf={pdf} store={store} original={originalBytes} busy={pageBusy} onCropActive={setCropActive} />}
         {!pageManagerOpen && <>
         {pageBusy && <p role="status" className="hint">Seitenansicht wird aktualisiert …</p>}
         {pdf && !pageBusy && (
@@ -687,12 +704,16 @@ export default function App() {
         {pdf && !pageBusy && (tool==='select' || isShapeTool(tool)) && selectedShape && isShape(selectedShape) && shapePageSize?.pdf===pdf && shapePageSize.pageIndex===shapePage && <ShapeToolbar
           key={activeDraftId} workspaceRef={workspaceRef} shape={selectedShape} pageSize={shapePageSize.size} store={store} onSelect={setSelectedId}
           onStyle={shape=>{const next={fill:shape.fill,strokeColor:shape.strokeColor,strokeWidth:shape.strokeWidth};if(shape.shape==='marker')setMarkerStyle(next);else setShapeStyle(next)}} />}
+        {formInfo?.pages === documentPages && !!formInfo?.unsupported.length && <p className="hint" role="status">Nicht unterstützte Formularfelder bleiben unverändert: {formInfo.unsupported.join(', ')}. Signaturen, XFA und PDF-JavaScript werden nicht ausgeführt oder neu erstellt.</p>}
         <div className="pages">
         {pdf && !pageBusy &&
           (documentPages ?? Array.from({length:pdf.pageCount},(_,index)=>({id:String(index)}))).map((page,index) => (
             <PageView
               key={`${activeDraftId}-${page.id}`}
               pdf={pdf}
+              nativeWidgets={nativeWidgets}
+              highlightFields={highlightFields}
+              onFormError={setError}
               pageIndex={index}
               zoom={zoom}
               tool={tool}

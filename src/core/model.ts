@@ -1,3 +1,4 @@
+import type { FormValues } from './forms'
 import type { DocumentPage, PageSource } from './pages'
 // Domain model for overlay elements. Pure data, no framework, no PDF libraries.
 
@@ -117,6 +118,7 @@ export function cloneOverlay(overlay: Overlay): Overlay {
 }
 
 export interface EditorState {
+  formValues?: FormValues
   pages?: DocumentPage[]
   pageSources?: PageSource[]
   overlays: Overlay[]

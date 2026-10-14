@@ -1,3 +1,4 @@
+import type { FormValues } from '../forms'
 import type { DocumentPage, PageSource } from '../pages'
 // Draft persistence in IndexedDB (framework-free, ADR-004). A draft holds the
 // original PDF bytes plus the full overlay state, so closing the tab and
@@ -5,6 +6,7 @@ import type { DocumentPage, PageSource } from '../pages'
 import { isImage, type ImageOverlay, type Overlay } from '../model'
 
 export interface DraftRecord {
+  formValues?: FormValues
   id: string
   /** Display name, usually the original file name. */
   name: string
@@ -181,6 +183,7 @@ export async function loadDraft(db: IDBDatabase, id: string): Promise<DraftRecor
         createdAt: stored.createdAt,
         updatedAt: stored.updatedAt,
         overlays,
+        formValues: stored.formValues,
         pages: stored.pages,
         pageSources: [...sourceRequests].map(([id,request])=>({id,bytes:request.result!})),
         pdfBytes: (bytesRequest.result as ArrayBuffer | undefined) ?? new ArrayBuffer(0),
