@@ -57,7 +57,40 @@ export interface ImageOverlay {
   dataUrl: string
 }
 
-export type Overlay = Textbox | Stroke | ImageOverlay
+export type ShapeKind = 'rect' | 'ellipse' | 'line' | 'arrow' | 'marker'
+
+/** Editable vector shape in displayed page points, with a clockwise center rotation. */
+export interface ShapeOverlay {
+  kind: 'shape'
+  shape: ShapeKind
+  id: string
+  pageIndex: number
+  x: number
+  y: number
+  width: number
+  height: number
+  rotation: number
+  fill: string | null
+  strokeColor: string | null
+  strokeWidth: number
+  /** Endpoint direction within the local rectangle (lines/arrows only). */
+  flipX?: boolean
+  flipY?: boolean
+  /** Immutable normalized local points (textmarker only), y-up fractions. */
+  markerPoints?: StrokePoint[]
+}
+
+export type Overlay = Textbox | Stroke | ImageOverlay | ShapeOverlay
+
+export function isShape(overlay: Overlay): overlay is ShapeOverlay {
+  return 'kind' in overlay && overlay.kind === 'shape'
+}
+
+export type MarkerOverlay = ShapeOverlay & { shape: 'marker'; markerPoints: StrokePoint[] }
+
+export function isMarker(overlay: Overlay): overlay is MarkerOverlay {
+  return isShape(overlay) && overlay.shape === 'marker' && Array.isArray(overlay.markerPoints)
+}
 
 export function isImage(overlay: Overlay): overlay is ImageOverlay {
   return 'kind' in overlay && overlay.kind === 'image'
@@ -72,6 +105,7 @@ export function isTextbox(overlay: Overlay): overlay is Textbox {
 }
 
 export function cloneOverlay(overlay: Overlay): Overlay {
+  if (isShape(overlay) && overlay.markerPoints) return { ...overlay, markerPoints: overlay.markerPoints.map(point => ({ ...point })) }
   if (isStroke(overlay)) return { ...overlay, points: overlay.points.map((point) => ({ ...point })) }
   return { ...overlay }
 }

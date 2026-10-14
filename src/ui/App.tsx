@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useRef, useState, useSyncExternalStore } from 'react'
-import { addImage, clearDrawing, nudgeImage, nudgeTextbox, removeImage, removeTextbox } from '../core/commands'
+import { addImage, clearDrawing, nudgeImage, nudgeShape, nudgeTextbox, removeImage, removeShape, removeTextbox } from '../core/commands'
 import { EditorStore } from '../core/editorStore'
-import { cloneOverlay, createId, isImage, isStroke, isTextbox } from '../core/model'
+import { cloneOverlay, createId, isImage, isMarker, isShape, isStroke, isTextbox } from '../core/model'
 import {
   deleteDraft,
   DRAFT_SIZE_WARN_BYTES,
@@ -15,6 +15,9 @@ import {
 import { loadPdf, type PdfHandle } from '../core/pdf/loadPdf'
 import { importImage } from '../core/images/importImage'
 import { imageGeometry, initialImageGeometry, moveImage } from '../core/images/geometry'
+import { shapeGeometry, moveShape, type ShapeStyle } from '../core/shapes'
+import { ShapeToolbar } from './ShapeToolbar'
+import { SHAPE_TOOLS, isShapeTool } from './tools'
 import { zoomIn, zoomOut } from '../core/viewerState'
 import { DraftsMenu } from './DraftsMenu'
 import { DrawingToolbar } from './DrawingToolbar'
@@ -22,6 +25,12 @@ import { PageView } from './PageView'
 import { SymbolPicker } from './SymbolPicker'
 import type { Tool } from './tools'
 import './app.css'
+
+interface ManualSave {
+  draftId: string
+  version: number
+  status: 'saving' | 'saved' | 'error'
+}
 
 interface ActiveDraft {
   id: string
@@ -47,6 +56,9 @@ export default function App() {
   const [symbol, setSymbol] = useState('✓')
   const [strokeColor, setStrokeColor] = useState('#111111')
   const [strokeWidth, setStrokeWidth] = useState(3)
+  const [shapeStyle,setShapeStyle] = useState<ShapeStyle>({fill:null,strokeColor:'#2455c7',strokeWidth:3})
+  const [markerStyle,setMarkerStyle] = useState<ShapeStyle>({fill:null,strokeColor:'#ffe34d',strokeWidth:24})
+  const [shapePageSize,setShapePageSize] = useState<{pdf:PdfHandle;pageIndex:number;size:{width:number;height:number}}|null>(null)
   const [eraserRadius, setEraserRadius] = useState(8)
   const [error, setError] = useState<string | null>(null)
   const [selectedId, setSelectedId] = useState<string | null>(null)
@@ -54,6 +66,9 @@ export default function App() {
   const [drafts, setDrafts] = useState<DraftSummary[]>([])
   const [draftsError, setDraftsError] = useState<string | null>(null)
   const [activeDraftId, setActiveDraftId] = useState<string | null>(null)
+  const [manualSave, setManualSave] = useState<ManualSave | null>(null)
+  const manualSaveRequestRef = useRef<object | null>(null)
+  const inputEpochRef = useRef(0)
   const [loadingDraftId, setLoadingDraftId] = useState<string | null>(null)
   // Current handle in a ref so destroy() runs outside React state updaters
   // (updaters must stay pure; StrictMode double-invokes them in dev).
@@ -75,6 +90,13 @@ export default function App() {
   const [store] = useState(() => new EditorStore())
   useSyncExternalStore(store.subscribe, store.getVersion)
   const overlays = store.state.overlays
+  const selectedShape = overlays.find(o=>o.id===selectedId && isShape(o))
+  const shapePage = selectedShape?.pageIndex
+  useEffect(()=>{
+    let cancelled=false
+    if(pdf && shapePage!==undefined) void pdf.getPageSize(shapePage+1).then(size=>{if(!cancelled)setShapePageSize({pdf,pageIndex:shapePage,size})})
+    return ()=>{cancelled=true}
+  },[pdf,shapePage])
 
   const ensureDraftDb = useCallback(async () => {
     dbRef.current ??= await openDraftDb()
@@ -110,7 +132,7 @@ export default function App() {
       saveTimerRef.current = null
     }
     const draft = draftRef.current
-    if (!draft) return
+    if (!draft) return null
     const generation = persistenceGenerationRef.current
     // Copy the overlays now: the record must describe this save point even if
     // the user keeps editing while the queued IndexedDB write is waiting.
@@ -130,7 +152,33 @@ export default function App() {
       rememberDraft(record)
       setDraftsError(null)
     }
+    return record
   }, [ensureDraftDb, queuePersistence, rememberDraft, store])
+
+  const onManualSave = useCallback(async () => {
+    const draft = draftRef.current
+    if (!draft || (manualSave?.draftId === draft.id && manualSave.status === 'saving')) return
+    const request = {}
+    manualSaveRequestRef.current = request
+    const generation = persistenceGenerationRef.current
+    const version = store.getVersion()
+    const inputEpoch = inputEpochRef.current
+    const stillCurrent = () => manualSaveRequestRef.current === request &&
+      draftRef.current?.id === draft.id && persistenceGenerationRef.current === generation
+    setManualSave({ draftId: draft.id, version, status: 'saving' })
+    try {
+      // A normal button click blurs the active textarea first, committing its
+      // text before persistActiveDraft snapshots and queues this save point.
+      const record = await persistActiveDraft()
+      if (!stillCurrent()) return
+      setManualSave(record && store.getVersion() === version && inputEpochRef.current === inputEpoch
+        ? { draftId: draft.id, version, status: 'saved' } : null)
+    } catch (problem) {
+      if (!stillCurrent()) return
+      reportDraftProblem(problem, 'Der Entwurf konnte nicht gespeichert werden. Bitte erneut versuchen.')
+      setManualSave({ draftId: draft.id, version, status: 'error' })
+    }
+  }, [manualSave, persistActiveDraft, reportDraftProblem, store])
 
   const refreshDrafts = useCallback(async () => {
     const list = await queuePersistence(async () => listDrafts(await ensureDraftDb()))
@@ -164,6 +212,8 @@ export default function App() {
       pdfRef.current = next
       draftRef.current = draft
       setActiveDraftId(draft.id)
+      setManualSave(null)
+      manualSaveRequestRef.current = null
       setSelectedId(null)
       setSizeWarning(draft.bytes.byteLength > DRAFT_SIZE_WARN_BYTES)
       setPdf(next)
@@ -240,6 +290,8 @@ export default function App() {
         // Pause auto-save while deleting; on failure it resumes and persists
         // any edits made during the confirmation/DB round trip.
         persistenceGenerationRef.current += 1
+        setManualSave(null)
+        manualSaveRequestRef.current = null
         if (saveTimerRef.current) {
           clearTimeout(saveTimerRef.current)
           saveTimerRef.current = null
@@ -354,9 +406,9 @@ export default function App() {
       }
       if ((event.key === 'Delete' || event.key === 'Backspace') && selectedId) {
         const box = store.state.overlays.find((o) => o.id === selectedId)
-        if (box && (isTextbox(box) || isImage(box))) {
+        if (box && (isTextbox(box) || isImage(box) || isShape(box))) {
           event.preventDefault()
-          store.dispatch(isImage(box) ? removeImage(box) : removeTextbox(box))
+          store.dispatch(isImage(box) ? removeImage(box) : isShape(box) ? removeShape(box) : removeTextbox(box))
           setSelectedId(null)
         }
         return
@@ -365,16 +417,20 @@ export default function App() {
         const box = store.state.overlays.find((o) => o.id === selectedId)
         if (!box || isStroke(box)) return
         event.preventDefault()
-        if (isImage(box)) {
+        if (isImage(box) || isShape(box)) {
           const step = event.shiftKey ? 10 : 1
           const element = workspaceRef.current?.querySelector<HTMLElement>(`[data-page-index="${box.pageIndex}"]`)
           if (!element) return
-          const before = imageGeometry(box)
-          const next = moveImage(before,
-            event.key === 'ArrowLeft' ? -step : event.key === 'ArrowRight' ? step : 0,
-            event.key === 'ArrowUp' ? step : event.key === 'ArrowDown' ? -step : 0,
-            { width: element.clientWidth / zoom, height: element.clientHeight / zoom })
-          if (next.x !== box.x || next.y !== box.y) store.dispatch(nudgeImage(box.id, before, next))
+          const stepX = event.key === 'ArrowLeft' ? -step : event.key === 'ArrowRight' ? step : 0
+          const stepY = event.key === 'ArrowUp' ? step : event.key === 'ArrowDown' ? -step : 0
+          const page = {width:element.clientWidth/zoom,height:element.clientHeight/zoom}
+          if(isImage(box)) {
+            const before=imageGeometry(box), next=moveImage(before,stepX,stepY,page)
+            if(next.x!==box.x || next.y!==box.y) store.dispatch(nudgeImage(box.id,before,next))
+          } else {
+            const before=shapeGeometry(box), next=moveShape(before,stepX,stepY,page)
+            if(next.x!==box.x || next.y!==box.y) store.dispatch(nudgeShape(box.id,before,next))
+          }
           return
         }
         const step = event.shiftKey ? 10 : 1
@@ -415,8 +471,18 @@ export default function App() {
     setTimeout(() => URL.revokeObjectURL(url), 1000)
   }, [pdf, store])
 
+  const visibleSave = manualSave?.draftId === activeDraftId &&
+    (manualSave.status !== 'saved' || manualSave.version === store.getVersion()) ? manualSave : null
+  const saveMessage = visibleSave?.status === 'saving' ? 'Entwurf wird gespeichert …'
+    : visibleSave?.status === 'saved' ? '✓ Entwurf gespeichert · Nur auf diesem Gerät.'
+    : visibleSave?.status === 'error' ? 'Der Entwurf konnte nicht gespeichert werden. Bitte erneut versuchen.'
+    : 'Automatisches Speichern ist aktiv · Entwürfe bleiben auf diesem Gerät.'
+
   return (
-    <div className="app">
+    <div className="app" onChange={() => {
+      inputEpochRef.current += 1
+      setManualSave(current => current?.status === 'saved' ? null : current)
+    }}>
       <header className="toolbar">
         <input
           ref={fileInputRef}
@@ -452,6 +518,12 @@ export default function App() {
         />
         {pdf && (
           <>
+            <button type="button" aria-label="Speichern" title="Aktuellen Entwurf auf diesem Gerät speichern"
+              disabled={visibleSave?.status === 'saving'} onClick={() => void onManualSave()}>
+              <svg className="tool-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+                strokeWidth="1.7" aria-hidden="true"><path d="M4 3h13l3 3v15H4zM8 3v6h8V3M8 21v-8h8v8" /></svg>
+              {visibleSave?.status === 'saving' ? 'Speichert …' : 'Speichern'}
+            </button>
             <span className="file-info">
               {pdf.fileName} · {pdf.pageCount} {pdf.pageCount === 1 ? 'Seite' : 'Seiten'}
             </span>
@@ -524,6 +596,10 @@ export default function App() {
               </svg>
               Radierer
             </button>
+            {SHAPE_TOOLS.map(option=><button key={option.tool} type="button" className="tool" aria-label={option.label}
+              aria-pressed={tool===option.tool} onClick={()=>{setSelectedId(null);setTool(option.tool)}}>
+              <svg className="tool-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7" aria-hidden="true"><path d={option.path} /></svg>{option.label}
+            </button>)}
             <span className="separator" />
             <button type="button" aria-label="Rückgängig" disabled={!store.canUndo} onClick={() => store.undo()} title="Rückgängig (Strg+Z)">
               ↩︎
@@ -537,6 +613,9 @@ export default function App() {
           </>
         )}
       </header>
+      {pdf && <p className="draft-save-status" role={visibleSave?.status === 'error' ? 'alert' : 'status'}>
+        {saveMessage}
+      </p>}
       {error && (
         <p role="alert" className="error">
           {error}
@@ -557,6 +636,9 @@ export default function App() {
           <DrawingToolbar workspaceRef={workspaceRef} tool={tool} color={strokeColor} width={strokeWidth}
             eraserRadius={eraserRadius} onColor={setStrokeColor} onWidth={setStrokeWidth} onEraserRadius={setEraserRadius} />
         )}
+        {pdf && (tool==='select' || isShapeTool(tool)) && selectedShape && isShape(selectedShape) && shapePageSize?.pdf===pdf && shapePageSize.pageIndex===shapePage && <ShapeToolbar
+          key={activeDraftId} workspaceRef={workspaceRef} shape={selectedShape} pageSize={shapePageSize.size} store={store} onSelect={setSelectedId}
+          onStyle={shape=>{const next={fill:shape.fill,strokeColor:shape.strokeColor,strokeWidth:shape.strokeWidth};if(shape.shape==='marker')setMarkerStyle(next);else setShapeStyle(next)}} />}
         <div className="pages">
         {pdf &&
           Array.from({ length: pdf.pageCount }, (_, index) => (
@@ -570,6 +652,8 @@ export default function App() {
               strokeColor={strokeColor}
               strokeWidth={strokeWidth}
               eraserRadius={eraserRadius}
+              shapeStyle={shapeStyle}
+              markerStyle={markerStyle}
               overlays={overlays}
               store={store}
               selectedId={selectedId}
@@ -581,10 +665,10 @@ export default function App() {
       </div>
       {pdf && (
         <footer className="drawing-footer">
-          <button type="button" disabled={!overlays.some(isStroke)}
-            title="Alle Freihandstriche in diesem Dokument löschen · Texte, Bilder und PDF bleiben erhalten"
+          <button type="button" disabled={!overlays.some(o=>isStroke(o)||isMarker(o))}
+            title="Freihandstriche und Textmarker löschen · Formen, Texte, Bilder und PDF bleiben erhalten"
             onClick={() => {
-              if (store.state.overlays.some(isStroke)) store.dispatch(clearDrawing(store.state.overlays))
+              if (store.state.overlays.some(o=>isStroke(o)||isMarker(o))) store.dispatch(clearDrawing(store.state.overlays))
             }}>
             Zeichnung löschen
           </button>

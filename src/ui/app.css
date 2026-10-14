@@ -656,3 +656,48 @@
   .image-options label { min-width: 76px; }
   .image-actions { flex-basis: 100%; justify-content: flex-end; }
 }
+
+/* T5: local vector paint order is unchanged; selected frames never raise the source. */
+.shape-overlay { position:absolute; cursor:grab; touch-action:none; user-select:none; transform-origin:center; }
+.shape-vector { display:block; pointer-events:none; }
+.shape-overlay.selected { outline:2px solid var(--accent); }
+.shape-overlay:focus-visible { outline:2px dashed var(--accent); outline-offset:4px; }
+.page.drawing-tool .shape-overlay, .page.text-tool .shape-overlay, .page.symbol-tool .shape-overlay { pointer-events:none; }
+.shape-overlay { min-width:0; min-height:0; }
+.shape-endpoint { cursor:crosshair; }
+.shape-toolbar { width:360px; max-height:calc(100% - 16px); overflow:auto; }
+.shape-options { padding:12px; display:flex; flex-direction:column; gap:8px; color:var(--text); font-size:14px; }
+.shape-heading { display:flex; justify-content:space-between; gap:8px; margin-bottom:2px; }
+.shape-heading b { color:var(--text-h); }
+.shape-row { display:flex; align-items:center; gap:4px; }
+.shape-row > span:first-child { width:68px; flex-shrink:0; }
+.shape-color { width:22px; height:22px; border-radius:50%; border:1px solid #888; display:grid; place-items:center; color:#fff; text-shadow:0 1px 2px #000; }
+.shape-color.light-color { color:#111; text-shadow:none; }
+.no-color { background:linear-gradient(135deg,transparent 47%,var(--text) 48%,var(--text) 52%,transparent 53%); }
+.shape-angle-input { position:relative; min-width:0; flex:1; }
+.shape-angle-input input { width:100%; box-sizing:border-box; min-height:44px; font:inherit; padding:8px 20px 8px 8px; color:var(--text-h); background:var(--bg); border:1px solid var(--border); border-radius:6px; }
+.shape-angle-input span { position:absolute; right:8px; top:12px; }
+.shape-actions { display:flex; justify-content:flex-end; gap:8px; margin-top:4px; }
+.shape-actions button:first-child { padding:0 12px; }
+.shape-hit { pointer-events:stroke; }
+.page.drawing-tool .shape-hit, .page.text-tool .shape-hit, .page.symbol-tool .shape-hit { pointer-events:none; }
+
+.shape-angle button svg, .shape-actions button svg { width:20px; height:20px; }
+
+/* Explicit grips remain editable; dragging any ordinary source/page area creates again. */
+.page.drawing-tool .shape-overlay .image-handle,
+.page.drawing-tool .shape-overlay .image-rotate-handle { pointer-events:auto; }
+
+/* Explicit save feedback remains visible without opening the drafts menu. */
+.draft-save-status {
+  padding: 8px 12px;
+  margin: 0;
+  font-size: 13px;
+  text-align: left;
+  border-bottom: 1px solid var(--border);
+  flex-shrink: 0;
+}
+.draft-save-status[role="alert"] { color: #b91c1c; }
+@media (prefers-color-scheme: dark) {
+  .draft-save-status[role="alert"] { color: #f87171; }
+}

@@ -217,7 +217,7 @@ function ImageNumberInput({ label, unit, min, value, onCommit }: { label: string
   </label>
 }
 
-function RotationIcon({ clockwise = false }: { clockwise?: boolean }) {
+export function RotationIcon({ clockwise = false }: { clockwise?: boolean }) {
   return <svg viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round">
     <path d={clockwise ? 'M 21 10 a 9 9 0 1 0 -1.5 7 M 21 4 v 6 h -6' : 'M 3 10 a 9 9 0 1 1 1.5 7 M 3 4 v 6 h 6'} />
   </svg>

@@ -2,6 +2,7 @@ import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react
 import { moveTextbox, removeTextbox, updateTextbox } from '../core/commands'
 import type { EditorStore } from '../core/editorStore'
 import { isTextbox, patchOverlay, type OverlayFont, type Textbox } from '../core/model'
+import { TEXT_LINE_HEIGHT as LINE_HEIGHT } from '../core/textLayout'
 import type { Tool } from './tools'
 
 interface FontCss {
@@ -28,7 +29,6 @@ const FONT_OPTIONS: Array<{ value: OverlayFont; label: string }> = [
 const SIZE_PRESETS = [8, 10, 12, 14, 18, 24, 36]
 const MIN_FONT_SIZE = 4
 const MAX_FONT_SIZE = 200
-const LINE_HEIGHT = 1.2
 
 function clampFontSize(raw: string): number | null {
   const parsed = Number(raw)
@@ -160,6 +160,9 @@ export function TextboxView({ box, zoom, pageHeightPts, selected, tool, store, o
   const [focused, setFocused] = useState(false)
   const beforeEdit = useRef(box.text)
   const textareaRef = useRef<HTMLTextAreaElement>(null)
+  const baselineLineRef = useRef<HTMLSpanElement>(null)
+  const baselineMarkerRef = useRef<HTMLSpanElement>(null)
+  const anchorRef = useRef<HTMLDivElement>(null)
   const dragFrom = useRef<{ pointerX: number; pointerY: number; x: number; y: number } | null>(null)
 
   const displayText = focused ? draft : box.text
@@ -188,7 +191,22 @@ export function TextboxView({ box, zoom, pageHeightPts, selected, tool, store, o
     )
     el.style.width = `${Math.max(40, Math.ceil(width) + 10 + Math.ceil(px * 0.2))}px`
     el.style.height = `${Math.ceil(lines * px * LINE_HEIGHT) + 6}px`
-  }, [displayText, box.font, box.bold, box.italic, box.fontSize, zoom])
+    // CSS padding/border must not move glyphs away from the stored PDF origin.
+    // Canvas font bounds are not the CSS line-box baseline: their metrics and
+    // leading are rounded differently. Measure a zero-height inline baseline
+    // marker in the same inherited font/line-height as the textarea instead.
+    const line = baselineLineRef.current
+    const marker = baselineMarkerRef.current
+    if (!line || !marker) return
+    const baseline = marker.getBoundingClientRect().top - line.getBoundingClientRect().top
+    const chrome = getComputedStyle(el)
+    const insetX = parseFloat(chrome.paddingLeft) + parseFloat(chrome.borderLeftWidth)
+    const insetY = parseFloat(chrome.paddingTop) + parseFloat(chrome.borderTopWidth)
+    if (anchorRef.current) {
+      anchorRef.current.style.left = `${box.x * zoom - insetX}px`
+      anchorRef.current.style.top = `${(pageHeightPts - box.y) * zoom - baseline - insetY}px`
+    }
+  }, [displayText, box.font, box.bold, box.italic, box.fontSize, box.x, box.y, pageHeightPts, zoom])
 
   // Focus the textarea when a new (still empty) box gets selected.
   useEffect(() => {
@@ -247,6 +265,7 @@ export function TextboxView({ box, zoom, pageHeightPts, selected, tool, store, o
 
   return (
     <div
+      ref={anchorRef}
       className={`textbox${selected ? ' selected' : ''}`}
       style={{ left, top, ...fontCss, fontSize: box.fontSize * zoom }}
       onPointerDown={(event) => {
@@ -254,6 +273,19 @@ export function TextboxView({ box, zoom, pageHeightPts, selected, tool, store, o
         onSelect(box.id)
       }}
     >
+      <span
+        ref={baselineLineRef}
+        aria-hidden="true"
+        style={{
+          position: 'absolute', visibility: 'hidden', pointerEvents: 'none',
+          whiteSpace: 'pre', lineHeight: LINE_HEIGHT,
+        }}
+      >
+        Mg<span
+          ref={baselineMarkerRef}
+          style={{ display: 'inline-block', width: 0, height: 0, verticalAlign: 'baseline' }}
+        />
+      </span>
       {selected && (
         <div className="minibar">
           {!isSymbol && (
@@ -332,7 +364,7 @@ export function TextboxView({ box, zoom, pageHeightPts, selected, tool, store, o
         ref={textareaRef}
         // text-decoration does not propagate into the textarea's text (it is
         // a replaced element), so underline must be set on the element itself.
-        style={{ textDecoration: box.underline ? 'underline' : undefined }}
+        style={{ lineHeight: LINE_HEIGHT, textDecoration: box.underline ? 'underline' : undefined }}
         value={displayText}
         rows={1}
         placeholder={isSymbol ? undefined : 'Text …'}
