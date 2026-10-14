@@ -69,7 +69,7 @@ try {
   await p.waitForSelector('.image-overlay'); assert.deepEqual(await geometry(), edited)
   await btn('Seiten verwalten').click(); await settled()
   await p.locator('.page-manager-row').first().getByRole('button').first().click(); await settled()
-  await btn('Seite im Uhrzeigersinn drehen').click(); await settled()
+  await btn('1 Seite im Uhrzeigersinn drehen').click(); await settled()
   await btn('Zuschneiden').click(); await p.getByLabel('Links · mm').fill('5'); await btn('Zuschnitt anwenden').click(); await settled()
   const extracted = await download('Extrahieren', 'form-cropped.pdf')
   assert.equal(extracted.getForm().getTextField('person.name').getText(), 'Ada Lovelace')

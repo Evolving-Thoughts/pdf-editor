@@ -98,7 +98,7 @@ try {
   await button('＋ Seiten einfügen').click()
   assert.equal(await p.getByLabel('Einfügeposition').inputValue(), '2')
   await p.keyboard.press('Escape')
-  await button('Seite im Uhrzeigersinn drehen').click()
+  await button('1 Seite im Uhrzeigersinn drehen').click()
   await settled()
   assert.match(await p.locator('.page-manager-row.selected').textContent(), /90°/)
   assert.match(await p.locator('.page-manager-preview .textbox').getAttribute('style'), /rotate\(90deg\)/)

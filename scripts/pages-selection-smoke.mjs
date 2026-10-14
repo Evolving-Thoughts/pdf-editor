@@ -15,6 +15,13 @@ const btn = name => p.getByRole('button', { name, exact: true })
 const ready = () => p.waitForFunction(() => document.querySelector('.page-manager-preview canvas')?.width > 0 && !document.querySelector('.page-manager-message')?.textContent.includes('aktualisiert') && !document.querySelector('.page-manager-message')?.textContent.includes('verarbeitet'))
 const title = (index, modifiers = []) => p.locator('.page-manager-select').nth(index - 1).click({ modifiers })
 const checked = () => p.locator('.page-manager-check input').evaluateAll(inputs => inputs.flatMap((el, i) => el.checked ? [i + 1] : []))
+async function rotationNames(count) {
+  for (const direction of ['im', 'gegen den']) {
+    const name = `${count} ${count === 1 ? 'Seite' : 'Seiten'} ${direction} Uhrzeigersinn drehen`
+    assert.equal(await btn(name).count(), 1, `Accessible rotation name: ${name}`)
+    assert.equal(await btn(name).isDisabled(), count === 0)
+  }
+}
 const checkbox = index => p.getByRole('checkbox', { name: `Seite ${index} auswählen`, exact: true })
 async function download(name, file) { const event = p.waitForEvent('download'); await btn(name).click(); await (await event).saveAs(join(out, file)); return PDFDocument.load(readFileSync(join(out, file))) }
 async function textPages(bytes) {
@@ -34,6 +41,7 @@ try {
   await p.locator('input[accept="application/pdf"]').setInputFiles({ name: 'many.pdf', mimeType: 'application/pdf', buffer: Buffer.from(await doc.save()) })
   await p.waitForFunction(() => document.querySelector('.pages .page canvas')?.width > 0)
   await btn('Seiten verwalten').click(); await ready(); assert.equal(await p.locator('.page-manager-row').count(), 32)
+  await rotationNames(1)
   await title(2); assert.deepEqual(await checked(), [1])
   await title(4, ['Shift']); assert.deepEqual(await checked(), [2, 3, 4])
   await title(15, ['Control']); assert.deepEqual(await checked(), [2, 3, 4, 15])
@@ -43,12 +51,13 @@ try {
   await title(26, ['Control', 'Shift']); assert.deepEqual(await checked(), [21, 22, 23, 24, 25, 26])
   await checkbox(30).click({ modifiers: ['Control'] }); assert.deepEqual(await checked(), [21, 22, 23, 24, 25, 26, 30])
   await title(2); await title(4, ['Shift']); assert.deepEqual(await checked(), [2, 3, 4])
+  await rotationNames(3)
   assert.equal(await btn('Zuschneiden').isDisabled(), true)
   const fixed = await p.locator('.page-manager-controls').boundingBox()
   await p.locator('.page-manager-list').evaluate(el => el.scrollTop = el.scrollHeight)
   const scroll = await p.locator('.page-manager-list').evaluate(el => el.scrollTop)
   assert.ok(scroll > 1000); assert.equal((await p.locator('.page-manager-controls').boundingBox()).y, fixed.y)
-  await btn('Seite im Uhrzeigersinn drehen').click(); await ready()
+  await btn('3 Seiten im Uhrzeigersinn drehen').click(); await ready()
   assert.equal(await p.locator('.page-manager-list').evaluate(el => el.scrollTop), scroll)
   let output = await download('Exportieren', 'rotated.pdf')
   assert.deepEqual(output.getPages().map(page => page.getRotation().angle), Array.from({ length: 32 }, (_, i) => [1, 2, 3].includes(i) ? 90 : 0))
@@ -66,7 +75,7 @@ try {
   await btn('Seite 2 nach unten').click(); await ready(); assert.deepEqual(await checked(), [2, 3, 4])
   await title(3); await title(4, ['Shift']); assert.deepEqual(await checked(), [3, 4])
   await download('Extrahieren', 'reordered.pdf'); assert.deepEqual((await textPages(readFileSync(join(out, 'reordered.pdf')))).map(page => /Fixture page \d+/.exec(page.text)[0]), ['Fixture page 2', 'Fixture page 4'])
-  await btn('Auswahl aufheben').click(); assert.equal(await btn('Extrahieren').isDisabled(), true)
+  await btn('Auswahl aufheben').click(); await rotationNames(0); assert.equal(await btn('Extrahieren').isDisabled(), true)
   await checkbox(32).focus(); await p.keyboard.press('Space'); assert.deepEqual(await checked(), [32]); assert.equal(await btn('Zuschneiden').isDisabled(), false)
   await p.screenshot({ path: join(out, 'desktop.png') })
   await p.setViewportSize({ width: 390, height: 1000 })
@@ -80,7 +89,7 @@ try {
   assert.ok(await p.evaluate(() => document.documentElement.scrollWidth <= innerWidth))
   await p.screenshot({ path: join(out, 'mobile.png'), fullPage: true })
   await p.setViewportSize({ width: 1280, height: 1100 })
-  await btn('Alle auswählen').click(); assert.equal((await checked()).length, 32)
+  await btn('Alle auswählen').click(); assert.equal((await checked()).length, 32); await rotationNames(32)
   await btn('32 Seiten löschen').click(); await btn('32 Seiten löschen').click(); await p.waitForSelector('.page-manager-empty')
   assert.equal(await btn('Exportieren').isDisabled(), true); assert.equal(await btn('Alle auswählen').isDisabled(), true)
   await btn('Rückgängig').click(); await ready(); assert.equal((await checked()).length, 32)

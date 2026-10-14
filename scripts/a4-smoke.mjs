@@ -86,7 +86,7 @@ try {
   await p.reload(); await p.getByRole('button', { name: /Entwürfe/ }).click(); await p.locator('.draft-open').first().click()
   await p.waitForSelector('.pages .image-overlay'); assert.equal(await p.locator('.pages .image-overlay').evaluate(el => el.style.left), imagePosition)
   await btn('Seiten verwalten').click(); await ready(); await expectSizes(await download('Exportieren', 'restored.pdf'), true)
-  await choose(0); await btn('Seite im Uhrzeigersinn drehen').click(); await ready()
+  await choose(0); await btn('1 Seite im Uhrzeigersinn drehen').click(); await ready()
   const extracted = await download('Extrahieren', 'rotated.pdf'); near(extracted.getPage(0).getRotation().angle, 90)
   assert.equal(extracted.getForm().getTextField('person.name').getText(), 'Ada')
   await btn('Rückgängig').click(); await ready()

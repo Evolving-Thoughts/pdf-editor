@@ -385,7 +385,7 @@ export function PagesManager({ pdf, store, original, busy, onCropActive }: Props
             </button>
             <button
               disabled={!selection.length || locked}
-              aria-label="Seite gegen den Uhrzeigersinn drehen"
+              aria-label={`${pageCount(selection.length)} gegen den Uhrzeigersinn drehen`}
               onClick={() =>
                 run(() => store.dispatch(rotatePages(store.state, selection, false)), `${pageCount(selection.length)} um 90° gedreht.`)
               }
@@ -394,7 +394,7 @@ export function PagesManager({ pdf, store, original, busy, onCropActive }: Props
             </button>
             <button
               disabled={!selection.length || locked}
-              aria-label="Seite im Uhrzeigersinn drehen"
+              aria-label={`${pageCount(selection.length)} im Uhrzeigersinn drehen`}
               onClick={() =>
                 run(() => store.dispatch(rotatePages(store.state, selection, true)), `${pageCount(selection.length)} um 90° gedreht.`)
               }
