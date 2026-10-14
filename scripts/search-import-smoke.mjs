@@ -1,8 +1,8 @@
+import { chromiumPath } from './browser-helper.mjs'
 import { confirmDefaultExport, openProtectedExport } from './export-smoke-helper.mjs'
 import { PNG_DATA_URL } from '../tests/imageFixtures.js'
 import { chromium } from 'playwright'
 import { PDFDocument, StandardFonts, degrees } from 'pdf-lib'
-import { execFileSync } from 'node:child_process'
 import { readFileSync, mkdirSync, mkdtempSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
@@ -17,9 +17,7 @@ const fixtures = JSON.parse(
   ),
 ).pdfs
 const browser = await chromium.launch({
-  executablePath: execFileSync('which', ['chromium'], {
-    encoding: 'utf8',
-  }).trim(),
+  executablePath: chromiumPath(),
   args: ['--no-sandbox'],
 })
 const p = await browser.newPage({

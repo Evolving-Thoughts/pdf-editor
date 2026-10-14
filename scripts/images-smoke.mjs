@@ -1,8 +1,9 @@
+import { fileURLToPath } from 'node:url'
+import { chromiumPath } from './browser-helper.mjs'
 import { confirmDefaultExport } from './export-smoke-helper.mjs'
 // Real-browser integration checks for T6. Isolated contexts: no user data.
 import { chromium } from 'playwright'
 import assert from 'node:assert/strict'
-import { execFileSync } from 'node:child_process'
 import { mkdirSync, mkdtempSync, readFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
@@ -11,9 +12,9 @@ import { PNG_DATA_URL, JPEG_DATA_URL, EXIF_JPEG_DATA_URL } from '../tests/imageF
 const base = process.env.SMOKE_URL ?? 'http://localhost:5202'
 const artifacts = process.env.SMOKE_ARTIFACT_DIR ?? mkdtempSync(join(tmpdir(), 'pdf-editor-t6-'))
 mkdirSync(artifacts, { recursive: true })
-const browser = await chromium.launch({ executablePath: process.env.CHROMIUM_PATH ?? execFileSync('which', ['chromium'], { encoding: 'utf8' }).trim(), args: ['--no-sandbox'] })
+const browser = await chromium.launch({ executablePath: chromiumPath(), args: ['--no-sandbox'] })
 const errors = []
-const fixture = new URL('../tests/fixtures/zweiseitig.pdf', import.meta.url).pathname
+const fixture = fileURLToPath(new URL('../tests/fixtures/zweiseitig.pdf', import.meta.url))
 const png = { name: 'transparent.png', mimeType: 'image/png', buffer: Buffer.from(PNG_DATA_URL.split(',')[1], 'base64') }
 const jpg = { name: 'photo.jpg', mimeType: 'image/jpeg', buffer: Buffer.from(JPEG_DATA_URL.split(',')[1], 'base64') }
 const watch = page => { page.on('pageerror', error => errors.push(String(error))) }

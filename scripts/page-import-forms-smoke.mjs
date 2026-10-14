@@ -1,15 +1,15 @@
+import { chromiumPath } from './browser-helper.mjs'
 import { confirmDefaultExport } from './export-smoke-helper.mjs'
 // Real local files and UI: matching sheet sizes, editable image overlay, native PDF widgets.
 import { chromium } from 'playwright'
 import { PDFDocument, PDFArray, PDFName, PDFRawStream, decodePDFRawStream } from 'pdf-lib'
-import { execFileSync } from 'node:child_process'
 import { mkdtempSync, readFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import assert from 'node:assert/strict'
 import { PNG_DATA_URL } from '../tests/imageFixtures.js'
 const out = process.env.SMOKE_ARTIFACT_DIR ?? mkdtempSync(join(tmpdir(), 'pdf-page-import-'))
-const browser = await chromium.launch({ executablePath: execFileSync('which', ['chromium'], { encoding: 'utf8' }).trim(), args: ['--no-sandbox'] })
+const browser = await chromium.launch({ executablePath: chromiumPath(), args: ['--no-sandbox'] })
 const p = await browser.newPage({ viewport: { width: 1280, height: 1000 }, acceptDownloads: true })
 const errors = []
 p.on('pageerror', e => errors.push(String(e)))

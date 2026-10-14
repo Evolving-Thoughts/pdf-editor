@@ -1,12 +1,13 @@
+import { fileURLToPath } from 'node:url'
+import { chromiumPath } from './browser-helper.mjs'
 import { confirmDefaultExport } from './export-smoke-helper.mjs'
 import { chromium } from 'playwright'
 import assert from 'node:assert/strict'
-import { execFileSync } from 'node:child_process'
 import { mkdirSync, mkdtempSync, readFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { PDFDocument } from 'pdf-lib'
-const browser = await chromium.launch({ executablePath: process.env.CHROMIUM_PATH ?? execFileSync('which', ['chromium'], { encoding: 'utf8' }).trim(), args: ['--no-sandbox'] })
+const browser = await chromium.launch({ executablePath: chromiumPath(), args: ['--no-sandbox'] })
 const context = await browser.newContext({ viewport: { width: 1280, height: 900 } })
 const page = await context.newPage()
 const errors = []
@@ -17,7 +18,7 @@ mkdirSync(artifactDir, { recursive: true })
 const baseUrl = process.env.SMOKE_URL ?? 'http://localhost:5199'
 try {
   await page.goto(baseUrl)
-  await page.locator('input[type=file][accept="application/pdf"]').setInputFiles(new URL('../tests/fixtures/zweiseitig.pdf', import.meta.url).pathname)
+  await page.locator('input[type=file][accept="application/pdf"]').setInputFiles(fileURLToPath(new URL('../tests/fixtures/zweiseitig.pdf', import.meta.url)))
   await page.waitForSelector('.page canvas')
   const pen = page.getByRole('button', { name: 'Stift', exact: true })
   assert.equal(await pen.count(), 1, 'Freihand-Werkzeug ist erreichbar')
@@ -136,7 +137,7 @@ try {
   const touchPage = await touchContext.newPage()
   touchPage.on('pageerror', e => errors.push(String(e)))
   await touchPage.goto(baseUrl)
-  await touchPage.locator('input[type=file][accept="application/pdf"]').setInputFiles(new URL('../tests/fixtures/zweiseitig.pdf', import.meta.url).pathname)
+  await touchPage.locator('input[type=file][accept="application/pdf"]').setInputFiles(fileURLToPath(new URL('../tests/fixtures/zweiseitig.pdf', import.meta.url)))
   await touchPage.waitForSelector('.page canvas')
   await touchPage.getByRole('button', { name: 'Stift', exact: true }).tap()
   const touchSheet = await touchPage.locator('.page').first().boundingBox()

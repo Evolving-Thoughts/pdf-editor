@@ -1,3 +1,5 @@
+import { fileURLToPath } from 'node:url'
+import { chromiumPath } from './browser-helper.mjs'
 // Dev-server smoke test: exercises the full textbox interaction flow in a
 // real browser. Usage:
 //   npm run dev -- --port 5199 --strictPort
@@ -10,7 +12,7 @@ const results = []
 const check = (name, ok) => results.push(`${ok ? 'PASS' : 'FAIL'} ${name}`)
 
 const browser = await chromium.launch(
-  process.env.CHROMIUM_PATH ? { executablePath: process.env.CHROMIUM_PATH } : {},
+  { executablePath: chromiumPath(), args: ['--no-sandbox'] },
 )
 const page = await browser.newPage()
 const errors = []
@@ -19,7 +21,7 @@ page.on('console', (m) => m.type() === 'error' && errors.push(m.text()))
 
 const baseUrl = process.env.SMOKE_URL ?? 'http://localhost:5199'
 await page.goto(baseUrl)
-await page.locator('input[type=file][accept="application/pdf"]').setInputFiles(new URL('../tests/fixtures/zweiseitig.pdf', import.meta.url).pathname)
+await page.locator('input[type=file][accept="application/pdf"]').setInputFiles(fileURLToPath(new URL('../tests/fixtures/zweiseitig.pdf', import.meta.url)))
 await page.waitForSelector('canvas')
 
 // 0. Empty-box cleanup: create with text tool, Escape without typing -> removed
@@ -203,7 +205,7 @@ await page.keyboard.press('Escape')
 check('Esc schließt Entwürfe-Menü', (await menu.count()) === 0)
 
 // 16. Multiple drafts: open a second PDF, edit it, then switch back
-await page.locator('input[type=file][accept="application/pdf"]').setInputFiles(new URL('../tests/fixtures/zweiseitig.pdf', import.meta.url).pathname)
+await page.locator('input[type=file][accept="application/pdf"]').setInputFiles(fileURLToPath(new URL('../tests/fixtures/zweiseitig.pdf', import.meta.url)))
 await page.waitForFunction(() => document.querySelector('canvas') && !document.querySelector('.textbox'))
 check('Neue PDF startet ohne alte Boxen', (await page.locator('.textbox').count()) === 0)
 await page.getByRole('button', { name: 'T Text', exact: true }).click()

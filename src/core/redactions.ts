@@ -10,7 +10,7 @@ export function createRedaction(pageId: string, start: StrokePoint, end: StrokeP
   return { id: createId(), pageId, x, y, width, height, fill }
 }
 export function replaceRedactions(state: EditorState, next: Redaction[]): Command {
-  const before = structuredClone(state.redactions ?? []), after = structuredClone(next)
+  const before = structuredClone(state.redactions), after = structuredClone(next)
   return { label: 'Edit pending redactions', apply: s => { s.redactions = structuredClone(after) }, revert: s => { s.redactions = structuredClone(before) } }
 }
 export function moveRedaction(mark: Redaction, dx: number, dy: number, size: { width: number; height: number }): Redaction {

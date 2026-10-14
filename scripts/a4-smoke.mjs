@@ -1,8 +1,8 @@
+import { chromiumPath } from './browser-helper.mjs'
 import { confirmDefaultExport } from './export-smoke-helper.mjs'
 // Optional A4 via real UI, real PDF export, native fields, overlays and local drafts.
 import { chromium } from 'playwright'
 import { PDFDocument, StandardFonts, rgb } from 'pdf-lib'
-import { execFileSync } from 'node:child_process'
 import { mkdtempSync, mkdirSync, readFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
@@ -12,7 +12,7 @@ const out = process.env.SMOKE_ARTIFACT_DIR ?? mkdtempSync(join(tmpdir(), 'pdf-a4
 mkdirSync(out, { recursive: true })
 const W = 210 * 72 / 25.4, H = 297 * 72 / 25.4
 const near = (a, b, tolerance = 0.05) => assert.ok(Math.abs(a - b) < tolerance, `${a} != ${b}`)
-const browser = await chromium.launch({ executablePath: execFileSync('which', ['chromium'], { encoding: 'utf8' }).trim(), args: ['--no-sandbox'] })
+const browser = await chromium.launch({ executablePath: chromiumPath(), args: ['--no-sandbox'] })
 const p = await browser.newPage({ viewport: { width: 1280, height: 1100 }, acceptDownloads: true })
 const errors = []; p.on('pageerror', e => errors.push(String(e)))
 const btn = name => p.getByRole('button', { name, exact: true })

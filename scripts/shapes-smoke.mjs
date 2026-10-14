@@ -1,8 +1,9 @@
+import { fileURLToPath } from 'node:url'
+import { chromiumPath } from './browser-helper.mjs'
 import { confirmDefaultExport } from './export-smoke-helper.mjs'
 // Real UI/command/export boundaries; isolated browser data, no fixture store injection.
 import { chromium } from 'playwright'
 import assert from 'node:assert/strict'
-import { execFileSync } from 'node:child_process'
 import { mkdirSync, mkdtempSync, readFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
@@ -11,12 +12,11 @@ const base = process.env.SMOKE_URL ?? 'http://localhost:5203'
 const artifacts = process.env.SMOKE_ARTIFACT_DIR ?? mkdtempSync(join(tmpdir(), 'pdf-editor-t5-'))
 mkdirSync(artifacts, { recursive: true })
 const browser = await chromium.launch({
-  executablePath:
-    process.env.CHROMIUM_PATH ?? execFileSync('which', ['chromium'], { encoding: 'utf8' }).trim(),
+  executablePath: chromiumPath(),
   args: ['--no-sandbox'],
 })
 const errors = [],
-  fixture = new URL('../tests/fixtures/zweiseitig.pdf', import.meta.url).pathname
+  fixture = fileURLToPath(new URL('../tests/fixtures/zweiseitig.pdf', import.meta.url))
 const context = await browser.newContext({ viewport: { width: 1280, height: 1000 }, acceptDownloads: true })
 const page = await context.newPage()
 page.on('pageerror', (e) => errors.push(String(e)))
