@@ -750,3 +750,13 @@
 }
 .page-manager-panel { text-align: left; }
 .page-insert-dialog { text-align: left; }
+
+/* A4 conversion retains each existing element's previously visible fragment. */
+.overlay-clip { position: absolute; inset: 0; pointer-events: none; }
+.overlay-clip > .textbox, .overlay-clip > .image-overlay, .overlay-clip > .shape-overlay { pointer-events: auto; }
+.page.drawing-tool .overlay-clip > .textbox, .page.drawing-tool .overlay-clip > .image-overlay, .page.drawing-tool .overlay-clip > .shape-overlay,
+.page.text-tool .overlay-clip > .image-overlay, .page.text-tool .overlay-clip > .shape-overlay,
+.page.symbol-tool .overlay-clip > .image-overlay, .page.symbol-tool .overlay-clip > .shape-overlay { pointer-events: none; }
+.page-a4-global { border-top: 1px solid var(--border); margin-top: 16px; padding-top: 12px; }
+.page-a4-global button { width: 100%; }
+.page-a4-global small { display: block; margin-top: 8px; }

@@ -1,6 +1,9 @@
 import type { Command } from './commands'
 import { cloneOverlay, isStroke, isTextbox, type Overlay, type EditorState } from './model'
 
+export const A4_WIDTH = 210 * 72 / 25.4
+export const A4_HEIGHT = 297 * 72 / 25.4
+
 /** Source coordinates are the original PDF's user space. Rotation is clockwise. */
 export interface DocumentPage {
   id: string
@@ -111,6 +114,7 @@ function transformOverlay(
 ) {
   if (isStroke(overlay)) {
     overlay.points = overlay.points.map((p) => point(p.x, p.y))
+    if (overlay.clips) overlay.clips = overlay.clips.map(polygon => polygon.map(p => point(p.x, p.y)))
     return
   }
   if (isTextbox(overlay)) {
@@ -181,4 +185,21 @@ export function cropPage(state: EditorState, id: string, m: CropMargins): Comman
       .filter((o) => o.pageIndex === index)
       .forEach((o) => transformOverlay(o, (x, y) => ({ x: x - m.left, y: y - m.bottom })))
   })
+}
+
+/** One reversible publication of a prepared PDF source and all mapped overlays. */
+export function replacePageDocument(state: EditorState, pages: DocumentPage[], source: PageSource, overlays: Overlay[]): Command {
+  return pageCommand(state, 'Set all pages to A4', next => {
+    next.pages = structuredClone(pages)
+    next.pageSources = [source]
+    next.overlays = overlays.map(cloneOverlay)
+  })
+}
+export function a4Size(size: { width: number; height: number }) {
+  return size.width > size.height ? { width: A4_HEIGHT, height: A4_WIDTH } : { width: A4_WIDTH, height: A4_HEIGHT }
+}
+/** One scale for the entire page set, not a separate fit-to-height per selection. */
+export function commonPreviewScale(sizes: { width: number; height: number }[], available: { width: number; height: number }) {
+  return Math.min(1, Math.max(1, available.width - 48) / Math.max(1, ...sizes.map(s => s.width)),
+    Math.max(1, available.height - 60) / Math.max(1, ...sizes.map(s => s.height)))
 }

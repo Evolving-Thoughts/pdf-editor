@@ -1,4 +1,5 @@
-import { useEffect, useRef, useState } from 'react'
+import { useEffect, useRef, useState, type ReactNode } from 'react'
+import { resolvedOverlayClips } from '../core/overlayClipping'
 import { addShape, addStroke, addTextbox, replaceOverlays } from '../core/commands'
 import { eraseStrokes, strokeToSvgPath } from '../core/drawing'
 import type { EditorStore } from '../core/editorStore'
@@ -60,6 +61,9 @@ export function PageView({
     let cancelled = false
     void pdf.getPageSize(pageIndex + 1).then((size) => {
       if (!cancelled) setPageSize(size)
+    }).catch(error => {
+      // A superseded preview may be destroyed while its page size is loading.
+      if (!cancelled) console.warn(error)
     })
     return () => {
       cancelled = true
@@ -192,7 +196,8 @@ export function PageView({
       {pageSize &&
         overlays
           .filter((overlay) => overlay.pageIndex === pageIndex)
-          .map((overlay) => isStroke(overlay) ? (
+          .map((overlay) => {
+            const element: ReactNode = isStroke(overlay) ? (
             <svg key={overlay.id} className="stroke-layer" viewBox={`0 0 ${pageSize.width} ${pageSize.height}`} aria-hidden="true">
               <path className="stroke" d={strokeToSvgPath(overlay.points, pageSize.height)} fill="none"
                 stroke={overlay.color} strokeWidth={overlay.width} strokeLinecap="round" strokeLinejoin="round" />
@@ -206,7 +211,11 @@ export function PageView({
           ) : (
             <TextboxView key={overlay.id} box={overlay} zoom={zoom} pageHeightPts={pageSize.height}
               selected={overlay.id === selectedId} tool={tool} store={store} onSelect={onSelect} />
-          ))}
+          )
+            return resolvedOverlayClips(overlay).reduceRight<ReactNode>((child, polygon, clipIndex) => (
+              <div key={`${overlay.id}-clip-${clipIndex}`} className="overlay-clip" style={{ clipPath: `polygon(${polygon.map(p => `${p.x * zoom}px ${(pageSize.height - p.y) * zoom}px`).join(',')})` }}>{child}</div>
+            ), element)
+          })}
       {pageSize && previewPoints.length > 0 && !isShapeTool(tool) && (
         <svg className="stroke-layer" viewBox={`0 0 ${pageSize.width} ${pageSize.height}`} aria-hidden="true">
           <path className="stroke-preview" d={strokeToSvgPath(previewPoints, pageSize.height)} fill="none"

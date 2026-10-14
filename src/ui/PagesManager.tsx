@@ -1,7 +1,10 @@
 import { downloadPdf } from '../core/pdf/downloadPdf'
 import { useEffect, useRef, useState } from 'react'
-import type { EditorStore } from '../core/editorStore'
+import { EditorStore } from '../core/editorStore'
 import {
+  a4Size,
+  commonPreviewScale,
+  replacePageDocument,
   cropPage,
   deletePage,
   insertPages,
@@ -12,7 +15,8 @@ import {
   type CropMargins,
 } from '../core/pages'
 import { exportPageDocument, importPageFile, preparePages, textPageBytes } from '../core/pdf/pageOperations'
-import type { PdfHandle } from '../core/pdf/loadPdf'
+import { loadPdf, type PdfHandle } from '../core/pdf/loadPdf'
+import { normalizeA4 } from '../core/pdf/normalizeA4'
 import { PageView } from './PageView'
 
 const MM = 72 / 25.4
@@ -49,6 +53,8 @@ export function PagesManager({ pdf, store, original, busy, onCropActive }: Props
   const page = pages.find((p) => p.id === selected) ?? pages[0]
   const index = page ? pages.indexOf(page) : -1
   const [crop, setCrop] = useState<{ id: string; margins: CropMargins } | null>(null)
+  const [a4Open, setA4Open] = useState(false)
+  const [a4Preview, setA4Preview] = useState<{ pdf: PdfHandle; prepared: Awaited<ReturnType<typeof normalizeA4>>; store: EditorStore; version: number } | null>(null)
   const activeCrop = crop?.id === page?.id ? crop : null
   const [message, setMessage] = useState('Wähle eine Seite oder füge neue Seiten ein.')
   const [problem, setProblem] = useState<string | null>(null)
@@ -64,22 +70,20 @@ export function PagesManager({ pdf, store, original, busy, onCropActive }: Props
   const request = useRef(0)
   const dragId = useRef<string | null>(null)
   const size = page ? pageSize(page) : { width: 595, height: 842 }
-  // Crop uses exactly the same fitting scale as normal page preview.
-  const scale = Math.min(
-    1,
-    Math.max(1, available.width - 48) / size.width,
-    Math.max(1, available.height - 60) / size.height,
-  )
+  // A common scale makes physical dimensions comparable between selections.
+  const shownSize = a4Open ? a4Size(size) : size
+  const scale = commonPreviewScale(pages.map(p => a4Open ? a4Size(pageSize(p)) : pageSize(p)), available)
   const marginsFit = (m: CropMargins) =>
     Object.values(m).every((v) => Number.isFinite(v) && v >= 0) &&
     size.width - m.left - m.right >= 20 * MM - 1e-6 &&
     size.height - m.top - m.bottom >= 20 * MM - 1e-6
   const frameMargins = activeCrop && marginsFit(activeCrop.margins) ? activeCrop.margins : zero()
-  const locked = busy || working || !!activeCrop
+  const locked = busy || working || !!activeCrop || a4Open
   useEffect(() => {
-    onCropActive(!!activeCrop)
+    onCropActive(!!activeCrop || a4Open)
     return () => onCropActive(false)
-  }, [activeCrop, onCropActive])
+  }, [activeCrop, a4Open, onCropActive])
+  useEffect(() => () => { void a4Preview?.pdf.destroy().catch(() => {}) }, [a4Preview])
   useEffect(
     () => () => {
       request.current++
@@ -100,16 +104,18 @@ export function PagesManager({ pdf, store, original, busy, onCropActive }: Props
     return () => observer.disconnect()
   }, [])
   useEffect(() => {
-    if (!activeCrop) return
+    if (!activeCrop && !a4Open) return
     const escape = (e: KeyboardEvent) => {
       if (e.key === 'Escape') {
         setCrop(null)
-        setMessage('Zuschnitt abgebrochen. Seite unverändert.')
+        request.current++
+        setA4Open(false); setA4Preview(null); setWorking(false)
+        setMessage(a4Open ? 'A4-Umstellung abgebrochen. Seiten unverändert.' : 'Zuschnitt abgebrochen. Seite unverändert.')
       }
     }
     window.addEventListener('keydown', escape)
     return () => window.removeEventListener('keydown', escape)
-  }, [activeCrop])
+  }, [activeCrop, a4Open])
   function run(work: () => void, message: string) {
     try {
       work()
@@ -131,6 +137,31 @@ export function PagesManager({ pdf, store, original, busy, onCropActive }: Props
     shapeStyle: defaultStyle,
     markerStyle: defaultStyle,
     readOnly: true,
+  }
+  async function openA4() {
+    if (locked || !pages.length) return
+    const token = ++request.current, version = store.getVersion()
+    setA4Open(true); setWorking(true); setProblem(null)
+    try {
+      const prepared = await normalizeA4(new Uint8Array(original), store.state.pageSources ?? [], pages, store.state.overlays)
+      if (request.current !== token) return
+      const previewPdf = await loadPdf('A4-Vorschau', new Uint8Array(prepared.source.bytes))
+      if (request.current !== token) { await previewPdf.destroy(); return }
+      if (store.getVersion() !== version) { await previewPdf.destroy(); throw new Error('Der Arbeitsstand hat sich geändert. Bitte erneut öffnen.') }
+      const previewStore = new EditorStore()
+      previewStore.restore(prepared.overlays, prepared.pages, [prepared.source])
+      setA4Preview({ pdf: previewPdf, prepared, store: previewStore, version })
+      setMessage('A4-Vorschau: Erst Anwenden verändert die Seiten.')
+    } catch (error) {
+      if (request.current === token) {
+        setProblem(error instanceof Error ? error.message : 'Die A4-Vorschau konnte nicht erstellt werden.')
+        setA4Open(false)
+      }
+    } finally { if (request.current === token) setWorking(false) }
+  }
+  function cancelA4() {
+    request.current++; setA4Open(false); setA4Preview(null); setWorking(false); setProblem(null)
+    setMessage('A4-Umstellung abgebrochen. Seiten unverändert.')
   }
   async function insert() {
     if (working) return
@@ -225,7 +256,23 @@ export function PagesManager({ pdf, store, original, busy, onCropActive }: Props
             mit dem AcroForm-Modus. Die Originaldatei bleibt unverändert.
           </p>
         )}
-        {activeCrop ? (
+        {a4Open ? (
+          <div className="page-crop-controls">
+            <h3>Alle Seiten auf A4</h3>
+            <p>Hoch-/Querformat wird beibehalten.</p>
+            <p>Hochformat: 210 × 297 mm<br />Querformat: 297 × 210 mm</p>
+            <p>Inhalte werden proportional eingepasst und zentriert — ohne Abschneiden oder Verzerren. Formularfelder und Overlays bleiben erhalten.</p>
+            <div className="page-manager-actions">
+              <button onClick={cancelA4}>Abbrechen</button>
+              <button disabled={working || !a4Preview} onClick={() => run(() => {
+                if (!a4Preview || store.getVersion() !== a4Preview.version) throw new Error('Der Arbeitsstand hat sich geändert. Bitte erneut öffnen.')
+                store.dispatch(replacePageDocument(store.state, a4Preview.prepared.pages, a4Preview.prepared.source, a4Preview.prepared.overlays))
+                setA4Open(false); setA4Preview(null)
+              }, 'Alle Seiten auf A4 gesetzt. Rückgängig ist möglich.')}>{pages.length} Seiten auf A4 setzen</button>
+            </div>
+            <small>Erst Anwenden ändert die Seiten. Rückgängig stellt das bisherige Format wieder her.</small>
+          </div>
+        ) : activeCrop ? (
           <div className="page-crop-controls">
             <h3>Seite zuschneiden</h3>
             <p>Ecken ziehen oder Ränder in mm eingeben. Mindestens 20 × 20 mm bleiben sichtbar.</p>
@@ -345,6 +392,11 @@ export function PagesManager({ pdf, store, original, busy, onCropActive }: Props
             </button>
           </div>
         )}
+        {!a4Open && !activeCrop && <div className="page-a4-global">
+          <h3>Für alle Seiten</h3>
+          <button disabled={locked || !pages.length} onClick={() => void openA4()}>Alle Seiten auf A4 …</button>
+          <small>Optional — das Format wird nicht automatisch geändert.</small>
+        </div>}
         {problem && (
           <p className="page-manager-error" role="alert">
             {problem}
@@ -385,7 +437,7 @@ export function PagesManager({ pdf, store, original, busy, onCropActive }: Props
                   setSelected(p.id)
                   setCrop(null)
                   setProblem(null)
-                  setMessage(activeCrop ? 'Offenen Zuschnitt verworfen.' : 'Seite ausgewählt.')
+                  setMessage(activeCrop ? 'Offenen Zuschnitt verworfen.' : a4Open ? 'A4-Vorschau: Erst Anwenden verändert die Seiten.' : 'Seite ausgewählt.')
                 }}
               >
                 <span className="page-miniature" aria-hidden="true">
@@ -400,7 +452,7 @@ export function PagesManager({ pdf, store, original, busy, onCropActive }: Props
                 <span>
                   {i + 1} · {p.name}
                   <small>
-                    {(pageSize(p).width / MM).toFixed(0)} × {(pageSize(p).height / MM).toFixed(0)} mm ·{' '}
+                    {a4Open ? 'Bisher: ' : ''}{(pageSize(p).width / MM).toFixed(0)} × {(pageSize(p).height / MM).toFixed(0)} mm ·{' '}
                     {p.rotation}°
                   </small>
                 </span>
@@ -433,15 +485,15 @@ export function PagesManager({ pdf, store, original, busy, onCropActive }: Props
             <h2>Keine Seiten</h2>
             <p>Füge Seiten ein oder mache das Löschen rückgängig.</p>
           </div>
-        ) : busy ? (
+        ) : busy || (a4Open && !a4Preview) ? (
           <p role="status">Seitenansicht wird aktualisiert …</p>
         ) : (
           <>
             <div
               className="page-preview-paper"
-              style={{ width: size.width * scale, height: size.height * scale }}
+              style={{ width: shownSize.width * scale, height: shownSize.height * scale }}
             >
-              <PageView {...pageProps} pageIndex={index} zoom={scale} />
+              <PageView {...pageProps} pdf={a4Preview?.pdf ?? pdf} store={a4Preview?.store ?? store} overlays={a4Preview?.prepared.overlays ?? store.state.overlays} pageIndex={index} zoom={scale} />
               {activeCrop && (
                 <div className="page-crop-layer">
                   <div
@@ -467,7 +519,7 @@ export function PagesManager({ pdf, store, original, busy, onCropActive }: Props
               )}
             </div>
             <p>
-              Seite {index + 1} · {page.name}
+              {a4Open ? `A4-Vorschau · ${(shownSize.width / MM).toFixed(0)} × ${(shownSize.height / MM).toFixed(0)} mm · noch nicht angewendet · ` : ''}Seite {index + 1} · {page.name}
             </p>
           </>
         )}
