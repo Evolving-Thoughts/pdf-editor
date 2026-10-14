@@ -1,5 +1,5 @@
-import { expect, test } from 'vitest'
-import { PDFDocument } from 'pdf-lib'
+import { expect, test, vi } from 'vitest'
+import { PDFDocument, PDFName, PDFString } from 'pdf-lib'
 import { inspectPages, exportPageDocument } from '../../src/core/pdf/pageOperations'
 
 test('editing a native text value exports a live editable field without changing original bytes', async () => {
@@ -103,4 +103,38 @@ test('automatic native text font size follows the generated editable field appea
   const result = await PDFDocument.load(await exportPageDocument(auto, [], pages, [], undefined, { [widget.key]: value }))
   const actual = Number(/([\d.]+)\s+Tf/.exec(result.getForm().getTextField('name').acroField.getDefaultAppearance()!)![1])
   expect(widget.autoFont).toBe(true); expect(nativeDisplayFontSize(widget, value)).toBe(actual)
+})
+
+
+test('known form-less pages skip inspection without loading their PDFs', async () => {
+  const doc = await PDFDocument.create(); doc.addPage([400, 600])
+  const bytes = await doc.save(), pages = await inspectPages(bytes, 'plain')
+  const load = vi.spyOn(PDFDocument, 'load')
+  try {
+    for (const plan of [pages, pages.map(page => ({ ...page, rotation: 90 }))]) {
+      expect(await inspectNativeForms(bytes, [], plan)).toEqual({ widgets: [], unsupported: [] })
+    }
+    expect(load).not.toHaveBeenCalled()
+  } finally { load.mockRestore() }
+})
+test('mixed documents inspect the form source but skip the form-less source', async () => {
+  const form = await fixture(), imported = await preparePages(form.bytes, 'attachment')
+  const doc = await PDFDocument.create(); doc.addPage([400, 600])
+  const bytes = await doc.save(), plain = await inspectPages(bytes, 'plain')
+  const load = vi.spyOn(PDFDocument, 'load')
+  try {
+    const info = await inspectNativeForms(bytes, [imported.source], [...plain, ...imported.pages])
+    expect(load).toHaveBeenCalledTimes(1)
+    expect(info.widgets.filter(widget => widget.name === 'name').map(widget => widget.pageIndex)).toEqual([1, 2])
+  } finally { load.mockRestore() }
+})
+test('XFA warnings and unknown legacy form metadata still trigger inspection', async () => {
+  const doc = await PDFDocument.create(); doc.addPage([400, 600])
+  doc.getForm().acroForm.dict.set(PDFName.of('XFA'), PDFString.of('synthetic XFA'))
+  const bytes = await doc.save(), pages = await inspectPages(bytes, 'xfa')
+  expect(pages[0].hasForms).toBe(false); expect(pages[0].hasXfa).toBe(true)
+  expect((await inspectNativeForms(bytes, [], pages)).unsupported).toEqual(['XFA-Formular'])
+  const legacy = await fixture()
+  const unknown = legacy.pages.map(page => ({ ...page, hasForms: undefined }))
+  expect((await inspectNativeForms(legacy.bytes, [], unknown)).widgets.filter(widget => widget.name === 'name')).toHaveLength(2)
 })

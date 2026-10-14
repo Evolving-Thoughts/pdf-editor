@@ -52,11 +52,15 @@ function point(page: DocumentPage, x: number, y: number) {
   const w = page.box.width * page.unit, h = page.box.height * page.unit
   switch (page.rotation) { case 90: return { x: y, y: w - x }; case 180: return { x: w - x, y: h - y }; case 270: return { x: h - y, y: x }; default: return { x, y } }
 }
+/** Missing metadata from older drafts is unknown, not proof that a source has no fields. */
+export const needsNativeFormInspection = (page: DocumentPage) => page.hasForms !== false || page.hasXfa === true
 /** Source keys never depend on document order or collision-renamed export field names. */
 export async function inspectNativeForms(original: Uint8Array, sources: PageSource[], pages: DocumentPage[]): Promise<{ widgets: NativeWidget[]; unsupported: string[] }> {
+  const sourceIds = new Set(pages.filter(needsNativeFormInspection).map(page => page.sourceId))
+  if (!sourceIds.size) return { widgets: [], unsupported: [] }
   await ensureMetrics()
   const widgets: NativeWidget[] = [], unsupported: string[] = []
-  for (const sourceId of new Set(pages.map(p => p.sourceId))) {
+  for (const sourceId of sourceIds) {
     const bytes = sourceId === 'original' ? original : sources.find(s => s.id === sourceId)?.bytes
     if (!bytes) throw new Error('Formular-Quelldaten fehlen.')
     const doc = await PDFDocument.load(bytes)

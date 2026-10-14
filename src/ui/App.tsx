@@ -1,5 +1,5 @@
 import type { FormValues, NativeWidget } from '../core/forms'
-import { inspectNativeForms } from '../core/pdf/acroForm'
+import { inspectNativeForms, needsNativeFormInspection } from '../core/pdf/acroForm'
 import { useCallback, useEffect, useRef, useState, useSyncExternalStore } from 'react'
 import { addImage, clearDrawing, nudgeImage, nudgeShape, nudgeTextbox, removeImage, removeShape, removeTextbox } from '../core/commands'
 import { EditorStore } from '../core/editorStore'
@@ -107,7 +107,7 @@ export default function App() {
   const documentSources = store.state.pageSources
   const nativeWidgets = formInfo?.pages === documentPages ? formInfo?.widgets ?? [] : []
   useEffect(() => {
-    if (!originalBytes || !documentPages) return
+    if (!originalBytes || !documentPages || !documentPages.some(needsNativeFormInspection)) return
     let cancelled = false
     void inspectNativeForms(new Uint8Array(originalBytes), documentSources ?? [], documentPages).then(result => {
       if (!cancelled) setFormInfo({ pages: documentPages, ...result })
