@@ -288,7 +288,7 @@ export function PagesManager({ pdf, store, original, busy, onCropActive }: Props
             <button
               disabled={busy || working}
               onClick={() => {
-                setPosition(index < 0 ? 0 : index + 1)
+                setPosition(pages.length)
                 setFile(null)
                 setProblem(null)
                 setInserting(true)
@@ -522,15 +522,16 @@ export function PagesManager({ pdf, store, original, busy, onCropActive }: Props
             disabled={working}
             onChange={(e) => setPosition(Number(e.target.value))}
           >
-            {Array.from({ length: pages.length + 1 }, (_, i) => (
-              <option key={i} value={i}>
-                {i === 0
-                  ? 'Vor der ersten Seite'
-                  : i === pages.length
-                    ? 'Am Ende anhängen'
-                    : `Zwischen Seite ${i} und ${i + 1}`}
-              </option>
-            ))}
+            <option value={pages.length}>Am Ende anhängen</option>
+            {pages.length > 0 && <option value={0}>Am Anfang einfügen</option>}
+            {Array.from({ length: Math.max(0, pages.length - 1) }, (_, offset) => {
+              const i = offset + 1
+              return (
+                <option key={i} value={i}>
+                  Zwischen Seite {i} und {i + 1}
+                </option>
+              )
+            })}
           </select>
           <p>
             Text- und Bildseiten übernehmen das Format der vorherigen Seite (am Anfang: der ersten Seite).

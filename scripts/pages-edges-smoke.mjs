@@ -49,6 +49,8 @@ try {
   await btn('Seiten verwalten').click()
   await p.waitForSelector('.page-manager-empty')
   await btn('＋ Seiten einfügen').click()
+  assert.equal(await p.getByLabel('Einfügeposition').inputValue(), '0')
+  assert.deepEqual(await p.getByLabel('Einfügeposition').locator('option').allTextContents(), ['Am Ende anhängen'])
   await p
     .locator('.page-insert-dialog input[type=file]')
     .setInputFiles({ name: 'bad.pdf', mimeType: 'application/pdf', buffer: Buffer.from('broken') })
@@ -66,6 +68,10 @@ try {
   await p.locator('.page-insert-dialog').waitFor({ state: 'detached' })
   await settled()
   assert.equal(await p.locator('.page-manager-row').count(), 1)
+  await btn('＋ Seiten einfügen').click()
+  assert.equal(await p.getByLabel('Einfügeposition').inputValue(), '1')
+  assert.deepEqual(await p.getByLabel('Einfügeposition').locator('option').allTextContents(), ['Am Ende anhängen', 'Am Anfang einfügen'])
+  await p.keyboard.press('Escape')
   // Native desktop crop drag and cancellation, not direct store injection.
   await btn('Zuschneiden').click()
   const grip = await p.getByRole('button', { name: 'Zuschnitt-Ecke tl', exact: true }).boundingBox()

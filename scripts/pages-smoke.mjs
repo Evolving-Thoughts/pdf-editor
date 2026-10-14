@@ -88,6 +88,16 @@ try {
   await button('Seiten verwalten').click()
   await settled()
   assert.equal(await p.locator('.page-manager-row').count(), 2)
+  // A selected page must not override append-at-end as the fresh dialog default.
+  await button('＋ Seiten einfügen').click()
+  assert.equal(await p.getByLabel('Einfügeposition').inputValue(), '2')
+  assert.deepEqual(await p.getByLabel('Einfügeposition').locator('option').allTextContents(),
+    ['Am Ende anhängen', 'Am Anfang einfügen', 'Zwischen Seite 1 und 2'])
+  await p.getByLabel('Einfügeposition').selectOption('0')
+  await p.keyboard.press('Escape')
+  await button('＋ Seiten einfügen').click()
+  assert.equal(await p.getByLabel('Einfügeposition').inputValue(), '2')
+  await p.keyboard.press('Escape')
   await button('Seite im Uhrzeigersinn drehen').click()
   await settled()
   assert.match(await p.locator('.page-manager-row.selected').textContent(), /90°/)
