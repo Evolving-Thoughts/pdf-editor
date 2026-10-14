@@ -814,3 +814,40 @@
   .app:has(.redaction-bar) .toolbar { position: static; }
   .app:has(.redaction-bar) .workspace { flex: none; height: 60svh; min-height: 320px; }
 }
+
+/* T11: approved compact floating search. Navigation and close never wrap. */
+.search-window {
+  position: absolute; right: 12px; top: 12px; z-index: 25;
+  width: 340px; max-width: calc(100% - 24px); box-sizing: border-box;
+  padding: 10px; border: 1px solid var(--border); border-radius: 8px;
+  background: var(--bg); color: var(--text); box-shadow: 0 3px 14px #0003;
+}
+.search-query input { width: 100%; min-width: 0; box-sizing: border-box; font: inherit; padding: 10px; }
+.search-controls { display: flex; flex-wrap: nowrap; align-items: center; gap: 6px; margin: 6px 0; }
+.search-controls span { flex: 1; min-width: 0; font-size: 12px; }
+.search-controls button { flex: 0 0 44px; width: 44px; min-height: 44px; padding: 0; font: inherit; }
+.search-window small { font-size: 11px; }
+.search-highlights { position: absolute; inset: 0; width: 100%; height: 100%; z-index: 8; pointer-events: none; overflow: hidden; }
+.search-highlights polygon { fill: #ffde5966; stroke: none; }
+.search-highlights polygon.active { fill: #ffae0080; stroke: #995700; stroke-width: 1; }
+.password-dialog { width: 440px; max-width: calc(100% - 40px); box-sizing: border-box; max-height: calc(100svh - 40px); overflow: auto; border: 1px solid var(--border); border-radius: 10px; padding: 20px; background: var(--bg); color: var(--text); }
+.password-dialog::backdrop { background: #0008; }
+.password-dialog h2 { font-size: 20px; margin-top: 0; }
+.password-dialog p { font-size: 14px; }
+.password-dialog label { display: block; }
+.password-dialog input { display: block; width: 100%; box-sizing: border-box; font: inherit; padding: 10px; margin-top: 6px; }
+.password-warning { padding: 10px; background: var(--accent-bg); border-radius: 6px; }
+.password-actions { display: flex; gap: 8px; margin-top: 16px; }
+.password-actions button { flex: 1; min-height: 44px; font: inherit; }
+.search-window input, .password-dialog input {
+  color: var(--text); background: var(--bg); border: 1px solid var(--border); border-radius: 6px;
+}
+.search-controls button, .password-actions button {
+  color: var(--text); background: var(--bg); border: 1px solid var(--border); border-radius: 6px; cursor: pointer;
+}
+.search-controls button:disabled { opacity: .4; cursor: default; }
+.search-window :focus-visible, .password-dialog :focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+@media (max-width: 640px) {
+  /* Leave room above the first page so its first match cannot hide behind the panel. */
+  .workspace:has(.search-window) .pages { padding-top: 180px; }
+}

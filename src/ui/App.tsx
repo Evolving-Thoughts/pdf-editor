@@ -1,3 +1,8 @@
+import { ProtectedExportDialog } from './ProtectedExportDialog'
+import { preparePdf, unlockPdf, encryptPdf, PasswordRequiredError, IncorrectPasswordError } from '../core/pdf/unlockPdf'
+import { PasswordDialog, type PasswordRequest } from './PasswordDialog'
+import { SearchWindow } from './SearchWindow'
+import type { SearchHit } from '../core/search'
 import { applyRedactionResult,replaceRedactions,type Redaction } from '../core/redactions'
 import { prepareRedaction } from '../core/pdf/redactDocument'
 import { RedactionBar } from './RedactionBar'
@@ -59,6 +64,30 @@ function draftSummary(record: DraftRecord): DraftSummary {
 }
 
 export default function App() {
+  const [protectedExport, setProtectedExport] = useState(false)
+  const [exportBusy, setExportBusy] = useState(false)
+  const [searchOpen, setSearchOpen] = useState(false)
+  const [searchResult, setSearchResult] = useState<{
+    hits: SearchHit[]
+    active: number
+  }>({ hits: [], active: 0 })
+  const [openingFile, setOpeningFile] = useState(false)
+  const [passwordRequest, setPasswordRequest] = useState<PasswordRequest | null>(
+    null,
+  )
+  const passwordPending = useRef<((password: string | null) => void) | null>(null)
+  const passwordEpoch = useRef(0)
+  const openingIntent = useRef(0)
+  const searchButtonRef = useRef<HTMLButtonElement>(null)
+  const onSearchHits = useCallback(
+    (hits: SearchHit[], active: number) => setSearchResult({ hits, active }),
+    [],
+  )
+  const closeSearch = useCallback(() => {
+    setSearchOpen(false)
+    requestAnimationFrame(() => searchButtonRef.current?.focus())
+  }, [])
+
   const [redactionFill,setRedactionFill]=useState<Redaction['fill']>('black')
   const [redactionBusy,setRedactionBusy]=useState(false)
   const [highlightFields, setHighlightFields] = useState(true)
@@ -274,6 +303,7 @@ export default function App() {
       setActiveDraftId(draft.id)
       setManualSave(null)
       manualSaveRequestRef.current = null
+      setSearchOpen(false)
       setSelectedId(null)
       setTool('select')
       setRedactionFill('black')
@@ -292,21 +322,85 @@ export default function App() {
 
   const onOpenFile = useCallback(
     async (file: File) => {
-      documentIntentRef.current += 1
+      const intent = ++documentIntentRef.current
+      openingIntent.current = intent
+      passwordPending.current?.(null)
       setError(null)
+      setOpeningFile(true)
       try {
-        await persistActiveDraft().catch((problem) =>
-          reportDraftProblem(problem, 'Der bisherige Entwurf konnte nicht gespeichert werden.'),
+        // Do not discard the current document if its last save failed.
+        await persistActiveDraft()
+        const input = new Uint8Array(await file.arrayBuffer())
+        if (documentIntentRef.current !== intent) return
+        let bytes: Uint8Array
+        try {
+          bytes = await preparePdf(input)
+        } catch (problem) {
+          if (!(problem instanceof PasswordRequiredError)) throw problem
+          let message: string | null = null
+          for (;;) {
+            if (documentIntentRef.current !== intent) return
+            const password = await new Promise<string | null>((resolve) => {
+              const finish = (value: string | null) => {
+                passwordPending.current = null
+                setPasswordRequest(null)
+                resolve(value)
+              }
+              passwordPending.current = finish
+              passwordEpoch.current++
+              setPasswordRequest({
+                fileName: file.name,
+                error: message,
+                resolve: finish,
+              })
+            })
+            if (password === null || documentIntentRef.current !== intent) return
+            try {
+              bytes = await unlockPdf(input, password)
+              break
+            } catch (error) {
+              if (error instanceof IncorrectPasswordError) {
+                message = error.message
+                continue
+              }
+              throw error
+            }
+          }
+        }
+        if (documentIntentRef.current !== intent) return
+        const buffer = bytes.slice().buffer as ArrayBuffer
+        const pages = await inspectPages(bytes, file.name)
+        const next = await loadPdf(file.name, bytes)
+        if (documentIntentRef.current !== intent) {
+          void next.destroy()
+          return
+        }
+        replaceDocument(
+          next,
+          {
+            id: createId(),
+            name: file.name,
+            createdAt: Date.now(),
+            bytes: buffer,
+          },
+          [],
+          pages,
         )
-        const buffer = await file.arrayBuffer()
-        const pages = await inspectPages(new Uint8Array(buffer), file.name)
-        const next = await loadPdf(file.name, new Uint8Array(buffer))
-        replaceDocument(next, { id: createId(), name: file.name, createdAt: Date.now(), bytes: buffer }, [], pages)
         void persistActiveDraft().catch((problem) =>
-          reportDraftProblem(problem, 'Der neue Entwurf konnte nicht gespeichert werden.'),
+          reportDraftProblem(
+            problem,
+            'Der neue Entwurf konnte nicht gespeichert werden.',
+          ),
         )
-      } catch {
-        setError(`„${file.name}“ konnte nicht geöffnet werden (beschädigt oder passwortgeschützt?).`)
+      } catch (problem) {
+        if (documentIntentRef.current === intent)
+          setError(
+            problem instanceof IncorrectPasswordError
+              ? problem.message
+              : `„${file.name}“ konnte nicht geöffnet werden. ${problem instanceof Error && /entschlüsselt/.test(problem.message) ? problem.message : 'Datei beschädigt, kein gültiges PDF oder bisheriger Entwurf nicht speicherbar. Der bisherige Stand bleibt geöffnet.'}`,
+          )
+      } finally {
+        if (openingIntent.current === intent) setOpeningFile(false)
       }
     },
     [persistActiveDraft, replaceDocument, reportDraftProblem],
@@ -315,7 +409,7 @@ export default function App() {
   const onOpenDraft = useCallback(
     async (id: string) => {
       if (loadingDraftId) return
-      documentIntentRef.current += 1
+      const intent=++documentIntentRef.current
       setError(null)
       setLoadingDraftId(id)
       try {
@@ -323,6 +417,7 @@ export default function App() {
           reportDraftProblem(problem, 'Der bisherige Entwurf konnte nicht gespeichert werden.'),
         )
         const record = await queuePersistence(async () => loadDraft(await ensureDraftDb(), id))
+        if(documentIntentRef.current!==intent)return
         if (!record) {
           setDrafts((current) => current.filter((draft) => draft.id !== id))
           setError('Dieser Entwurf ist nicht mehr vorhanden.')
@@ -333,6 +428,7 @@ export default function App() {
         const sources = record.pageSources ?? []
         const base = pages.length ? await composePages(new Uint8Array(bytes), sources, pages, undefined, record.redactionApplied||pages.some(page=>page.redacted)) : new Uint8Array(bytes)
         const next = await loadPdf(record.name, base)
+        if(documentIntentRef.current!==intent){void next.destroy();return}
         replaceDocument(
           next,
           { id: record.id, name: record.name, createdAt: record.createdAt, bytes },
@@ -340,7 +436,7 @@ export default function App() {
           pages, sources, record.formValues, record.redactions, record.redactionApplied,
         )
       } catch {
-        setError('Der Entwurf konnte nicht geöffnet werden.')
+        if(documentIntentRef.current===intent)setError('Der Entwurf konnte nicht geöffnet werden.')
       } finally {
         setLoadingDraftId(null)
       }
@@ -404,7 +500,7 @@ export default function App() {
   }, [persistActiveDraft, refreshDrafts, reportDraftProblem])
 
   // Release the worker document when the app unmounts.
-  useEffect(() => () => { documentIntentRef.current += 1; void pdfRef.current?.destroy() }, [])
+  useEffect(() => () => { documentIntentRef.current += 1; passwordPending.current?.(null); void pdfRef.current?.destroy() }, [])
 
   // Auto-save: every store change (edits, moves, deletes) persists the draft
   // to IndexedDB, debounced so gestures like dragging or typing coalesce.
@@ -469,7 +565,11 @@ export default function App() {
   useEffect(() => {
     const onKeyDown = (event: KeyboardEvent) => {
       const target = event.target as HTMLElement
-      if (redactionBusy || pageBusy || (pageManagerOpen && cropActive)) return
+      if (target.closest('dialog')) return
+      if (loadingDraftId || exportBusy || openingFile || redactionBusy || pageBusy || (pageManagerOpen && cropActive)) return
+      if (pdf && (event.ctrlKey || event.metaKey) && event.key.toLowerCase()==='f') {
+        event.preventDefault();setPageManagerOpen(false);setSelectedId(null);setSearchOpen(true);return
+      }
       if (target.closest('textarea, input, select, [contenteditable]')) return
       if (event.key === 'Escape') {
         setSelectedId(null)
@@ -530,17 +630,78 @@ export default function App() {
     }
     window.addEventListener('keydown', onKeyDown)
     return () => window.removeEventListener('keydown', onKeyDown)
-  }, [store, selectedId, zoom, pageBusy, pageManagerOpen, cropActive, redactionBusy])
+  }, [store, selectedId, zoom, pageBusy, pageManagerOpen, cropActive, redactionBusy, openingFile, exportBusy, loadingDraftId, pdf])
 
-  const onExport = useCallback(async () => {
-    const draft = draftRef.current
-    if (!draft || !store.state.pages?.length || pageBusy) return
-    try {
-      if(store.state.redactions?.length)throw new Error('Vorgemerkte Schwärzungen zuerst anwenden oder verwerfen; sie sind noch nicht sicher entfernt.')
-      const bytes = await exportPageDocument(new Uint8Array(draft.bytes), store.state.pageSources ?? [], store.state.pages, store.state.overlays.map(cloneOverlay), undefined, store.state.formValues, store.state.redactionApplied||store.state.pages.some(page=>page.redacted))
-      downloadPdf(bytes, draft.name)
-    } catch (problem) {setError(problem instanceof Error ? problem.message : 'Das PDF konnte nicht exportiert werden.')}
-  }, [store, pageBusy])
+  const onSearchJump = useCallback(
+    (hit: SearchHit) => {
+      const scroller = workspaceRef.current?.querySelector<HTMLElement>('.pages')
+      const page = workspaceRef.current?.querySelector<HTMLElement>(
+        `.page[data-page-index="${hit.pageIndex}"]`,
+      )
+      if (!scroller || !page || !hit.polygons[0]?.length) return
+      const polygon = hit.polygons[0],
+        x = polygon.reduce((sum, p) => sum + p.x, 0) / polygon.length,
+        y = polygon.reduce((sum, p) => sum + p.y, 0) / polygon.length
+      const rect = page.getBoundingClientRect(),
+        view = scroller.getBoundingClientRect()
+      const panel=workspaceRef.current?.querySelector<HTMLElement>('.search-window')?.getBoundingClientRect()
+      const centeredX=view.left+scroller.clientWidth/2
+      const coveredTop=panel && centeredX>=panel.left && centeredX<=panel.right ? Math.max(0,Math.min(scroller.clientHeight,panel.bottom-view.top+8)) : 0
+      const centerY=coveredTop+(scroller.clientHeight-coveredTop)/2
+      scroller.scrollTo({
+        left:
+          scroller.scrollLeft +
+          rect.left -
+          view.left +
+          x * zoom -
+          scroller.clientWidth / 2,
+        top:
+          scroller.scrollTop +
+          rect.top -
+          view.top +
+          y * zoom -
+          centerY,
+      })
+    },
+    [zoom],
+  )
+
+  const onExport = useCallback(
+    async (password?: string) => {
+      const draft = draftRef.current
+      if (!draft || !store.state.pages?.length || pageBusy || exportBusy) return
+      setError(null)
+      setExportBusy(true)
+      try {
+        if (store.state.redactions?.length)
+          throw new Error(
+            'Vorgemerkte Schwärzungen zuerst anwenden oder verwerfen; sie sind noch nicht sicher entfernt.',
+          )
+        const bytes = await exportPageDocument(
+          new Uint8Array(draft.bytes),
+          store.state.pageSources ?? [],
+          store.state.pages,
+          store.state.overlays.map(cloneOverlay),
+          undefined,
+          store.state.formValues,
+          store.state.redactionApplied ||
+            store.state.pages.some((page) => page.redacted),
+        )
+        const output =
+          password === undefined ? bytes : await encryptPdf(bytes, password)
+        downloadPdf(output, draft.name)
+      } catch (problem) {
+        setError(
+          problem instanceof Error
+            ? problem.message
+            : 'Das PDF konnte nicht exportiert werden.',
+        )
+      } finally {
+        setExportBusy(false)
+      }
+    },
+    [store, pageBusy, exportBusy],
+  )
 
   const onApplyRedactions = async () => {
     const draft=draftRef.current,version=store.getVersion(),intent=documentIntentRef.current
@@ -560,14 +721,24 @@ export default function App() {
   const saveMessage = visibleSave?.status === 'saving' ? 'Entwurf wird gespeichert …'
     : visibleSave?.status === 'saved' ? '✓ Entwurf gespeichert · Nur auf diesem Gerät.'
     : visibleSave?.status === 'error' ? 'Der Entwurf konnte nicht gespeichert werden. Bitte erneut versuchen.'
-    : 'Automatisches Speichern ist aktiv · Entwürfe bleiben auf diesem Gerät.'
+    : 'Automatisches Speichern ist aktiv · Entwürfe bleiben unverschlüsselt auf diesem Gerät.'
 
   return (
-    <div className="app" onChange={() => {
+    <div className="app" onDragOverCapture={event=>{if(event.dataTransfer.types.includes('Files')){event.preventDefault();event.dataTransfer.dropEffect='copy'}}}
+      onDropCapture={event=>{
+        const files=Array.from(event.dataTransfer.files)
+        if(!files.length)return
+        const pdfFiles=files.filter(file=>file.type==='application/pdf'||/\.pdf$/i.test(file.name))
+        if(!pdfFiles.length && (event.target as HTMLElement).closest('.page') && files.every(file=>/^image\/(png|jpeg)$/.test(file.type)))return
+        event.preventDefault();event.stopPropagation()
+        if(loadingDraftId||exportBusy||openingFile||redactionBusy||pageBusy||cropActive)return
+        if(files.length!==1||pdfFiles.length!==1){setError('Bitte genau eine PDF-Datei zum Öffnen ziehen. Bilder auf einer Dokumentseite ablegen.');return}
+        void onOpenFile(pdfFiles[0])
+      }} onChange={() => {
       inputEpochRef.current += 1
       setManualSave(current => current?.status === 'saved' ? null : current)
     }}>
-      <header className="toolbar" inert={redactionBusy}>
+      <header className="toolbar" inert={redactionBusy || openingFile || exportBusy || !!loadingDraftId}>
         <input
           ref={fileInputRef}
           type="file"
@@ -611,9 +782,10 @@ export default function App() {
             <span className="file-info">
               {pdf.fileName} · {documentPages?.length ?? pdf.pageCount} {(documentPages?.length ?? pdf.pageCount) === 1 ? 'Seite' : 'Seiten'}
             </span>
-            <button type="button" aria-pressed={pageManagerOpen} disabled={pageBusy || redactions.length>0} onClick={() => {setSelectedId(null);setCropActive(false);setPageManagerOpen(open => !open)}}>
+            <button type="button" aria-pressed={pageManagerOpen} disabled={pageBusy || redactions.length>0} onClick={() => {setSearchOpen(false);setSelectedId(null);setCropActive(false);setPageManagerOpen(open => !open)}}>
               {pageManagerOpen ? 'Zur Dokumentbearbeitung' : 'Seiten verwalten'}
             </button>
+            <button ref={searchButtonRef} type="button" disabled={pageBusy || cropActive} aria-pressed={searchOpen} onClick={()=>{setPageManagerOpen(false);setSelectedId(null);setSearchOpen(open=>!open)}} title="Im Dokument suchen (Strg/⌘+F)">Suchen</button>
             {!pageManagerOpen && <>
             <button type="button" onClick={() => setZoom((z) => zoomOut(z))}>
               −
@@ -701,6 +873,7 @@ export default function App() {
             <button type="button" disabled={pageBusy || cropActive || redactions.length>0 || !documentPages?.length} onClick={() => void onExport()}>
               Exportieren
             </button>
+            <button type="button" disabled={pageBusy || cropActive || redactions.length>0 || !documentPages?.length} onClick={()=>setProtectedExport(true)}>Mit Passwort exportieren …</button>
           </>
         )}
       </header>
@@ -722,10 +895,12 @@ export default function App() {
       )}
       {!pdf && !error && (
         <p className="hint">
-          Wähle eine PDF-Datei – oder öffne über <b>Entwürfe&nbsp;▾</b> einen früheren Stand.
+          Wähle eine PDF-Datei oder ziehe sie in den Editor – oder öffne über <b>Entwürfe&nbsp;▾</b> einen früheren Stand.
         </p>
       )}
-      <div className="workspace" ref={workspaceRef} inert={redactionBusy}>
+      {openingFile && <p role="status" className="hint">PDF wird geöffnet …</p>}
+      <div className="workspace" ref={workspaceRef} inert={redactionBusy || openingFile || exportBusy || !!loadingDraftId}>
+        {pdf && searchOpen && !pageManagerOpen && !pageBusy && <SearchWindow pdf={pdf} overlays={overlays} onClose={closeSearch} onHits={onSearchHits} onJump={onSearchJump}/>}
         {pdf && pageManagerOpen && originalBytes && <PagesManager nativeWidgets={nativeWidgets} key={activeDraftId} pdf={pdf} store={store} original={originalBytes} busy={pageBusy} onCropActive={setCropActive} />}
         {!pageManagerOpen && <>
         {pageBusy && <p role="status" className="hint">Seitenansicht wird aktualisiert …</p>}
@@ -743,6 +918,8 @@ export default function App() {
             <PageView
               key={`${activeDraftId}-${page.id}`}
               pdf={pdf}
+              searchHits={searchOpen?searchResult.hits.filter(hit=>hit.pageIndex===index):[]}
+              activeSearchHit={searchOpen?searchResult.hits[searchResult.active]:undefined}
               redactionFill={redactionFill}
               nativeWidgets={nativeWidgets}
               highlightFields={highlightFields}
@@ -766,8 +943,11 @@ export default function App() {
         </div>
         </>}
       </div>
+      {protectedExport && <ProtectedExportDialog onCancel={()=>setProtectedExport(false)} onExport={password=>{setProtectedExport(false);void onExport(password)}}/>}
+      {exportBusy && <p role="status" className="hint">PDF wird exportiert …</p>}
+      {passwordRequest && <PasswordDialog key={passwordEpoch.current} request={passwordRequest}/>}
       {pdf && !pageManagerOpen && !pageBusy && (
-        <footer className="drawing-footer" inert={redactionBusy}>
+        <footer className="drawing-footer" inert={redactionBusy || openingFile || exportBusy || !!loadingDraftId}>
           <button type="button" disabled={!overlays.some(o=>isStroke(o)||isMarker(o))}
             title="Freihandstriche und Textmarker löschen · Formen, Texte, Bilder und PDF bleiben erhalten"
             onClick={() => {
