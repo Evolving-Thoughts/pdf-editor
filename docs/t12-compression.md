@@ -38,6 +38,8 @@ The regression smoke scripts now explicitly confirm default export in the shared
 
 Use a representative real PDF with fine print, signatures and scanned photos. Compare all three presets with the uncompressed export at normal size and high zoom. Check text search and native field editability in another viewer. Inspect applied black/white redactions and ensure only the checked export is shared. No automated size or pixel test can establish that every document remains acceptably legible; users must review lossy outputs.
 
-## Known unrelated regression observed during validation
+## Mobile shape-smoke fixture repair
 
-`shapes-smoke.mjs` completes its desktop creation/edit/export/render checks, then fails its mobile rotation-grip visibility precondition. The movable shape palette covers that grip in the small workspace. The **same** assertion failure was reproduced on the unchanged merged T11 `main` baseline (`6e85b805`), using its unmodified script and app. This is not fixed by T12; the shared export confirmation changes do not cause it. T8 thumbnails, T9 forms, T10 redaction, T11 search/import/protected export and image-export regression suites passed.
+The initial run reproduced a mobile grip-occlusion failure also seen on unchanged T11 main with its original script. The test placed its rectangle at a fixed height that put the rotation grip under the bottom-clamped palette after the toolbar gained more rows.
+
+The T12 follow-up moves that **test fixture** 30 px higher (touch creation from y=50 to y=140 instead of y=80 to y=170). The viewport remains 390×900; it still uses genuine Chromium touch creation, rotation and cancellation. The `elementFromPoint` grip-visibility assertion and geometry/cancellation assertions remain unchanged. The complete desktop/export/mobile shapes smoke now passes. This is a focused test-setup correction, not a mobile palette redesign.

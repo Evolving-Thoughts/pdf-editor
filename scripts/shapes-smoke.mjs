@@ -383,15 +383,18 @@ try {
   await mobile.getByRole('button', { name: 'Rechteck', exact: true }).click()
   const mobilePage = await mobile.locator('.page').first().boundingBox(),
     session = await mobile.context().newCDPSession(mobile)
-  // The save status row reduces workspace height. Create higher up so the
-  // bottom-positioned floating palette leaves the grip unobstructed.
+  // At 390×900 the wrapped toolbar + save status leave only a narrow strip
+  // above the bottom-clamped palette. Put this rotation fixture higher up,
+  // keeping both the initial grip and the 30° grip center in that visible strip.
+  // Keep the real touch gestures and the hit-test assertion in rotateArc: do
+  // not bypass an occluded grip by dispatching synthetic pointer events to it.
   await session.send('Input.dispatchTouchEvent', {
     type: 'touchStart',
-    touchPoints: [{ x: mobilePage.x + 100, y: mobilePage.y + 80 }],
+    touchPoints: [{ x: mobilePage.x + 100, y: mobilePage.y + 50 }],
   })
   await session.send('Input.dispatchTouchEvent', {
     type: 'touchMove',
-    touchPoints: [{ x: mobilePage.x + 280, y: mobilePage.y + 170 }],
+    touchPoints: [{ x: mobilePage.x + 280, y: mobilePage.y + 140 }],
   })
   await session.send('Input.dispatchTouchEvent', { type: 'touchEnd', touchPoints: [] })
   await mobile.waitForSelector('.shape-toolbar')
