@@ -1,3 +1,4 @@
+import { confirmDefaultExport } from './export-smoke-helper.mjs'
 // Real-browser integration checks for T6. Isolated contexts: no user data.
 import { chromium } from 'playwright'
 import assert from 'node:assert/strict'
@@ -92,7 +93,7 @@ try {
 
   // A real export includes the image once at the edited geometry.
   const downloadPromise = page.waitForEvent('download')
-  await page.getByRole('button', { name: 'Exportieren', exact: true }).click()
+  await page.getByRole('button', { name: 'Exportieren', exact: true }).click(); await confirmDefaultExport(page)
   const download = await downloadPromise; await download.saveAs(join(artifacts, 'images-export.pdf'))
   const exported = await PDFDocument.load(readFileSync(join(artifacts, 'images-export.pdf')))
   const value = exported.getPage(0).node.Contents()
@@ -178,7 +179,7 @@ try {
     await importFile(rotated, png)
     const placed = await imageRect(rotated)
     const downloadPromise = rotated.waitForEvent('download')
-    await rotated.getByRole('button', { name: 'Exportieren', exact: true }).click()
+    await rotated.getByRole('button', { name: 'Exportieren', exact: true }).click(); await confirmDefaultExport(rotated)
     const exported = await downloadPromise
     const output = join(artifacts, `rotated-${rotation}-export.pdf`); await exported.saveAs(output)
     await rotated.locator('input[accept="application/pdf"]').setInputFiles({ name: `baked-${rotation}.pdf`, mimeType: 'application/pdf', buffer: readFileSync(output) })

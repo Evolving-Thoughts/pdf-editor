@@ -1,3 +1,4 @@
+import { confirmDefaultExport } from './export-smoke-helper.mjs'
 // Compare actual editor glyph pixels against exported PDF.js pixels after arrow nudges.
 import { chromium } from 'playwright'
 import assert from 'node:assert/strict'
@@ -173,7 +174,7 @@ try {
       : null
     if (test.second) await page.screenshot({ path: join(artifacts, test.name + '-scene.png') })
     const pending = page.waitForEvent('download')
-    await page.getByRole('button', { name: 'Exportieren', exact: true }).click()
+    await page.getByRole('button', { name: 'Exportieren', exact: true }).click(); await confirmDefaultExport(page)
     const output = join(artifacts, test.name + '-nudged.pdf')
     await (await pending).saveAs(output)
     const parsed = await PDFDocument.load(readFileSync(output)),

@@ -1,3 +1,4 @@
+import { confirmDefaultExport, openProtectedExport } from './export-smoke-helper.mjs'
 import { PNG_DATA_URL } from '../tests/imageFixtures.js'
 import { chromium } from 'playwright'
 import { PDFDocument, StandardFonts, degrees } from 'pdf-lib'
@@ -71,7 +72,7 @@ async function drop(bytes, name = 'dropped.pdf', files = 1) {
 }
 async function download(action, file) {
   const pending = p.waitForEvent('download')
-  await btn(action).click()
+  await btn(action).click(); if (action === 'Exportieren') await confirmDefaultExport(p)
   const d = await pending
   await d.saveAs(join(out, file))
   return new Uint8Array(readFileSync(join(out, file)))
@@ -302,8 +303,8 @@ try {
     (await PDFDocument.load(plain)).getForm().getTextField('Name').getText(),
     'Grace',
   )
-  // The existing unprotected export remains one click; protected export is explicit.
-  await btn('Mit Passwort exportieren …').click()
+  // Password protection is now an explicit option in the shared export dialog.
+  await openProtectedExport(p)
   await p.getByLabel('Export-Passwort', { exact: true }).fill('export-demo')
   await p.getByLabel('Passwort wiederholen', { exact: true }).fill('mismatch')
   await btn('Geschützt exportieren').click()
@@ -391,7 +392,7 @@ try {
   assert.equal(await p.getByRole('dialog').count(), 0)
   await p.setViewportSize({ width: 390, height: 900 })
   await p.emulateMedia({ colorScheme: 'dark' })
-  await btn('Mit Passwort exportieren …').click()
+  await openProtectedExport(p)
   await p.screenshot({
     path: join(out, 'protected-export-mobile-dark.png'),
     fullPage: true,
@@ -402,7 +403,7 @@ try {
   await p.emulateMedia({ colorScheme: 'light' })
   await btn('Suchen').click()
   await query('Searchable', 1)
-  await btn('Mit Passwort exportieren …').click()
+  await openProtectedExport(p)
   await p.keyboard.press('Escape')
   assert.equal(await p.getByRole('dialog').count(), 0)
   assert.equal(await p.locator('.search-window').count(), 1)
@@ -429,7 +430,7 @@ try {
   await p.mouse.down()
   await p.mouse.move(rr.x + 390, rr.y + 260, { steps: 4 })
   await p.mouse.up()
-  assert.equal(await btn('Mit Passwort exportieren …').isDisabled(), true)
+  assert.equal(await btn('Exportieren').isDisabled(), true)
   await btn('Schwärzung anwenden …').click()
   await btn('Jetzt wirklich schwärzen').click()
   await p.waitForFunction(() => !document.querySelector('.redaction-overlay'))
@@ -453,7 +454,7 @@ try {
   await query('NEW-VISIBLE', 1)
   await query('REDACTION-SECRET', 0)
   await btn('Suche schließen').click()
-  await btn('Mit Passwort exportieren …').click()
+  await openProtectedExport(p)
   await p.getByLabel('Export-Passwort', { exact: true }).fill('safe-export')
   await p
     .getByLabel('Passwort wiederholen', { exact: true })

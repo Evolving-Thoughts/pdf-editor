@@ -1,3 +1,4 @@
+import { confirmDefaultExport } from './export-smoke-helper.mjs'
 // Optional A4 via real UI, real PDF export, native fields, overlays and local drafts.
 import { chromium } from 'playwright'
 import { PDFDocument, StandardFonts, rgb } from 'pdf-lib'
@@ -19,7 +20,7 @@ const ready = () => p.waitForFunction(() => document.querySelector('.page-manage
 const choose = async index => { await p.locator('.page-manager-select').nth(index).click(); await ready() }
 const paper = () => p.locator('.page-preview-paper').boundingBox()
 async function download(name, file) {
-  const pending = p.waitForEvent('download'); await btn(name).click(); await (await pending).saveAs(join(out, file))
+  const pending = p.waitForEvent('download'); await btn(name).click(); if (name === 'Exportieren') await confirmDefaultExport(p); await (await pending).saveAs(join(out, file))
   return PDFDocument.load(readFileSync(join(out, file)))
 }
 async function expectSizes(doc, a4) {

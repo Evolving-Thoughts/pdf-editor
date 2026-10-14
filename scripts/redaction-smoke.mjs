@@ -1,3 +1,4 @@
+import { confirmDefaultExport } from './export-smoke-helper.mjs'
 import { chromium } from 'playwright'
 import { PDFDocument,StandardFonts } from 'pdf-lib'
 import { execFileSync } from 'node:child_process'
@@ -11,7 +12,7 @@ const p=await browser.newPage({viewport:{width:1280,height:1100},acceptDownloads
 p.on('pageerror',e=>errors.push(String(e)))
 const btn=name=>p.getByRole('button',{name,exact:true})
 async function drag(pageIndex,x1,y1,x2,y2){const el=p.locator('.pages .page').nth(pageIndex);await el.scrollIntoViewIfNeeded();const r=await el.boundingBox();await p.mouse.move(r.x+x1,r.y+y1);await p.mouse.down();await p.mouse.move(r.x+x2,r.y+y2,{steps:4});await p.mouse.up()}
-async function exported(file){const event=p.waitForEvent('download');await btn('Exportieren').click();await (await event).saveAs(join(out,file));return new Uint8Array(readFileSync(join(out,file)))}
+async function exported(file){const event=p.waitForEvent('download');await btn('Exportieren').click(); await confirmDefaultExport(p);await (await event).saveAs(join(out,file));return new Uint8Array(readFileSync(join(out,file)))}
 async function parsed(bytes){return p.evaluate(async data=>{const {getDocument,GlobalWorkerOptions,OPS}=await import('/node_modules/pdfjs-dist/build/pdf.mjs');GlobalWorkerOptions.workerSrc='/node_modules/pdfjs-dist/build/pdf.worker.min.mjs';const task=getDocument({data:new Uint8Array(data)}),doc=await task.promise,result=[];try{for(let i=1;i<=doc.numPages;i++){const page=await doc.getPage(i),text=(await page.getTextContent()).items.map(t=>t.str??'').join(' '),ops=await page.getOperatorList(),annotations=await page.getAnnotations();const canvas=document.createElement('canvas'),v=page.getViewport({scale:1});canvas.width=Math.ceil(v.width);canvas.height=Math.ceil(v.height);await page.render({canvas,viewport:v}).promise;const ctx=canvas.getContext('2d');result.push({text,fields:annotations.filter(a=>a.subtype==='Widget').map(a=>a.fieldName),vector:ops.fnArray.includes(OPS.showText),pixel:Array.from(ctx.getImageData(100,200,1,1).data)});canvas.width=1;canvas.height=1}return result}finally{await task.destroy()}},Array.from(bytes))}
 try{
  const doc=await PDFDocument.create(),a=doc.addPage([600,800]),b=doc.addPage([600,800]),font=await doc.embedFont(StandardFonts.Helvetica)

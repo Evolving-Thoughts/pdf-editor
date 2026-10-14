@@ -1,4 +1,6 @@
-import { ProtectedExportDialog } from './ProtectedExportDialog'
+import { ExportDialog, type PreparedExport } from './ExportDialog'
+import { compressPdf, checkExportAbort, type CompressionPreset } from '../core/pdf/compressPdf'
+import { encodeCompressedImage } from '../core/images/compressImage'
 import { preparePdf, unlockPdf, encryptPdf, PasswordRequiredError, IncorrectPasswordError } from '../core/pdf/unlockPdf'
 import { PasswordDialog, type PasswordRequest } from './PasswordDialog'
 import { SearchWindow } from './SearchWindow'
@@ -64,7 +66,7 @@ function draftSummary(record: DraftRecord): DraftSummary {
 }
 
 export default function App() {
-  const [protectedExport, setProtectedExport] = useState(false)
+  const [exportDialogOpen, setExportDialogOpen] = useState(false)
   const [exportBusy, setExportBusy] = useState(false)
   const [searchOpen, setSearchOpen] = useState(false)
   const [searchResult, setSearchResult] = useState<{
@@ -666,42 +668,37 @@ export default function App() {
     [zoom],
   )
 
-  const onExport = useCallback(
-    async (password?: string) => {
+  const prepareExport = useCallback(
+    async (preset: CompressionPreset | undefined, signal: AbortSignal, onProgress: (done: number, total: number) => void): Promise<PreparedExport> => {
       const draft = draftRef.current
-      if (!draft || !store.state.pages?.length || pageBusy || exportBusy) return
-      setError(null)
+      if (!draft || !store.state.pages?.length || pageBusy || exportBusy)
+        throw new Error('Der Export ist gerade nicht verfügbar.')
       setExportBusy(true)
       try {
+        checkExportAbort(signal)
         if (store.state.redactions?.length)
-          throw new Error(
-            'Vorgemerkte Schwärzungen zuerst anwenden oder verwerfen; sie sind noch nicht sicher entfernt.',
-          )
-        const bytes = await exportPageDocument(
-          new Uint8Array(draft.bytes),
-          store.state.pageSources ?? [],
-          store.state.pages,
-          store.state.overlays.map(cloneOverlay),
-          undefined,
-          store.state.formValues,
-          store.state.redactionApplied ||
-            store.state.pages.some((page) => page.redacted),
+          throw new Error('Vorgemerkte Schwärzungen zuerst anwenden oder verwerfen; sie sind noch nicht sicher entfernt.')
+        const original = await exportPageDocument(
+          new Uint8Array(draft.bytes), store.state.pageSources ?? [], store.state.pages,
+          store.state.overlays.map(cloneOverlay), undefined, store.state.formValues,
+          store.state.redactionApplied || store.state.pages.some(page => page.redacted),
         )
-        const output =
-          password === undefined ? bytes : await encryptPdf(bytes, password)
-        downloadPdf(output, draft.name)
-      } catch (problem) {
-        setError(
-          problem instanceof Error
-            ? problem.message
-            : 'Das PDF konnte nicht exportiert werden.',
-        )
-      } finally {
-        setExportBusy(false)
-      }
-    },
-    [store, pageBusy, exportBusy],
+        checkExportAbort(signal)
+        const compression = preset ? await compressPdf(original, preset, encodeCompressedImage, { signal, onProgress }) : undefined
+        checkExportAbort(signal)
+        return { name: draft.name, original, compression }
+      } finally { setExportBusy(false) }
+    }, [store, pageBusy, exportBusy],
   )
+  const downloadExport = useCallback(async (bytes: Uint8Array, name: string, password: string | undefined, signal: AbortSignal) => {
+    setExportBusy(true)
+    try {
+      checkExportAbort(signal)
+      const output = password === undefined ? bytes : await encryptPdf(bytes, password)
+      checkExportAbort(signal)
+      downloadPdf(output, name)
+    } finally { setExportBusy(false) }
+  }, [])
 
   const onApplyRedactions = async () => {
     const draft=draftRef.current,version=store.getVersion(),intent=documentIntentRef.current
@@ -728,17 +725,19 @@ export default function App() {
       onDropCapture={event=>{
         const files=Array.from(event.dataTransfer.files)
         if(!files.length)return
+        if(exportDialogOpen){event.preventDefault();event.stopPropagation();return}
         const pdfFiles=files.filter(file=>file.type==='application/pdf'||/\.pdf$/i.test(file.name))
         if(!pdfFiles.length && (event.target as HTMLElement).closest('.page') && files.every(file=>/^image\/(png|jpeg)$/.test(file.type)))return
         event.preventDefault();event.stopPropagation()
         if(loadingDraftId||exportBusy||openingFile||redactionBusy||pageBusy||cropActive)return
         if(files.length!==1||pdfFiles.length!==1){setError('Bitte genau eine PDF-Datei zum Öffnen ziehen. Bilder auf einer Dokumentseite ablegen.');return}
         void onOpenFile(pdfFiles[0])
-      }} onChange={() => {
+      }} onChange={event => {
+      if ((event.target as HTMLElement).closest('.export-dialog')) return
       inputEpochRef.current += 1
       setManualSave(current => current?.status === 'saved' ? null : current)
     }}>
-      <header className="toolbar" inert={redactionBusy || openingFile || exportBusy || !!loadingDraftId}>
+      <header className="toolbar" inert={exportDialogOpen || redactionBusy || openingFile || exportBusy || !!loadingDraftId}>
         <input
           ref={fileInputRef}
           type="file"
@@ -870,10 +869,9 @@ export default function App() {
             <button type="button" aria-label="Wiederholen" disabled={!store.canRedo || pageBusy || cropActive} onClick={() => store.redo()} title="Wiederholen (Strg+Y)">
               ↪︎
             </button>
-            <button type="button" disabled={pageBusy || cropActive || redactions.length>0 || !documentPages?.length} onClick={() => void onExport()}>
+            <button type="button" disabled={pageBusy || cropActive || redactions.length>0 || !documentPages?.length} onClick={() => setExportDialogOpen(true)}>
               Exportieren
             </button>
-            <button type="button" disabled={pageBusy || cropActive || redactions.length>0 || !documentPages?.length} onClick={()=>setProtectedExport(true)}>Mit Passwort exportieren …</button>
           </>
         )}
       </header>
@@ -899,7 +897,7 @@ export default function App() {
         </p>
       )}
       {openingFile && <p role="status" className="hint">PDF wird geöffnet …</p>}
-      <div className="workspace" ref={workspaceRef} inert={redactionBusy || openingFile || exportBusy || !!loadingDraftId}>
+      <div className="workspace" ref={workspaceRef} inert={exportDialogOpen || redactionBusy || openingFile || exportBusy || !!loadingDraftId}>
         {pdf && searchOpen && !pageManagerOpen && !pageBusy && <SearchWindow pdf={pdf} overlays={overlays} onClose={closeSearch} onHits={onSearchHits} onJump={onSearchJump}/>}
         {pdf && pageManagerOpen && originalBytes && <PagesManager nativeWidgets={nativeWidgets} key={activeDraftId} pdf={pdf} store={store} original={originalBytes} busy={pageBusy} onCropActive={setCropActive} />}
         {!pageManagerOpen && <>
@@ -943,11 +941,10 @@ export default function App() {
         </div>
         </>}
       </div>
-      {protectedExport && <ProtectedExportDialog onCancel={()=>setProtectedExport(false)} onExport={password=>{setProtectedExport(false);void onExport(password)}}/>}
-      {exportBusy && <p role="status" className="hint">PDF wird exportiert …</p>}
+      {exportDialogOpen && <ExportDialog onCancel={()=>setExportDialogOpen(false)} onPrepare={prepareExport} onDownload={downloadExport}/> }
       {passwordRequest && <PasswordDialog key={passwordEpoch.current} request={passwordRequest}/>}
       {pdf && !pageManagerOpen && !pageBusy && (
-        <footer className="drawing-footer" inert={redactionBusy || openingFile || exportBusy || !!loadingDraftId}>
+        <footer className="drawing-footer" inert={exportDialogOpen || redactionBusy || openingFile || exportBusy || !!loadingDraftId}>
           <button type="button" disabled={!overlays.some(o=>isStroke(o)||isMarker(o))}
             title="Freihandstriche und Textmarker löschen · Formen, Texte, Bilder und PDF bleiben erhalten"
             onClick={() => {

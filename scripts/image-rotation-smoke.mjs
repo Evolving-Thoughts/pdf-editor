@@ -1,3 +1,4 @@
+import { confirmDefaultExport } from './export-smoke-helper.mjs'
 // Approved rotation UI + draft/export/geometry regression checks in Chromium.
 import { chromium } from 'playwright'
 import assert from 'node:assert/strict'
@@ -126,7 +127,7 @@ try {
     await setAngle(exportedPage, 37.5)
     const placed = await geometry(exportedPage)
     const download = exportedPage.waitForEvent('download')
-    await exportedPage.getByRole('button', { name: 'Exportieren', exact: true }).click()
+    await exportedPage.getByRole('button', { name: 'Exportieren', exact: true }).click(); await confirmDefaultExport(exportedPage)
     const output = join(artifacts, `angle-page-${rotation}.pdf`); await (await download).saveAs(output)
     await exportedPage.locator('input[accept="application/pdf"]').setInputFiles({ name: `baked-${rotation}.pdf`, mimeType: 'application/pdf', buffer: readFileSync(output) })
     await exportedPage.getByText(`baked-${rotation}.pdf · 1 Seite`, { exact: true }).waitFor()

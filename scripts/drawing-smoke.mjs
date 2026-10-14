@@ -1,3 +1,4 @@
+import { confirmDefaultExport } from './export-smoke-helper.mjs'
 import { chromium } from 'playwright'
 import assert from 'node:assert/strict'
 import { execFileSync } from 'node:child_process'
@@ -120,7 +121,7 @@ try {
   await page.waitForSelector('.stroke', { state: 'attached' })
   assert.deepEqual(await page.locator('.stroke').evaluateAll(paths => paths.map(p => p.getAttribute('d'))), erasedPaths, 'Striche und Teilradierung überleben Reload')
   const downloadEvent = page.waitForEvent('download')
-  await page.getByRole('button', { name: 'Exportieren', exact: true }).click()
+  await page.getByRole('button', { name: 'Exportieren', exact: true }).click(); await confirmDefaultExport(page)
   const download = await downloadEvent
   await download.saveAs(join(artifactDir, 'drawing-export.pdf'))
   assert.equal((await PDFDocument.load(readFileSync(join(artifactDir, 'drawing-export.pdf')))).getPageCount(), 2)

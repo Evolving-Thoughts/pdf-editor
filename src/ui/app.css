@@ -851,3 +851,26 @@
   /* Leave room above the first page so its first match cannot hide behind the panel. */
   .workspace:has(.search-window) .pages { padding-top: 180px; }
 }
+
+/* T12 / chosen A: a single export dialog, both optional switches default off. */
+.export-dialog { width: 500px; text-align: left; }
+.export-dialog fieldset { border: 0; padding: 0; margin: 0; min-width: 0; }
+.export-dialog .export-toggle { display: flex; align-items: flex-start; gap: 10px; margin: 16px 0; cursor: pointer; }
+.export-dialog .export-toggle input { flex: 0 0 18px; width: 18px; height: 18px; padding: 0; margin: 2px 0 0; accent-color: var(--accent); }
+.export-toggle strong, .export-toggle small { display: block; }
+.export-toggle small { font-size: 12px; margin-top: 4px; }
+.export-dialog .export-quality select { display: block; width: 100%; min-height: 44px; padding: 8px; margin: 6px 0; font: inherit; color: var(--text-h); background: var(--bg); border: 1px solid var(--border); border-radius: 6px; }
+.export-quality small, .export-dialog .export-detail { font-size: 12px; line-height: 1.5; }
+.export-protection { border-top: 1px solid var(--border); margin-top: 16px; }
+.export-protection label:not(.export-toggle) { margin-top: 10px; }
+.export-sizes { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; margin: 16px 0; }
+.export-sizes > div { padding: 12px; border: 1px solid var(--border); border-radius: 6px; }
+.export-sizes dt { font-size: 12px; }
+.export-sizes dd { font-size: 22px; font-weight: 600; margin: 8px 0 0; color: var(--text-h); }
+.export-dialog .password-actions { flex-wrap: wrap; }
+.export-dialog .password-actions button { padding: 8px 12px; min-width: 100px; }
+.export-dialog .export-primary { background: #7132c1; border-color: #7132c1; color: white; }
+.export-dialog .export-fallback { margin-top: 12px; border: 0; background: transparent; color: var(--text-h); text-decoration: underline; font: inherit; font-size: 13px; min-height: 44px; cursor: pointer; }
+.export-dialog button:disabled { opacity: .5; cursor: default; }
+.export-error { color: #b91c1c; }
+@media (prefers-color-scheme: dark) { .export-error { color: #f87171; } }

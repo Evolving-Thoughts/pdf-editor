@@ -1,3 +1,4 @@
+import { confirmDefaultExport } from './export-smoke-helper.mjs'
 // T9 variant C: real fields + overlay text, undo, drafts, page operations and live export.
 import { chromium } from 'playwright'
 import { PDFDocument, StandardFonts } from 'pdf-lib'
@@ -15,7 +16,7 @@ const btn = name => p.getByRole('button', { name, exact: true })
 const name = () => p.locator('.pages').getByRole('textbox', { name: 'Name', exact: true }).first()
 const ready = () => p.waitForFunction(() => document.querySelector('.page-manager-preview canvas')?.width > 0 && !document.querySelector('.page-manager-message')?.textContent.includes('aktualisiert') && !document.querySelector('.page-manager-message')?.textContent.includes('verarbeitet'))
 async function exportDoc(button, file) {
-  const event = p.waitForEvent('download'); await btn(button).click(); await (await event).saveAs(join(out, file)); return PDFDocument.load(readFileSync(join(out, file)))
+  const event = p.waitForEvent('download'); await btn(button).click(); if (button === 'Exportieren') await confirmDefaultExport(p); await (await event).saveAs(join(out, file)); return PDFDocument.load(readFileSync(join(out, file)))
 }
 async function parsed(bytes) {
   return p.evaluate(async data => {
@@ -76,7 +77,7 @@ try {
   // A value outside the standard font must remain recoverable in a local draft.
   await name().fill('Unsupported 🙂'); await btn('Speichern').click(); await p.waitForFunction(() => document.querySelector('.draft-save-status')?.textContent.includes('Entwurf gespeichert'))
   await p.reload(); await p.getByRole('button', { name: /Entwürfe/ }).click(); await p.locator('.draft-open').first().click(); await name().waitFor(); assert.equal(await name().inputValue(), 'Unsupported 🙂')
-  await btn('Exportieren').click(); await p.getByRole('alert').filter({ hasText: 'Standardschrift' }).waitFor()
+  await btn('Exportieren').click(); await confirmDefaultExport(p); await p.getByRole('alert').filter({ hasText: 'Standardschrift' }).waitFor(); await p.keyboard.press('Escape')
   await name().fill('Recovered'); full = await exportDoc('Exportieren', 'recovered.pdf'); checkValues(full, 'Recovered')
   assert.equal((await PDFDocument.load(original)).getForm().getTextField('Name').getText(), 'Ada'); assert.deepEqual(errors, [])
   console.log('PASS T9 variant C: real native text/multiline/check/radio/single+multi-choice/read-only/shared widgets, grouped undo/redo, mixed overlay text, independent PDF.js values and later native edit, draft reload, rotation/subset export, A4 + subsequent edit/reload, mobile viewport; no page errors. Original immutable.')
