@@ -1,3 +1,5 @@
+import type { NativeWidget } from '../core/forms'
+import { NativeFormLayer } from './NativeFormLayer'
 import { useEffect, useRef, useState, type ReactNode } from 'react'
 import { resolvedOverlayClips } from '../core/overlayClipping'
 import { addShape, addStroke, addTextbox, replaceOverlays } from '../core/commands'
@@ -13,6 +15,9 @@ import { TextboxView } from './TextboxView'
 import type { Tool } from './tools'
 
 interface PageViewProps {
+  nativeWidgets?: NativeWidget[]
+  highlightFields?: boolean
+  onFormError?: (message: string) => void
   pdf: PdfHandle
   readOnly?: boolean
   pageIndex: number
@@ -45,6 +50,7 @@ interface DrawingGesture {
 }
 
 export function PageView({
+  nativeWidgets = [], highlightFields = false, onFormError,
   pdf, readOnly = false, pageIndex, zoom, tool, symbol, overlays, store, selectedId, onSelect,
   shapeStyle, markerStyle, onImageDrop, strokeColor = '#111111', strokeWidth = 3, eraserRadius = 8,
 }: PageViewProps) {
@@ -77,7 +83,7 @@ export function PageView({
   const onPagePointerDown = (event: React.PointerEvent<HTMLDivElement>) => {
     if (readOnly) return
     if (!event.isPrimary || event.button !== 0 || gestureRef.current) return
-    if ((event.target as HTMLElement).closest('.textbox, .image-overlay, .shape-overlay')) return
+    if ((event.target as HTMLElement).closest('.textbox, .image-overlay, .shape-overlay, .native-widget')) return
     if (tool === 'select') {
       onSelect(null)
       return
@@ -193,6 +199,7 @@ export function PageView({
       onLostPointerCapture={cancelDrawing}
     >
       <canvas ref={canvasRef} />
+      {pageSize && nativeWidgets.some(field => field.pageIndex === pageIndex) && <NativeFormLayer fields={nativeWidgets.filter(field => field.pageIndex === pageIndex)} store={store} interactive={!readOnly && (tool === 'select' || tool === 'text')} highlight={highlightFields} zoom={zoom} onSelect={onSelect} onError={onFormError} />}
       {pageSize &&
         overlays
           .filter((overlay) => overlay.pageIndex === pageIndex)

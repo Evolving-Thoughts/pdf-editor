@@ -1,3 +1,4 @@
+import type { FormValues } from '../forms'
 import { PDFArray, PDFDict, PDFDocument, PDFName, PDFNumber, PDFString, PDFHexString,
   clip, concatTransformationMatrix, endPath, popGraphicsState, pushGraphicsState, rectangle,
 } from 'pdf-lib'
@@ -8,9 +9,9 @@ import { clipAnnotation } from './clipAnnotation'
 import { composePages, preparePages } from './pageOperations'
 
 /** Normalize a derived source, never the user's original bytes or live state. */
-export async function normalizeA4(original: Uint8Array, sources: PageSource[], pages: DocumentPage[], overlays: Overlay[]) {
+export async function normalizeA4(original: Uint8Array, sources: PageSource[], pages: DocumentPage[], overlays: Overlay[], formValues: FormValues = {}) {
   if (pages.some(page => page.hasXfa)) throw new Error('XFA-Formulare werden bei Seitenoperationen noch nicht unterstützt.')
-  const bytes = await composePages(original, sources, pages)
+  const bytes = await composePages(original, sources, pages, formValues)
   const doc = await PDFDocument.load(bytes)
   if (doc.catalog.lookupMaybe(PDFName.of('AcroForm'), PDFDict)?.has(PDFName.of('XFA')))
     throw new Error('XFA-Formulare werden bei Seitenoperationen noch nicht unterstützt.')

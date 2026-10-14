@@ -306,3 +306,12 @@ test('page order, crop, rotation and inserted PDF sources survive saving and reo
  expect((await loadDraft(db,'pages'))!.pageSources![0].bytes).toEqual(new Uint8Array([1,2,3]).buffer)
  await deleteDraft(db,'pages');expect(await loadDraft(db,'pages')).toBeNull()
 })
+
+test('stores native form values and overlays together and reads older drafts without form values', async () => {
+  const db = await openDb(), draft = sampleDraft('native-form')
+  const values = { '["original","name"]': 'Grace', '["original","agree"]': true, '["original","choice"]': ['Two', 'Three'] }
+  await saveDraft(db, { ...draft, formValues: values })
+  const loaded = await loadDraft(db, draft.id)
+  expect(loaded?.formValues).toEqual(values); expect(loaded?.overlays).toEqual(draft.overlays)
+  await saveDraft(db, sampleDraft('old-format')); expect((await loadDraft(db, 'old-format'))?.formValues).toBeUndefined()
+})

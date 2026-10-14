@@ -1,3 +1,5 @@
+import type { FormValues } from '../forms'
+import { applyFormValues, updateFormAppearances } from './acroForm'
 import { PDFDict, PDFDocument, PDFName, PDFNumber, PDFObjectCopier, PDFPage, PDFPageLeaf, StandardFonts, degrees } from 'pdf-lib'
 import { cloneOverlay, createId, type Overlay } from '../model'
 import { exportPdf } from './exportPdf'
@@ -47,6 +49,7 @@ export async function composePages(
   original: Uint8Array,
   sources: PageSource[],
   pages: DocumentPage[],
+  formValues: FormValues = {},
 ): Promise<Uint8Array> {
   if (!pages.length) throw new Error('Ein PDF muss mindestens eine Seite enthalten.')
   // An ordinary overlay edit must not rebuild the page tree: preserve forms,
@@ -61,8 +64,13 @@ export async function composePages(
           page.unit === pages[index].unit &&
           page.rotation === pages[index].rotation,
       )
-    )
+    ) {
+      if (!Object.keys(formValues).length) return original.slice()
+      const doc = await PDFDocument.load(original)
+      if (doc.catalog.lookupMaybe(PDFName.of('AcroForm'), PDFDict)?.has(PDFName.of('XFA'))) throw new Error('XFA-Formulare werden noch nicht unterstützt.')
+      if (applyFormValues(doc, 'original', formValues)) { await updateFormAppearances(doc); return doc.save({ updateFieldAppearances: false }) }
       return original.slice()
+    }
   }
 
   const output = await PDFDocument.create()
@@ -75,6 +83,7 @@ export async function composePages(
       const doc = await PDFDocument.load(bytes)
       if (doc.catalog.lookupMaybe(PDFName.of('AcroForm'), PDFDict)?.has(PDFName.of('XFA')))
         throw new Error('XFA-Formulare werden bei Seitenoperationen noch nicht unterstützt. Die Originaldatei bleibt unverändert.')
+      if (applyFormValues(doc, page.sourceId, formValues)) await updateFormAppearances(doc)
       retainPageWidgets(doc, new Set(pages.filter(p => p.sourceId === page.sourceId).map(p => p.sourceIndex)))
       namespaceFormResources(doc, `Source${loaded.size}`)
       source = { doc, copier: PDFObjectCopier.for(doc.context, output.context) }
@@ -160,6 +169,7 @@ export async function exportPageDocument(
   pages: DocumentPage[],
   overlays: Overlay[],
   pageId?: string | readonly string[],
+  formValues: FormValues = {},
 ) {
   if (pageId !== undefined) {
     const ids = new Set(typeof pageId === 'string' ? [pageId] : pageId), available = new Set(pages.map(page => page.id))
@@ -169,7 +179,7 @@ export async function exportPageDocument(
     const indices = new Map(chosen.map((page, index) => [page.id, index]))
     const mapped = overlays.filter(overlay => indices.has(pages[overlay.pageIndex]?.id))
       .map(overlay => ({ ...cloneOverlay(overlay), pageIndex: indices.get(pages[overlay.pageIndex].id)! }))
-    return exportPdf(await composePages(original, sources, chosen), mapped)
+    return exportPdf(await composePages(original, sources, chosen, formValues), mapped)
   }
-  return exportPdf(await composePages(original, sources, pages), overlays)
+  return exportPdf(await composePages(original, sources, pages, formValues), overlays)
 }

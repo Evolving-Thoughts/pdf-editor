@@ -1,3 +1,4 @@
+import type { FormValues } from './forms'
 import type { DocumentPage, PageSource } from './pages'
 // Central editor store: holds the document overlay state and the command
 // stack (ADR-002). Framework-free; the UI subscribes and re-renders.
@@ -48,6 +49,7 @@ export class EditorStore {
 
   /** Clears all overlays and history, e.g. when a new document is loaded. */
   reset(): void {
+    this.state.formValues = undefined
     this.state.overlays = []
     this.state.pages = undefined
     this.state.pageSources = undefined
@@ -56,7 +58,8 @@ export class EditorStore {
   }
 
   /** Replaces overlays with a stored draft's state and clears history. */
-  restore(overlays: Overlay[], pages?: DocumentPage[], sources?: PageSource[]): void {
+  restore(overlays: Overlay[], pages?: DocumentPage[], sources?: PageSource[], formValues?: FormValues): void {
+    this.state.formValues = formValues ? structuredClone(formValues) : undefined
     this.state.overlays = overlays.map(cloneOverlay)
     this.state.pages = pages ? structuredClone(pages) : undefined
     this.state.pageSources = sources ? [...sources] : undefined

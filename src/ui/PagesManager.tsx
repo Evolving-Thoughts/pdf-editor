@@ -1,3 +1,4 @@
+import type { NativeWidget } from '../core/forms'
 import { selectPages, type PageSelectionGesture } from '../core/pageSelection'
 import { downloadPdf } from '../core/pdf/downloadPdf'
 import { useEffect, useRef, useState } from 'react'
@@ -44,13 +45,14 @@ function RotateIcon({ clockwise }: { clockwise: boolean }) {
 const defaultStyle = { fill: null, strokeColor: '#2455c7', strokeWidth: 3 }
 
 interface Props {
+  nativeWidgets?: NativeWidget[]
   pdf: PdfHandle
   store: EditorStore
   original: ArrayBuffer
   busy: boolean
   onCropActive: (active: boolean) => void
 }
-export function PagesManager({ pdf, store, original, busy, onCropActive }: Props) {
+export function PagesManager({ nativeWidgets = [], pdf, store, original, busy, onCropActive }: Props) {
   const pages = store.state.pages ?? []
   const [selected, setSelected] = useState(pages[0]?.id ?? '')
   const [checkedIds, setCheckedIds] = useState<string[]>(pages[0] ? [pages[0].id] : [])
@@ -147,6 +149,7 @@ export function PagesManager({ pdf, store, original, busy, onCropActive }: Props
     setMessage(activeCrop ? 'Offenen Zuschnitt verworfen.' : a4Open ? 'A4-Vorschau: Erst Anwenden verändert die Seiten.' : gesture.range || gesture.toggle || gesture.checked !== undefined ? 'Gemeinsame Seitenauswahl aktualisiert.' : 'Vorschau und Bereichsanker gewechselt; Auswahl unverändert.')
   }
   const pageProps = {
+    nativeWidgets,
     pdf,
     store,
     overlays: store.state.overlays,
@@ -164,7 +167,7 @@ export function PagesManager({ pdf, store, original, busy, onCropActive }: Props
     const token = ++request.current, version = store.getVersion()
     setA4Open(true); setWorking(true); setProblem(null)
     try {
-      const prepared = await normalizeA4(new Uint8Array(original), store.state.pageSources ?? [], pages, store.state.overlays)
+      const prepared = await normalizeA4(new Uint8Array(original), store.state.pageSources ?? [], pages, store.state.overlays, store.state.formValues)
       if (request.current !== token) return
       const previewPdf = await loadPdf('A4-Vorschau', new Uint8Array(prepared.source.bytes))
       if (request.current !== token) { await previewPdf.destroy(); return }
@@ -230,6 +233,7 @@ export function PagesManager({ pdf, store, original, busy, onCropActive }: Props
         pages,
         store.state.overlays,
         ids,
+        store.state.formValues,
       )
       if (token !== request.current) return
       downloadPdf(bytes, ids.length === 1 ? `Seite-${pages.findIndex(p => p.id === ids[0]) + 1}.pdf` : `Auswahl-${ids.length}-Seiten.pdf`)
@@ -282,7 +286,7 @@ export function PagesManager({ pdf, store, original, busy, onCropActive }: Props
         {pages.some((p) => p.hasForms) && (
           <details className="page-form-info">
             <summary>PDF-Formularfelder bleiben im Export bearbeitbar</summary>
-            <p>Das direkte Ausfüllen im Editor folgt mit dem AcroForm-Modus. Die Originaldatei bleibt unverändert.</p>
+            <p>Vorhandene Felder können in der Dokumentbearbeitung direkt ausgefüllt werden. Die Originaldatei bleibt unverändert.</p>
           </details>
         )}
         {deletePending ? (
@@ -534,7 +538,7 @@ export function PagesManager({ pdf, store, original, busy, onCropActive }: Props
               className="page-preview-paper"
               style={{ width: shownSize.width * scale, height: shownSize.height * scale }}
             >
-              <PageView {...pageProps} pdf={a4Preview?.pdf ?? pdf} store={a4Preview?.store ?? store} overlays={a4Preview?.prepared.overlays ?? store.state.overlays} pageIndex={index} zoom={scale} />
+              <PageView {...pageProps} nativeWidgets={a4Preview ? [] : nativeWidgets} pdf={a4Preview?.pdf ?? pdf} store={a4Preview?.store ?? store} overlays={a4Preview?.prepared.overlays ?? store.state.overlays} pageIndex={index} zoom={scale} />
               {activeCrop && (
                 <div className="page-crop-layer">
                   <div

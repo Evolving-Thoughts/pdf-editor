@@ -36,6 +36,7 @@ export function insertionPageSize(pages: DocumentPage[], index: number) {
 }
 function snapshot(state: EditorState) {
   return {
+    formValues: state.formValues ? structuredClone(state.formValues) : undefined,
     pages: structuredClone(state.pages ?? []),
     overlays: state.overlays.map(cloneOverlay),
     pageSources: [...(state.pageSources ?? [])],
@@ -52,6 +53,7 @@ function pageCommand(
     after = snapshot(state)
   mutate(after)
   const assign = (target: EditorState, value: typeof before) => {
+    target.formValues = value.formValues ? structuredClone(value.formValues) : undefined
     target.pages = structuredClone(value.pages)
     target.overlays = value.overlays.map(cloneOverlay)
     target.pageSources = [...value.pageSources]
@@ -200,6 +202,7 @@ export function cropPage(state: EditorState, id: string, m: CropMargins): Comman
 export function replacePageDocument(state: EditorState, pages: DocumentPage[], source: PageSource, overlays: Overlay[]): Command {
   return pageCommand(state, 'Set all pages to A4', next => {
     next.pages = structuredClone(pages)
+    next.formValues = undefined // The replacement source already contains native values.
     next.pageSources = [source]
     next.overlays = overlays.map(cloneOverlay)
   })
