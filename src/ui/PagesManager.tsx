@@ -5,6 +5,7 @@ import {
   cropPage,
   deletePage,
   insertPages,
+  insertionPageSize,
   movePage,
   pageSize,
   rotatePage,
@@ -140,14 +141,17 @@ export function PagesManager({ pdf, store, original, busy, onCropActive }: Props
     setProblem(null)
     try {
       if (source === 'file' && !file) throw new Error('Bitte eine PDF-, PNG- oder JPG-Datei auswählen.')
+      // Match the preceding displayed page; before the first page use that page.
+      // Empty documents start at A4. Native attached PDFs retain their own size.
+      const sheetSize = insertionPageSize(before ?? [], gap)
       const imported =
         source === 'text'
-          ? await preparePages(await textPageBytes(text), 'Textseite')
-          : await importPageFile(file!)
+          ? await preparePages(await textPageBytes(text, sheetSize), 'Textseite')
+          : await importPageFile(file!, sheetSize)
       if (request.current !== token) return
       if (store.state.pages !== before)
         throw new Error('Die Seiten haben sich inzwischen geändert. Bitte erneut einfügen.')
-      store.dispatch(insertPages(store.state, gap, imported.pages, imported.source))
+      store.dispatch(insertPages(store.state, gap, imported.pages, imported.source, imported.overlays))
       setSelected(imported.pages[0].id)
       setInserting(false)
       setFile(null)
@@ -217,8 +221,8 @@ export function PagesManager({ pdf, store, original, busy, onCropActive }: Props
         <h2>Seiten verwalten</h2>
         {pages.some((p) => p.hasForms) && (
           <p className="page-manager-message">
-            Hinweis: Bei geänderten Seiten werden vorhandene PDF-Formularfelder als sichtbarer, nicht mehr
-            interaktiver Inhalt übernommen. Die Originaldatei bleibt unverändert.
+            Vorhandene PDF-Formularfelder bleiben im Export bearbeitbar. Das direkte Ausfüllen im Editor folgt
+            mit dem AcroForm-Modus. Die Originaldatei bleibt unverändert.
           </p>
         )}
         {activeCrop ? (
@@ -488,7 +492,7 @@ export function PagesManager({ pdf, store, original, busy, onCropActive }: Props
             disabled={working}
           >
             <option value="file">PDF oder Bild (PNG/JPG)</option>
-            <option value="text">Text als neue A4-Seite</option>
+            <option value="text">Text als neue Seite</option>
           </select>
           {source === 'file' ? (
             <label>
@@ -529,8 +533,9 @@ export function PagesManager({ pdf, store, original, busy, onCropActive }: Props
             ))}
           </select>
           <p>
-            Bildseiten verwenden 96 Pixel pro Zoll. Text wird auf A4 umgebrochen; nicht unterstützte Zeichen
-            erscheinen als „?“.
+            Text- und Bildseiten übernehmen das Format der vorherigen Seite (am Anfang: der ersten Seite).
+            Bilder bleiben auf einer weißen Seite verschiebbar, skalierbar und drehbar. PDFs behalten ihr
+            Originalformat. Nicht unterstützte Textzeichen erscheinen als „?“.
           </p>
           {problem && (
             <p role="alert" className="page-manager-error">

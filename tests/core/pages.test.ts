@@ -4,6 +4,7 @@ import {
   movePage,
   deletePage,
   insertPages,
+  insertionPageSize,
   rotatePage,
   cropPage,
   pageSize,
@@ -146,4 +147,36 @@ test('crop translates overlay origins and maps margins into rotated, offset, sca
   store.undo()
   expect(store.state.pages![0].box).toEqual({ x: 10, y: 20, width: 100, height: 150 })
   expect(() => cropPage(store.state, 'a', { left: 300, top: 0, right: 0, bottom: 0 })).toThrow()
+})
+
+test('image page insertion adds editable overlays atomically and undo/redo preserves their geometry', () => {
+  const store = new EditorStore()
+  store.state.pages = pages()
+  store.state.overlays = [textbox('existing', 2)]
+  const image = { kind: 'image' as const, id: 'photo', pageIndex: 0, x: 20, y: 50, width: 100, height: 80,
+    lockAspectRatio: true, name: 'photo.png', dataUrl: 'png', pixelWidth: 100, pixelHeight: 80 }
+  store.dispatch(insertPages(store.state, 1, [{ ...pages()[0], id: 'photo-page', sourceId: 'photo-source' }],
+    { id: 'photo-source', bytes: new ArrayBuffer(1) }, [image]))
+  expect(store.state.overlays).toEqual([{ ...textbox('existing', 2), pageIndex: 3 }, { ...image, pageIndex: 1 }])
+  store.undo()
+  expect(store.state.overlays).toEqual([textbox('existing', 2)])
+  store.redo()
+  expect(store.state.overlays[1]).toEqual({ ...image, pageIndex: 1 })
+})
+
+test('page insertion references displayed rotation/crop/UserUnit and defaults to A4 only when empty', () => {
+  const plan = pages()
+  plan[1] = { ...plan[1], box: { x: 20, y: 30, width: 250, height: 400 }, rotation: 90, unit: 2 }
+  expect(insertionPageSize(plan, 0)).toEqual({ width: 200, height: 300 })
+  expect(insertionPageSize(plan, 2)).toEqual({ width: 800, height: 500 })
+  expect(insertionPageSize([], 0)).toEqual({ width: 595.28, height: 841.89 })
+})
+
+test('unsupported XFA page edits fail before changing editor state', () => {
+  const store = new EditorStore()
+  store.state.pages = pages().map(p => ({ ...p, hasXfa: true }))
+  const before = structuredClone(store.state)
+  expect(() => rotatePage(store.state, 'a', true)).toThrow('XFA-Formulare')
+  expect(() => deletePage(store.state, 'a')).toThrow('XFA-Formulare')
+  expect(store.state).toEqual(before)
 })

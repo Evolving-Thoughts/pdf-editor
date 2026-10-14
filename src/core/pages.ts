@@ -11,8 +11,10 @@ export interface DocumentPage {
   unit: number
   rotation: number
   cropped?: boolean
-  /** Existing PDF form widgets are kept visually when assembling a new PDF. */
+  /** Source contains native AcroForm fields; preserved on page operations/export. */
   hasForms?: boolean
+  /** XFA is not supported by pdf-lib; refuse page edits rather than lose it. */
+  hasXfa?: boolean
 }
 export interface PageSource {
   id: string
@@ -23,6 +25,11 @@ export function pageSize(page: DocumentPage) {
   return page.rotation % 180
     ? { width: height * page.unit, height: width * page.unit }
     : { width: width * page.unit, height: height * page.unit }
+}
+/** Match the preceding visible sheet, or the first sheet when inserting at the start. */
+export function insertionPageSize(pages: DocumentPage[], index: number) {
+  const reference = pages[Math.max(0, index - 1)]
+  return reference ? pageSize(reference) : { width: 595.28, height: 841.89 }
 }
 function snapshot(state: EditorState) {
   return {
@@ -36,6 +43,8 @@ function pageCommand(
   label: string,
   mutate: (next: EditorState & { pages: DocumentPage[] }) => void,
 ): Command {
+  if (state.pages?.some(p => p.hasXfa))
+    throw new Error('XFA-Formulare werden bei Seitenoperationen noch nicht unterstützt.')
   const before = snapshot(state),
     after = snapshot(state)
   mutate(after)
@@ -74,6 +83,7 @@ export function insertPages(
   index: number,
   pages: DocumentPage[],
   source: PageSource,
+  overlays: Overlay[] = [],
 ): Command {
   if (!Number.isInteger(index) || index < 0 || index > (state.pages?.length ?? 0) || pages.length === 0)
     throw new Error('Ungültige Einfügeposition.')
@@ -82,11 +92,15 @@ export function insertPages(
     new Set(pages.map((p) => p.id)).size !== pages.length
   )
     throw new Error('Doppelte Seitenkennung.')
+  if (pages.some(p => p.hasXfa)) throw new Error('XFA-Formulare werden bei Seitenoperationen noch nicht unterstützt.')
+  if (overlays.some((o) => !Number.isInteger(o.pageIndex) || o.pageIndex < 0 || o.pageIndex >= pages.length))
+    throw new Error('Ungültige Overlay-Seite.')
   return pageCommand(state, 'Insert pages', (next) => {
     next.pages.splice(index, 0, ...structuredClone(pages))
     next.overlays.forEach((o) => {
       if (o.pageIndex >= index) o.pageIndex += pages.length
     })
+    next.overlays.push(...overlays.map((o) => ({ ...cloneOverlay(o), pageIndex: o.pageIndex + index })))
     if (!next.pageSources?.some((s) => s.id === source.id)) next.pageSources!.push(source)
   })
 }

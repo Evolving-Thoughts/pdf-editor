@@ -1,8 +1,10 @@
-import { PDFDocument, PDFName, PDFNumber, StandardFonts, degrees } from 'pdf-lib'
+import { PDFDict, PDFDocument, PDFName, PDFNumber, PDFObjectCopier, PDFPage, PDFPageLeaf, StandardFonts, degrees } from 'pdf-lib'
 import { cloneOverlay, createId, type Overlay } from '../model'
 import { exportPdf } from './exportPdf'
 import { pageSize, type DocumentPage, type PageSource } from '../pages'
 import { importImage } from '../images/importImage'
+import { initialImageGeometry } from '../images/geometry'
+import { retainPageWidgets, namespaceFormResources, mergeAcroForm } from './preserveForms'
 
 export async function inspectPages(
   bytes: Uint8Array,
@@ -10,7 +12,10 @@ export async function inspectPages(
   sourceId = 'original',
 ): Promise<DocumentPage[]> {
   const doc = await PDFDocument.load(bytes)
-  const hasForms = doc.getForm().getFields().length > 0
+  const hasXfa = !!doc.catalog.lookupMaybe(PDFName.of('AcroForm'), PDFDict)?.has(PDFName.of('XFA'))
+  if (hasXfa && sourceId !== 'original')
+    throw new Error('XFA-Formulare werden bei Seitenoperationen noch nicht unterstützt.')
+  const hasForms = !hasXfa && doc.getForm().getFields().length > 0
   return doc.getPages().map((page, index) => {
     const media = page.getMediaBox(),
       crop = page.getCropBox()
@@ -26,6 +31,7 @@ export async function inspectPages(
     return {
       id: createId(),
       hasForms,
+      ...(hasXfa ? { hasXfa: true } : {}),
       name: `${name} · ${index + 1}`,
       sourceId,
       sourceIndex: index,
@@ -59,62 +65,57 @@ export async function composePages(
       return original.slice()
   }
 
-  const output = await PDFDocument.create(),
-    loaded = new Map<string, PDFDocument>()
+  const output = await PDFDocument.create()
+  const loaded = new Map<string, { doc: PDFDocument; copier: PDFObjectCopier }>()
   for (const page of pages) {
     let source = loaded.get(page.sourceId)
     if (!source) {
-      const bytes =
-        page.sourceId === 'original' ? original : sources.find((s) => s.id === page.sourceId)?.bytes
+      const bytes = page.sourceId === 'original' ? original : sources.find(s => s.id === page.sourceId)?.bytes
       if (!bytes) throw new Error('Quelldaten einer Seite fehlen.')
-      source = await PDFDocument.load(bytes)
-      const form = source.getForm(),
-        fields = form.getFields()
-      if (fields.length) {
-        // pdf-lib 1.17.1 removes appearance refs, not the actual widget refs,
-        // from Annots during flatten(). Capture and remove those widgets too.
-        const widgets = fields.flatMap((field) =>
-          field.acroField.getWidgets().map((widget) => source!.context.getObjectRef(widget.dict)),
-        )
-        form.flatten({ updateFieldAppearances: false })
-        for (const page of source.getPages()) for (const ref of widgets) if (ref) page.node.removeAnnot(ref)
-      }
+      const doc = await PDFDocument.load(bytes)
+      if (doc.catalog.lookupMaybe(PDFName.of('AcroForm'), PDFDict)?.has(PDFName.of('XFA')))
+        throw new Error('XFA-Formulare werden bei Seitenoperationen noch nicht unterstützt. Die Originaldatei bleibt unverändert.')
+      retainPageWidgets(doc, new Set(pages.filter(p => p.sourceId === page.sourceId).map(p => p.sourceIndex)))
+      namespaceFormResources(doc, `Source${loaded.size}`)
+      source = { doc, copier: PDFObjectCopier.for(doc.context, output.context) }
       loaded.set(page.sourceId, source)
     }
-    const [copied] = await output.copyPages(source, [page.sourceIndex])
+    const sourcePage = source.doc.getPage(page.sourceIndex)
+    const ref = source.copier.copy(sourcePage.ref)
+    const copied = PDFPage.of(output.context.lookup(ref) as PDFPageLeaf, ref, output)
     copied.setRotation(degrees(page.rotation))
     copied.setCropBox(page.box.x, page.box.y, page.box.width, page.box.height)
     copied.node.set(PDFName.of('UserUnit'), PDFNumber.of(page.unit))
     output.addPage(copied)
   }
-  return output.save()
+  // Stable names: preserve original field names even when attachments move before them.
+  for (const id of ['original', ...sources.map(s => s.id)]) {
+    const source = loaded.get(id)
+    if (source) mergeAcroForm(source.doc, output, source.copier)
+  }
+  return output.save({ updateFieldAppearances: false })
 }
-export async function imagePageBytes(image: {
-  dataUrl: string
-  pixelWidth: number
-  pixelHeight: number
-}): Promise<Uint8Array> {
-  const doc = await PDFDocument.create(),
-    embedded = await doc.embedPng(image.dataUrl)
-  // Local images have no dependable physical size; use 96 CSS pixels per inch.
-  const width = image.pixelWidth * 0.75,
-    height = image.pixelHeight * 0.75
-  const page = doc.addPage([width, height])
-  page.drawImage(embedded, { x: 0, y: 0, width, height })
+/** A white sheet; the actual image is an editable overlay, not baked into the PDF. */
+export async function imagePageBytes(size: { width: number; height: number }): Promise<Uint8Array> {
+  const doc = await PDFDocument.create()
+  doc.addPage([size.width, size.height])
   return doc.save()
 }
-export async function textPageBytes(text: string): Promise<Uint8Array> {
+export async function textPageBytes(text: string, size = { width: 595.28, height: 841.89 }): Promise<Uint8Array> {
   if (!text.trim()) throw new Error('Bitte zuerst Text eingeben.')
   const doc = await PDFDocument.create(),
     font = await doc.embedFont(StandardFonts.Helvetica)
-  let page = doc.addPage([595.28, 841.89]),
-    y = 790
+  if (!Number.isFinite(size.width) || !Number.isFinite(size.height) || size.width < 36 || size.height < 36)
+    throw new Error('Ungültige Seitengröße.')
+  const margin = Math.min(50, size.width / 6, size.height / 6)
+  let page = doc.addPage([size.width, size.height]),
+    y = size.height - margin - 2
   const line = (value: string) => {
-    if (y < 50) {
-      page = doc.addPage([595.28, 841.89])
-      y = 790
+    if (y < margin) {
+      page = doc.addPage([size.width, size.height])
+      y = size.height - margin - 2
     }
-    page.drawText(value, { x: 50, y, size: 12, font })
+    page.drawText(value, { x: margin, y, size: 12, font })
     y -= 17
   }
   for (const raw of text.replace(/\r\n?/g, '\n').split('\n')) {
@@ -126,7 +127,7 @@ export async function textPageBytes(text: string): Promise<Uint8Array> {
       } catch {
         safe = '?'
       }
-      if (font.widthOfTextAtSize(current + safe, 12) > 495) {
+      if (font.widthOfTextAtSize(current + safe, 12) > size.width - 2 * margin) {
         line(current)
         current = ''
       }
@@ -136,18 +137,20 @@ export async function textPageBytes(text: string): Promise<Uint8Array> {
   }
   return doc.save()
 }
-export async function importPageFile(file: File): Promise<{ pages: DocumentPage[]; source: PageSource }> {
-  let bytes: Uint8Array
+export async function importPageFile(file: File, size = { width: 595.28, height: 841.89 }) {
   if (/\.pdf$/i.test(file.name) || file.type === 'application/pdf')
-    bytes = new Uint8Array(await file.arrayBuffer())
-  else bytes = await imagePageBytes(await importImage(file))
-  return preparePages(bytes, file.name)
+    return preparePages(new Uint8Array(await file.arrayBuffer()), file.name)
+  const image = await importImage(file)
+  const imported = await preparePages(await imagePageBytes(size), file.name)
+  const overlay: Overlay = { kind: 'image', id: createId(), pageIndex: 0, ...image,
+    ...initialImageGeometry(image.pixelWidth, image.pixelHeight, size, { x: size.width / 2, y: size.height / 2 }) }
+  return { ...imported, overlays: [overlay] }
 }
 export async function preparePages(bytes: Uint8Array, name: string) {
   const id = createId(),
     pages = await inspectPages(bytes, name, id)
   if (!pages.length) throw new Error('Die Datei enthält keine Seiten.')
-  return { pages, source: { id, bytes: bytes.slice().buffer as ArrayBuffer } }
+  return { pages, source: { id, bytes: bytes.slice().buffer as ArrayBuffer }, overlays: [] as Overlay[] }
 }
 export { pageSize }
 

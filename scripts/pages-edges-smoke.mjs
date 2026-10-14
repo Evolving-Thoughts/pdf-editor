@@ -94,14 +94,17 @@ try {
   await p.locator('.page-insert-dialog').getByRole('button', { name: 'Einfügen', exact: true }).click()
   await p.locator('.page-insert-dialog').waitFor({ state: 'detached' })
   await settled()
-  assert.match(await p.locator('.page-manager-panel').textContent(), /nicht mehr interaktiver/)
+  assert.match(await p.locator('.page-manager-panel').textContent(), /im Export bearbeitbar/)
   const pending = p.waitForEvent('download')
   await btn('Extrahieren').click()
   const download = await pending
   const file = join(mkdtempSync(join(tmpdir(), 't7-form-')), 'form.pdf')
   await download.saveAs(file)
   assert.match(execFileSync('pdftotext', [file, '-'], { encoding: 'utf8' }), /Ada Lovelace/)
-  assert.equal((await PDFDocument.load(readFileSync(file))).getForm().getFields().length, 0)
+  const editable = await PDFDocument.load(readFileSync(file))
+  assert.equal(editable.getForm().getTextField('name').getText(), 'Ada Lovelace')
+  editable.getForm().getTextField('name').setText('Grace Hopper')
+  assert.equal((await PDFDocument.load(await editable.save())).getForm().getTextField('name').getText(), 'Grace Hopper')
   assert.deepEqual(errors, [])
   console.log(
     'PASS last-page deletion/undo, empty draft save/reload, invalid import preserves empty state, recovery via text insertion, crop corner drag/cancel/Escape.',
