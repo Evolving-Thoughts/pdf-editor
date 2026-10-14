@@ -33,3 +33,39 @@ aufgenommen. Dieser Bericht behauptet **keinen bereits grünen GitHub-CI-Lauf**.
 - Windows: Pfade/Browserauswahl korrigiert, aber nicht auf Windows ausgeführt.
 
 Details und manuelle Checkliste: [T13-MVP-QA.md](T13-MVP-QA.md).
+
+## Gemeldeter CI-Lauf und Diagnose
+
+Der erste GitHub-Lauf ist **nicht grün**: `shapes-smoke`, `shapes-repeat-smoke`
+und `search-import-smoke` wurden als FAIL gemeldet. Die bisherige Zusammenfassung
+enthält keine Assertion oder Stacktrace; eine konkrete Produktursache ist daraus
+nicht ableitbar.
+
+Die drei unveränderten Smokes wurden lokal zusätzlich mit dem zu Playwright 1.64.0
+gehörigen Chromium 156.0.8078.4 und separat mit alternativen Linux-Schriftmetriken
+(Liberation Sans) ausgeführt: alle drei bestanden. Das widerlegt nicht den CI-Fehler,
+belegt aber auch keinen gemeinsamen Export-/Geometriemutationsfehler.
+
+Der Runner zeigt deshalb nun die konkrete Fehlermeldung direkt im Actions-Log
+(letzte 60 Zeilen), behält den vollständigen Log und wartet dessen Abschluss ab.
+Vier neue Runner-Regressionstests bestätigen: Fehler bleiben FAIL, ursprünglicher
+Exit-Code bleibt erhalten, Timeouts werden benannt, und volle Logs gehen nicht verloren.
+Es wurden **keine** Shape-/PDF-/Schwärzungs-Exportregeln auf bloßen Verdacht geändert.
+Der gemeldete CI-Fehler bleibt bis zur konkreten Assertion und Verifikation offen.
+
+### Reproduzierter Layoutfehler (Ubuntu DejaVu)
+
+Mit verifizierten Ubuntu-DejaVu-Schriften wurden zwei Fehler reproduziert:
+`shapes-smoke` scheiterte am von der Palette verdeckten Rotationsgriff;
+`shapes-repeat-smoke` startete eine Touch-Geste auf Palettenkontrollen statt Papier.
+Beides lag vor der PDF-Exportprüfung. Die Palette belegte im 390×900-Viewport
+355 von 371 Pixeln Arbeitsbereich, sodass Herunterschieben keinen Griff freilegte.
+
+Korrektur: vorhandene scrollbare Formpalette auf höchstens 60% der Arbeitsfläche
+begrenzen. Kein neues Bedienkonzept, keine Änderung der PDF-Serialisierung.
+Ursprüngliche Fixtures/Viewportgrößen und reale Hit-Test-/Touch-/Cancel-Assertions
+bleiben erhalten; zusätzliche Assertions prüfen freie Papierfläche und die
+Erreichbarkeit der letzten Option per Palettenscroll.
+
+`search-import-smoke` besteht auch unter DejaVu. Dessen gemeldeter CI-Fehler bleibt
+mangels konkreter Assertion unbestätigt; er wird nicht als behoben ausgegeben.

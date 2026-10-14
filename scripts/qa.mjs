@@ -1,47 +1,24 @@
 // Run from the repository root. Never converts a failed test into a green run.
 import { spawn } from 'node:child_process'
-import { mkdirSync, writeFileSync, createWriteStream } from 'node:fs'
+import { mkdirSync, writeFileSync } from 'node:fs'
 import { resolve, join } from 'node:path'
 import { chromiumPath } from './browser-helper.mjs'
+import { runQaStep } from './qa-step.mjs'
 const root = resolve(process.env.QA_ARTIFACT_DIR ?? 'qa-artifacts')
 mkdirSync(root, { recursive: true })
 const npm = process.platform === 'win32' ? 'npm.cmd' : 'npm'
 const results = []
 async function run(name, command, args, env = {}) {
-  const start = Date.now(),
-    log = createWriteStream(join(root, `${name}.log`))
-  console.log(`RUN ${name}`)
-  const result = await new Promise((resolve) => {
-    const child = spawn(command, args, {
-      env: { ...process.env, ...env },
-      shell: process.platform === 'win32' && command === npm,
-      stdio: ['ignore', 'pipe', 'pipe'],
-    })
-    child.stdout.pipe(log, { end: false })
-    child.stderr.pipe(log, { end: false })
-    const timer = setTimeout(() => {
-      child.kill()
-    }, 240000)
-    child.on('error', (error) => {
-      log.write(String(error))
-    })
-    child.on('close', (code, signal) => {
-      clearTimeout(timer)
-      log.end()
-      resolve({
-        name,
-        status: code === 0 ? 'PASS' : 'FAIL',
-        code,
-        signal,
-        seconds: Math.round((Date.now() - start) / 1000),
-      })
-    })
-  })
+  const result = await runQaStep({ name, command, args, root, env })
   results.push(result)
-  console.log(`${result.status} ${name} (${result.seconds}s)`)
 }
+
 let server
 try {
+  await run('qa-runner-tests', process.execPath, [
+    '--test',
+    'scripts/qa-step.node-check.mjs',
+  ])
   await run('fixtures', process.execPath, ['scripts/make-fixtures.mjs'])
   await run('real-fixture-hashes', process.execPath, [
     'scripts/fetch-real-fixtures.mjs',

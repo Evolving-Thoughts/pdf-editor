@@ -90,6 +90,8 @@ try {
       for (let i = 0; i < 18; i++) await page.keyboard.press('ArrowDown')
       const first = await snapshot(page),
         bar = await page.locator('.shape-toolbar').boundingBox()
+      const work = await page.locator('.workspace').boundingBox()
+      assert.ok(bar.height <= work.height * .6 + 1, 'palette leaves document space for repeated creation')
       await draw(page, [180, 95], [270, 145], touch) // crosses the old source, not a resize grip
       assert.equal(
         await page.locator('.shape-overlay').count(),

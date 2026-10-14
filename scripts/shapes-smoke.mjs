@@ -399,6 +399,15 @@ try {
   await session.send('Input.dispatchTouchEvent', { type: 'touchEnd', touchPoints: [] })
   await mobile.waitForSelector('.shape-toolbar')
   await drag(mobile, mobile.getByRole('button', { name: 'Formleiste verschieben', exact: true }), 0, 320)
+  const paletteBounds = await mobile.locator('.shape-toolbar').boundingBox()
+  const workspaceBounds = await mobile.locator('.workspace').boundingBox()
+  assert.ok(paletteBounds.height <= workspaceBounds.height * .6 + 1,
+    'mobile form options must leave paper exposed, regardless of OS font metrics')
+  // Options remain reachable via the existing palette scroll, not removed/hidden.
+  await mobile.locator('.shape-toolbar').evaluate(el => { el.scrollTop = el.scrollHeight })
+  const lastOption = await mobile.getByRole('button', { name: 'Formleiste zurücksetzen', exact: true }).boundingBox()
+  assert.ok(lastOption.y >= paletteBounds.y && lastOption.y + lastOption.height <= paletteBounds.y + paletteBounds.height + 1)
+  await mobile.locator('.shape-toolbar').evaluate(el => { el.scrollTop = 0 })
   await rotateArc(mobile, 30, { touch: true })
   assert.ok(Math.abs((await geometry(mobile)).angle - 30) < 1)
   const touchBefore = await geometry(mobile)

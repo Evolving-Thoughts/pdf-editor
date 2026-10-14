@@ -1,5 +1,8 @@
 import { chromiumPath } from './browser-helper.mjs'
-import { confirmDefaultExport, openProtectedExport } from './export-smoke-helper.mjs'
+import {
+  confirmDefaultExport,
+  openProtectedExport,
+} from './export-smoke-helper.mjs'
 import { PNG_DATA_URL } from '../tests/imageFixtures.js'
 import { chromium } from 'playwright'
 import { PDFDocument, StandardFonts, degrees } from 'pdf-lib'
@@ -70,7 +73,8 @@ async function drop(bytes, name = 'dropped.pdf', files = 1) {
 }
 async function download(action, file) {
   const pending = p.waitForEvent('download')
-  await btn(action).click(); if (action === 'Exportieren') await confirmDefaultExport(p)
+  await btn(action).click()
+  if (action === 'Exportieren') await confirmDefaultExport(p)
   const d = await pending
   await d.saveAs(join(out, file))
   return new Uint8Array(readFileSync(join(out, file)))
@@ -136,8 +140,14 @@ try {
       true,
     )
     assert.equal(controls.length, 3)
-    assert.ok(controls.every((c) => Math.abs(c.y - controls[0].y) < 1))
-    assert.ok(controls.every((c) => c.x >= 0 && c.x + c.width <= width))
+    assert.ok(
+      controls.every((c) => Math.abs(c.y - controls[0].y) < 1),
+      `Search controls must share a row: ${JSON.stringify({ width, controls })}`,
+    )
+    assert.ok(
+      controls.every((c) => c.x >= 0 && c.x + c.width <= width),
+      `Search controls must fit viewport: ${JSON.stringify({ width, controls })}`,
+    )
     const activeBox = await p
         .locator('[data-search-active=true]')
         .boundingBox(),
@@ -149,7 +159,7 @@ try {
         activeBox.y < panelBox.y + panelBox.height &&
         activeBox.y + activeBox.height > panelBox.y
       ),
-      'Active match must not be covered by the search window',
+      `Active match must not be covered by the search window: ${JSON.stringify({ width, activeBox, panelBox })}`,
     )
     await p.screenshot({
       path: join(out, `search-${width}.png`),

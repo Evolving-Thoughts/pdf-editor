@@ -25,7 +25,9 @@ python scripts/verify-protected-export.py qa-artifacts/search-import-smoke
 
 `npm run qa` prüft Fixture-Hashes, Kern-Tests, Lint, Build, alle 21 Browser-Smokes
 und denselben echten Formularablauf im **gebauten Produktionsbundle**. Jeder Smoke
-bekommt isolierten Browser-Speicher und ein eigenes Artefaktverzeichnis. Logs und
+bekommt isolierten Browser-Speicher und ein eigenes Artefaktverzeichnis. Bei Fehlschlägen erscheinen die letzten 60 Logzeilen (inklusive Assertion/Stack)
+direkt im Job-Log; der vollständige Einzel-Log wird vorher vollständig geschrieben.
+Vier Node-Regressionstests prüfen Fehlercode, Timeout, Begrenzung und Log-Erhalt. Logs und
 PDFs liegen in `qa-artifacts/`; `results.json` und `results.md` dokumentieren auch
 Fehlschläge. Ein Fehler führt zu einem Exit-Code ungleich null. Ein einzelner
 Smoke hat ein Zeitlimit von vier Minuten.
