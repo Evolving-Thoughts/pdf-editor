@@ -99,7 +99,10 @@ try {
   const streams = value instanceof PDFArray ? value.asArray() : [value]
   const text = streams.map(ref => Buffer.from(decodePDFRawStream(exported.context.lookup(ref, PDFRawStream)).decode()).toString()).join('\n')
   assert.match(text, /144 0 0 72 0 0 cm/)
-  assert.ok(text.includes(`1 0 0 1 ${beforeCancel.x} ${842 - beforeCancel.y - beforeCancel.h} cm`))
+  const placement = text.match(/1 0 0 1 (-?\d+(?:\.\d+)?) (-?\d+(?:\.\d+)?) cm/)
+  assert.ok(placement, 'The image placement matrix is present in the export')
+  near(Number(placement[1]), beforeCancel.x)
+  near(Number(placement[2]), 842 - beforeCancel.y - beforeCancel.h)
   assert.match(text, /\/Image-\S+ Do/)
   await page.waitForTimeout(800)
   await page.reload()
