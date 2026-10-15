@@ -11,7 +11,9 @@
     "test": "vitest run",
     "fixtures:real": "node scripts/fetch-real-fixtures.mjs",
     "qa": "node scripts/qa.mjs",
-    "qa:ci": "node scripts/qa.mjs --synthetic-only"
+    "qa:ci": "node scripts/qa.mjs --synthetic-only",
+    "build:pages": "tsc -b && vite build --base=/pdf-editor/",
+    "test:pages": "node scripts/pages-deployment-smoke.mjs"
   },
   "dependencies": {
     "@cantoo/pdf-lib": "2.11.1",
