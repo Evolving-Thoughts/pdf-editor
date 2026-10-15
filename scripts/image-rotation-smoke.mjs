@@ -1,8 +1,9 @@
+import { fileURLToPath } from 'node:url'
+import { chromiumPath } from './browser-helper.mjs'
 import { confirmDefaultExport } from './export-smoke-helper.mjs'
 // Approved rotation UI + draft/export/geometry regression checks in Chromium.
 import { chromium } from 'playwright'
 import assert from 'node:assert/strict'
-import { execFileSync } from 'node:child_process'
 import { mkdirSync, mkdtempSync, readFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
@@ -11,7 +12,7 @@ import { PNG_DATA_URL } from '../tests/imageFixtures.js'
 const url = process.env.SMOKE_URL ?? 'http://localhost:5202'
 const artifacts = process.env.SMOKE_ARTIFACT_DIR ?? mkdtempSync(join(tmpdir(), 'pdf-editor-rotation-'))
 mkdirSync(artifacts, { recursive: true })
-const browser = await chromium.launch({ executablePath: process.env.CHROMIUM_PATH ?? execFileSync('which', ['chromium'], { encoding: 'utf8' }).trim(), args: ['--no-sandbox'] })
+const browser = await chromium.launch({ executablePath: chromiumPath(), args: ['--no-sandbox'] })
 const file = { name: 'angle.png', mimeType: 'image/png', buffer: Buffer.from(PNG_DATA_URL.split(',')[1], 'base64') }
 const errors = []
 const watch = page => page.on('pageerror', e => errors.push(String(e)))
@@ -58,7 +59,7 @@ try {
     window.observerCount = 0
     window.ResizeObserver = class extends Original { constructor(callback) { super(callback); window.observerCount++ } }
   })
-  await openAndInsert(page, new URL('../tests/fixtures/zweiseitig.pdf', import.meta.url).pathname)
+  await openAndInsert(page, fileURLToPath(new URL('../tests/fixtures/zweiseitig.pdf', import.meta.url)))
   const original = await geometry(page)
   await page.locator('.image-overlay').focus()
   for (let i = 0; i < 3; i++) await page.keyboard.press('ArrowRight')
@@ -147,7 +148,7 @@ try {
   console.log('PASS arbitrary angle export matches placement/orientation/alpha with page rotations, CropBox and UserUnit')
 
   const mobile = await browser.newPage({ viewport: { width: 390, height: 844 }, isMobile: true, hasTouch: true }); watch(mobile)
-  await openAndInsert(mobile, new URL('../tests/fixtures/zweiseitig.pdf', import.meta.url).pathname)
+  await openAndInsert(mobile, fileURLToPath(new URL('../tests/fixtures/zweiseitig.pdf', import.meta.url)))
   await rotateArc(mobile, 30, { touch: true }); near((await geometry(mobile)).angle, 30, 1)
   await rotateArc(mobile, 20, { touch: true, cancel: true }); near((await geometry(mobile)).angle, 30, 1)
   await setAngle(mobile, 30)

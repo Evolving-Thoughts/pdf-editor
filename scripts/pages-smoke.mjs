@@ -1,9 +1,9 @@
+import { chromiumPath } from './browser-helper.mjs'
 import { confirmDefaultExport } from './export-smoke-helper.mjs'
 import { PNG_DATA_URL } from '../tests/imageFixtures.js'
 import { chromium } from 'playwright'
 import { PDFDocument } from 'pdf-lib'
 import assert from 'node:assert/strict'
-import { execFileSync } from 'node:child_process'
 import { mkdirSync, mkdtempSync, readFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
@@ -11,7 +11,7 @@ const base = process.env.SMOKE_URL ?? 'http://localhost:5207'
 const out = process.env.SMOKE_ARTIFACT_DIR ?? mkdtempSync(join(tmpdir(), 'pdf-editor-pages-'))
 mkdirSync(out, { recursive: true })
 const browser = await chromium.launch({
-  executablePath: execFileSync('which', ['chromium'], { encoding: 'utf8' }).trim(),
+  executablePath: chromiumPath(),
   args: ['--no-sandbox'],
 })
 const p = await browser.newPage({ viewport: { width: 1280, height: 1000 }, acceptDownloads: true })

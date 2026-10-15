@@ -1,13 +1,14 @@
+import { fileURLToPath } from 'node:url'
+import { chromiumPath } from './browser-helper.mjs'
 // Focused regression checks for the labelled top grip, width buttons and
 // document-wide, undoable drawing deletion. Uses a disposable browser context.
 import { chromium } from 'playwright'
 import assert from 'node:assert/strict'
-import { execFileSync } from 'node:child_process'
 import { mkdirSync } from 'node:fs'
 import { join } from 'node:path'
 
 const browser = await chromium.launch({
-  executablePath: process.env.CHROMIUM_PATH ?? execFileSync('which', ['chromium'], { encoding: 'utf8' }).trim(),
+  executablePath: chromiumPath(),
   args: ['--no-sandbox'],
 })
 const artifacts = process.env.SMOKE_ARTIFACT_DIR
@@ -17,7 +18,7 @@ try {
   const page = await browser.newPage({ viewport: { width: 1280, height: 900 } })
   page.on('pageerror', e => errors.push(String(e)))
   await page.goto(process.env.SMOKE_URL ?? 'http://localhost:5201')
-  await page.locator('input[type=file][accept="application/pdf"]').setInputFiles(new URL('../tests/fixtures/zweiseitig.pdf', import.meta.url).pathname)
+  await page.locator('input[type=file][accept="application/pdf"]').setInputFiles(fileURLToPath(new URL('../tests/fixtures/zweiseitig.pdf', import.meta.url)))
   await page.waitForSelector('.page canvas')
   await page.getByRole('button', { name: 'Stift', exact: true }).click()
   const bar = page.getByRole('group', { name: 'Zeichenoptionen', exact: true })

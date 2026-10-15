@@ -1,8 +1,8 @@
+import { chromiumPath } from './browser-helper.mjs'
 import { chromium } from 'playwright'
 import { PDFDocument, PDFName, PDFNumber, degrees } from 'pdf-lib'
-import { execFileSync } from 'node:child_process'
 import assert from 'node:assert/strict'
-const browser=await chromium.launch({executablePath:execFileSync('which',['chromium'],{encoding:'utf8'}).trim(),args:['--no-sandbox']})
+const browser=await chromium.launch({executablePath:chromiumPath(),args:['--no-sandbox']})
 const page=await browser.newPage(),errors=[];page.on('pageerror',e=>errors.push(String(e)))
 try {
  await page.goto(process.env.SMOKE_URL??'http://localhost:5220')

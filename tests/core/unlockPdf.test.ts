@@ -91,3 +91,13 @@ it('does not retain the original encryption dictionary or password verifier in t
       .some(([, object]) => object.toString().includes('/Filter /Standard')),
   ).toBe(false)
 })
+
+it('automatically opens permission-protected PDFs with an empty user password without mutating the input', async () => {
+  const input = new Uint8Array(Buffer.from(fixtures.empty, 'base64'))
+  const before = input.slice()
+  const working = await preparePdf(input)
+  const doc = await PDFDocument.load(working)
+  expect(doc.isEncrypted).toBe(false)
+  expect(doc.getForm().getTextField('Name').getText()).toBe('Ada')
+  expect(input).toEqual(before)
+})

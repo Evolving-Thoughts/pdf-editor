@@ -18,8 +18,16 @@ export async function preparePdf(bytes: Uint8Array): Promise<Uint8Array> {
     ignoreEncryption: true,
     updateMetadata: false,
   })
-  if (probe.isEncrypted) throw new PasswordRequiredError()
-  return bytes
+  if (!probe.isEncrypted) return bytes
+  // Public permission-protected forms often have an empty user password.
+  // Actually decrypt them; ignoreEncryption is only a probe, never a working copy.
+  try {
+    return await unlockPdf(bytes, '')
+  } catch (error) {
+    if (error instanceof IncorrectPasswordError)
+      throw new PasswordRequiredError()
+    throw error
+  }
 }
 /** Decrypt only a local working copy. The caller must disclose that draft/export
  * are unencrypted. No credential is stored in the model or persistence layer.
@@ -40,7 +48,10 @@ export async function unlockPdf(
     doc.context.trailerInfo.Encrypt = undefined
     return await doc.save({ updateFieldAppearances: false })
   } catch (error) {
-    if (error instanceof Error && /password incorrect/i.test(error.message))
+    if (
+      error instanceof Error &&
+      /password incorrect|needs password/i.test(error.message)
+    )
       throw new IncorrectPasswordError()
     throw new Error(
       'Dieses PDF konnte nicht entschlüsselt werden. Die Datei ist beschädigt oder verwendet ein nicht unterstütztes Schutzverfahren.',

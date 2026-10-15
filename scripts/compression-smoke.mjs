@@ -1,7 +1,7 @@
+import { chromiumPath } from './browser-helper.mjs'
 // T12 approved A: real image optimization, preservation and combined encryption.
 import { chromium } from 'playwright'
 import { PDFDocument, PDFRawStream, PDFName, PDFNumber } from 'pdf-lib'
-import { execFileSync } from 'node:child_process'
 import { readFileSync, writeFileSync, mkdirSync, mkdtempSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
@@ -11,9 +11,7 @@ const out =
   mkdtempSync(join(tmpdir(), 'pdf-compression-'))
 mkdirSync(out, { recursive: true })
 const browser = await chromium.launch({
-  executablePath: execFileSync('which', ['chromium'], {
-    encoding: 'utf8',
-  }).trim(),
+  executablePath: chromiumPath(),
   args: ['--no-sandbox'],
 })
 const p = await browser.newPage({

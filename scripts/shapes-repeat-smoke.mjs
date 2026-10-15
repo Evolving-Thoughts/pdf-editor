@@ -1,7 +1,8 @@
+import { fileURLToPath } from 'node:url'
+import { chromiumPath } from './browser-helper.mjs'
 // Continuous creation uses real pointer input and disposable storage, not mocked store state.
 import { chromium } from 'playwright'
 import assert from 'node:assert/strict'
-import { execFileSync } from 'node:child_process'
 import { mkdirSync, mkdtempSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
@@ -9,8 +10,7 @@ const base = process.env.SMOKE_URL ?? 'http://localhost:5203'
 const artifacts = process.env.SMOKE_ARTIFACT_DIR ?? mkdtempSync(join(tmpdir(), 'pdf-editor-repeat-'))
 mkdirSync(artifacts, { recursive: true })
 const browser = await chromium.launch({
-  executablePath:
-    process.env.CHROMIUM_PATH ?? execFileSync('which', ['chromium'], { encoding: 'utf8' }).trim(),
+  executablePath: chromiumPath(),
   args: ['--no-sandbox'],
 })
 const errors = []
@@ -70,7 +70,7 @@ try {
     await page.goto(base)
     await page
       .locator('input[accept="application/pdf"]')
-      .setInputFiles(new URL('../tests/fixtures/zweiseitig.pdf', import.meta.url).pathname)
+      .setInputFiles(fileURLToPath(new URL('../tests/fixtures/zweiseitig.pdf', import.meta.url)))
     await page.waitForFunction(() => document.querySelector('.page canvas')?.width > 0)
     for (const label of tools) {
       console.log('Checking', touch ? 'touch' : 'mouse', label)
@@ -90,6 +90,8 @@ try {
       for (let i = 0; i < 18; i++) await page.keyboard.press('ArrowDown')
       const first = await snapshot(page),
         bar = await page.locator('.shape-toolbar').boundingBox()
+      const work = await page.locator('.workspace').boundingBox()
+      assert.ok(bar.height <= work.height * .6 + 1, 'palette leaves document space for repeated creation')
       await draw(page, [180, 95], [270, 145], touch) // crosses the old source, not a resize grip
       assert.equal(
         await page.locator('.shape-overlay').count(),
@@ -113,7 +115,9 @@ try {
       await page.getByRole('button', { name: 'Formleiste verschieben', exact: true }).focus()
       for (let i = 0; i < 18; i++) await page.keyboard.press('ArrowDown')
       const beforeCancel = await snapshot(page)
-      await draw(page, [300, 140], [350, 160], touch, true)
+      // The taller T12 toolbar clamps the palette above y=140 on mobile.
+      // Keep this cancellation gesture on exposed paper, without changing its size.
+      await draw(page, [300, 40], [350, 60], touch, true)
       assert.deepEqual(await snapshot(page), beforeCancel)
       assert.equal(await page.locator('.shape-overlay').count(), count + 2)
       await draw(page, [150, 60], [280, 130], touch)

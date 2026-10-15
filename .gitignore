@@ -25,3 +25,6 @@ dist-ssr
 
 # Generierte Test-Fixtures (scripts/make-fixtures.mjs)
 tests/fixtures/
+
+# Local QA evidence and downloaded public forms
+qa-artifacts/

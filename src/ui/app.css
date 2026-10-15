@@ -665,7 +665,8 @@
 .page.drawing-tool .shape-overlay, .page.text-tool .shape-overlay, .page.symbol-tool .shape-overlay { pointer-events:none; }
 .shape-overlay { min-width:0; min-height:0; }
 .shape-endpoint { cursor:crosshair; }
-.shape-toolbar { width:360px; max-height:calc(100% - 16px); overflow:auto; }
+/* A movable palette must leave paper exposed even with taller OS font metrics. */
+.shape-toolbar { width:360px; max-height:min(calc(100% - 16px), 60%); overflow:auto; }
 .shape-options { padding:12px; display:flex; flex-direction:column; gap:8px; color:var(--text); font-size:14px; }
 .shape-heading { display:flex; justify-content:space-between; gap:8px; margin-bottom:2px; }
 .shape-heading b { color:var(--text-h); }

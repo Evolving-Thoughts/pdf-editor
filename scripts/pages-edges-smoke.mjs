@@ -1,3 +1,4 @@
+import { chromiumPath } from './browser-helper.mjs'
 import { mkdtempSync, readFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
@@ -6,7 +7,7 @@ import { PDFDocument } from 'pdf-lib'
 import { execFileSync } from 'node:child_process'
 import assert from 'node:assert/strict'
 const browser = await chromium.launch({
-  executablePath: execFileSync('which', ['chromium'], { encoding: 'utf8' }).trim(),
+  executablePath: chromiumPath(),
   args: ['--no-sandbox'],
 })
 const p = await browser.newPage({ viewport: { width: 1200, height: 1000 } }),

@@ -1,13 +1,13 @@
+import { chromiumPath } from './browser-helper.mjs'
 import { confirmDefaultExport } from './export-smoke-helper.mjs'
 import { chromium } from 'playwright'
 import { PDFDocument,StandardFonts } from 'pdf-lib'
-import { execFileSync } from 'node:child_process'
 import { mkdirSync,readFileSync,mkdtempSync } from 'node:fs'
 import { join } from 'node:path'
 import { tmpdir } from 'node:os'
 import assert from 'node:assert/strict'
 const out=process.env.SMOKE_ARTIFACT_DIR??mkdtempSync(join(tmpdir(),'pdf-redaction-'));mkdirSync(out,{recursive:true})
-const browser=await chromium.launch({executablePath:execFileSync('which',['chromium'],{encoding:'utf8'}).trim(),args:['--no-sandbox']})
+const browser=await chromium.launch({executablePath:chromiumPath(),args:['--no-sandbox']})
 const p=await browser.newPage({viewport:{width:1280,height:1100},acceptDownloads:true}),errors=[]
 p.on('pageerror',e=>errors.push(String(e)))
 const btn=name=>p.getByRole('button',{name,exact:true})

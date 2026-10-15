@@ -37,9 +37,9 @@ export function PasswordDialog({ request }: { request: PasswordRequest }) {
         <p className="password-warning">
           Nur die lokale Arbeitskopie wird entschlüsselt. Automatische Entwürfe
           bleiben <strong>unverschlüsselt</strong>. Der normale Export ist
-          ebenfalls unverschlüsselt; „Mit Passwort exportieren …“ schützt die
-          Ausgabe. Die Originaldatei bleibt unverändert. Das Passwort wird nicht
-          gespeichert.
+          ebenfalls unverschlüsselt; „Mit Passwort schützen“ im Exportdialog
+          schützt die Ausgabe. Die Originaldatei bleibt unverändert. Das
+          Passwort wird nicht gespeichert.
         </p>
         <label>
           PDF-Passwort
