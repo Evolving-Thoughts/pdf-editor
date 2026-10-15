@@ -69,3 +69,18 @@ Erreichbarkeit der letzten Option per Palettenscroll.
 
 `search-import-smoke` besteht auch unter DejaVu. Dessen gemeldeter CI-Fehler bleibt
 mangels konkreter Assertion unbestätigt; er wird nicht als behoben ausgegeben.
+
+
+## CI-Umfang nach Owner-Entscheidung: echte PDFs nur lokal/manuell
+
+`npm run qa:ci` entfernt ausschließlich die Real-PDF-Hashprüfung, den
+Real-PDF-Smoke und dessen Produktionslauf aus der CI. Downloads und Cache der
+öffentlichen PDFs sowie die unabhängigen Real-PDF-Prüfungen entfallen dort.
+Die bestehenden Skripte bleiben für `npm run fixtures:real && npm run qa` erhalten.
+
+Lokale Validierung dieses CI-Modus: **25/25 ausgeführte Schritte bestanden**,
+inklusive 20 synthetischer Browser-Smokes, Kern-Tests, Lint, Build und vier
+Runner-Regressionstests. Die drei Real-PDF-Schritte stehen ausdrücklich auf
+**NOT_RUN**. Der unabhängige PyMuPDF-Prüfer für den synthetischen geschützten
+und geschwärzten Export bestand ebenfalls. Workflow-Abgrenzung und YAML geprüft.
+Ein neuer GitHub-CI-Lauf ist damit noch nicht als bestanden bestätigt.

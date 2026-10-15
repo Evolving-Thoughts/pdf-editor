@@ -8,12 +8,19 @@ Kein neues Bedienkonzept; die gewählten UI-Varianten bleiben erhalten.
 ```sh
 npm ci
 npx playwright install chromium
-npm run fixtures:real
-npm run qa
+npm run qa:ci
 ```
 
 Voraussetzungen: von Vite unterstützte Node-Version, Chromium (oder explizites
 `CHROMIUM_PATH`), Poppler/`pdftotext` im PATH für den vorhandenen Seiten-Randfalltest.
+Die CI benötigt keine öffentlichen Echtdokument-Downloads. Für den optionalen
+vollständigen lokalen Echtdokument-Lauf:
+
+```sh
+npm run fixtures:real
+npm run qa
+```
+
 Python/PyMuPDF ist nur für die zusätzlichen unabhängigen Prüfungen erforderlich:
 
 ```sh
@@ -23,7 +30,11 @@ python scripts/verify-mvp-exports.py qa-artifacts/mvp-production
 python scripts/verify-protected-export.py qa-artifacts/search-import-smoke
 ```
 
-`npm run qa` prüft Fixture-Hashes, Kern-Tests, Lint, Build, alle 21 Browser-Smokes
+`npm run qa:ci` prüft Kern-Tests, Lint, Build und alle 20 synthetischen
+Browser-Smokes. Echtdokument-Hashes, Echtdokument-Smoke und dessen Produktionslauf
+werden ausdrücklich als **NOT_RUN** ausgewiesen, nicht als bestanden.
+
+`npm run qa` prüft weiterhin Fixture-Hashes, Kern-Tests, Lint, Build, alle 21 Browser-Smokes
 und denselben echten Formularablauf im **gebauten Produktionsbundle**. Jeder Smoke
 bekommt isolierten Browser-Speicher und ein eigenes Artefaktverzeichnis. Bei Fehlschlägen erscheinen die letzten 60 Logzeilen (inklusive Assertion/Stack)
 direkt im Job-Log; der vollständige Einzel-Log wird vorher vollständig geschrieben.
@@ -123,24 +134,22 @@ Lauf bedeutet nicht automatisch „alle MVP-Kriterien vollständig bestanden“.
 
 ## CI
 
-`.github/workflows/mvp-qa.yml` richtet denselben Ablauf für Pull Requests und
-`main` ein (Node 22, Playwright-Chromium, Poppler, unabhängige PyMuPDF-Prüfungen).
+`.github/workflows/mvp-qa.yml` führt für Pull Requests und `main` ausschließlich
+`npm run qa:ci` aus: Runner-Regressionen, synthetische Fixtures, Kern-Tests, Lint,
+Build und 20 synthetische Browser-Smokes (Node 22, Playwright-Chromium, Poppler).
+Die unabhängige PyMuPDF-Prüfung des **synthetischen** passwortgeschützten und
+geschwärzten Exports bleibt aktiv.
+
+Auf Wunsch des Projekt-Owners sind öffentliche Real-PDF-Downloads, deren Cache,
+Hashprüfung, Real-PDF-Smoke, Real-PDF-Produktionslauf und die zugehörigen
+unabhängigen Real-PDF-Prüfer **nicht mehr Teil der CI**. Der Produktionsbuild
+bleibt geprüft; eine Browserprüfung mit echten PDFs gegen diesen Build ist nun
+manuell/lokal. Die betreffenden Skripte und Prüflisten bleiben erhalten.
+Für automatisierte lokale Real-PDF-Prüfungen zuerst `npm run fixtures:real`, dann
+`npm run qa` und die oben genannten unabhängigen Prüfer ausführen. Fehlende oder
+veränderte Fixtures lassen diesen vollständigen lokalen Lauf weiterhin fehlschlagen.
+
 Es werden nur Logs und Ergebnislisten als CI-Artefakte hochgeladen, **keine
-Quell-PDFs oder exportierten Formulare**. Der CI-Status ist separat vom lokalen
-Testergebnis zu betrachten; die Definition einer Pipeline ist kein Beleg für
-einen bereits bestandenen GitHub-Lauf.
-
-### Cache für öffentliche Real-PDF-Fixtures
-
-Vor `fixtures:real` stellt `actions/cache@v4` ausschließlich
-`tests/fixtures/real` wieder her. Der Schlüssel enthält Betriebssystem und Hash
-von `scripts/real-fixtures.json`; es gibt keine unpräzisen `restore-keys`.
-`fixtures:real` läuft **auch bei einem Cache-Treffer** und überprüft sämtliche
-SHA-256-Werte. Vorhandene gültige Dateien werden ohne Netzwerk verwendet.
-
-Der Cache enthält nur öffentliche Test-PDFs, keine Nutzerdokumente, Entwürfe,
-Browserprofile oder Passwörter. Diese Dateien liegen im GitHub-Actions-Cache,
-nicht im Repository und nicht in den hochgeladenen Ergebnis-Artefakten.
-Ein kalter/abgelaufener Cache benötigt weiterhin die Anbieter; ein Ausfall oder
-geänderter Inhalt kann dann bewusst zum Fehlschlag führen. Die Abhängigkeit ist
-reduziert, nicht vollständig beseitigt; die Prüfungen bleiben blockierend.
+Quell-PDFs oder exportierten Formulare**. Ausgeschlossene Real-PDF-Schritte werden
+als NOT_RUN dokumentiert; grüne CI ist kein Nachweis für Echtdokument-Kompatibilität.
+Der CI-Status ist separat vom lokalen Testergebnis zu betrachten.

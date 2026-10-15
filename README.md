@@ -18,16 +18,23 @@ prüfen Build, Lint und Kernfunktionen.
 
 ```sh
 npx playwright install chromium
-npm run fixtures:real
-npm run qa
+npm run qa:ci
 ```
 
 Zusätzlich benötigt der bestehende `pages-edges-smoke` **Poppler (`pdftotext`) im
 PATH**. `CHROMIUM_PATH` kann alternativ auf einen installierten Chromium zeigen.
-Der gemeinsame Runner startet eigene lokale Server (Ports 5234/5235), führt die
+Der gemeinsame Runner startet eigene lokale Server (Port 5234, beim vollständigen Echtdokument-Lauf zusätzlich 5235), führt die
 Smokes nacheinander aus und schreibt Logs, PDF-Ausgaben und `results.json` nach
 `qa-artifacts/`. Fehlgeschlagene Tests ergeben einen Exit-Code ungleich null.
 Die Server werden anschließend beendet.
+
+Die CI prüft nur synthetische Test-PDFs; echte PDFs werden auf Wunsch manuell
+oder lokal geprüft. Dafür ist der vollständige automatisierte Lauf weiterhin verfügbar:
+
+```sh
+npm run fixtures:real
+npm run qa
+```
 
 `fixtures:real` ist ein expliziter Netzwerk-Schritt zum Herunterladen öffentlicher,
 leerer Formulare. Bereits heruntergeladene Dateien werden per SHA-256 geprüft.

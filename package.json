@@ -10,7 +10,8 @@
     "preview": "vite preview",
     "test": "vitest run",
     "fixtures:real": "node scripts/fetch-real-fixtures.mjs",
-    "qa": "node scripts/qa.mjs"
+    "qa": "node scripts/qa.mjs",
+    "qa:ci": "node scripts/qa.mjs --synthetic-only"
   },
   "dependencies": {
     "@cantoo/pdf-lib": "2.11.1",

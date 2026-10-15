@@ -25,17 +25,9 @@ jobs:
       - run: npx playwright install --with-deps chromium
       - run: sudo apt-get update && sudo apt-get install -y poppler-utils
       - run: python -m pip install PyMuPDF==1.28.2
-      - name: Cache checksum-pinned public PDF fixtures
-        uses: actions/cache@v4
-        with:
-          path: tests/fixtures/real
-          key: real-pdf-fixtures-${{ runner.os }}-${{ hashFiles('scripts/real-fixtures.json') }}
-      - run: npm run fixtures:real
-      - run: npm run qa
+      - run: npm run qa:ci
       - name: Independent PDF reader checks
         run: |
-          python scripts/verify-mvp-exports.py qa-artifacts/mvp-real-smoke | tee qa-artifacts/independent-real.log
-          python scripts/verify-mvp-exports.py qa-artifacts/mvp-production | tee qa-artifacts/independent-production.log
           python scripts/verify-protected-export.py qa-artifacts/search-import-smoke | tee qa-artifacts/independent-protected.log
       - name: Keep test logs (no source PDFs or exported forms)
         if: always()

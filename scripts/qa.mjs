@@ -7,7 +7,12 @@ import { runQaStep } from './qa-step.mjs'
 const root = resolve(process.env.QA_ARTIFACT_DIR ?? 'qa-artifacts')
 mkdirSync(root, { recursive: true })
 const npm = process.platform === 'win32' ? 'npm.cmd' : 'npm'
+const syntheticOnly = process.argv.includes('--synthetic-only')
 const results = []
+function notRun(name, reason) {
+  results.push({ name, status: 'NOT_RUN', reason })
+  console.log(`NOT_RUN ${name}: ${reason}`)
+}
 async function run(name, command, args, env = {}) {
   const result = await runQaStep({ name, command, args, root, env })
   results.push(result)
@@ -20,10 +25,17 @@ try {
     'scripts/qa-step.node-check.mjs',
   ])
   await run('fixtures', process.execPath, ['scripts/make-fixtures.mjs'])
-  await run('real-fixture-hashes', process.execPath, [
-    'scripts/fetch-real-fixtures.mjs',
-    '--verify-only',
-  ])
+  if (syntheticOnly) {
+    notRun(
+      'real-fixture-hashes',
+      'Real PDFs are excluded from this CI run; check locally with npm run qa.',
+    )
+  } else {
+    await run('real-fixture-hashes', process.execPath, [
+      'scripts/fetch-real-fixtures.mjs',
+      '--verify-only',
+    ])
+  }
   for (const name of ['test', 'lint', 'build'])
     await run(name, npm, ['run', name])
   if (results.some((x) => x.status === 'FAIL'))
@@ -81,7 +93,7 @@ try {
     'redaction-geometry-smoke',
     'search-import-smoke',
     'compression-smoke',
-    'mvp-real-smoke',
+    ...(syntheticOnly ? [] : ['mvp-real-smoke']),
   ]
   for (const name of scripts) {
     const out = join(root, name)
@@ -92,8 +104,18 @@ try {
       SMOKE_ARTIFACT_DIR: out,
     })
   }
+  if (syntheticOnly) {
+    notRun(
+      'mvp-real-smoke',
+      'Real PDFs are checked manually/locally, not in CI.',
+    )
+    notRun(
+      'mvp-production',
+      'The real-PDF production suite is excluded from CI; build remains checked.',
+    )
+  }
   // The real-fixture suite uses a Node PDF.js parser, so it also runs against dist.
-  if (!process.env.SMOKE_URL) {
+  if (!syntheticOnly && !process.env.SMOKE_URL) {
     server.kill()
     server = spawn(
       process.execPath,
@@ -134,7 +156,7 @@ try {
         SMOKE_ARTIFACT_DIR: out,
       },
     )
-  } else {
+  } else if (!syntheticOnly) {
     results.push({
       name: 'mvp-production',
       status: 'NOT_RUN',
@@ -152,8 +174,9 @@ try {
     JSON.stringify(
       {
         generatedAt: new Date().toISOString(),
-        scope:
-          'Automated only; Acrobat/macOS Preview require manual validation.',
+        scope: syntheticOnly
+          ? 'Synthetic CI only; real PDFs and Acrobat/macOS Preview require manual/local validation.'
+          : 'Automated only; Acrobat/macOS Preview require manual validation.',
         results,
       },
       null,
@@ -163,8 +186,14 @@ try {
   writeFileSync(
     join(root, 'results.md'),
     '# Automated MVP QA\n\nAcrobat and macOS Preview are NOT covered.\n\n' +
+      (syntheticOnly
+        ? 'Real PDFs are excluded: manual/local validation required.\n\n'
+        : '') +
       results
-        .map((x) => `- ${x.status}: ${x.name}${x.error ? ` — ${x.error}` : ''}`)
+        .map(
+          (x) =>
+            `- ${x.status}: ${x.name}${x.error ? ` — ${x.error}` : x.reason ? ` — ${x.reason}` : ''}`,
+        )
         .join('\n') +
       '\n',
   )
