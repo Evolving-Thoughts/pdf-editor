@@ -720,6 +720,32 @@ export default function App() {
     : visibleSave?.status === 'error' ? 'Der Entwurf konnte nicht gespeichert werden. Bitte erneut versuchen.'
     : 'Automatisches Speichern ist aktiv · Entwürfe bleiben unverschlüsselt auf diesem Gerät.'
 
+  const shapeToolButton = (option: (typeof SHAPE_TOOLS)[number]) => (
+    <button
+      key={option.tool}
+      type="button"
+      className="tool"
+      aria-label={option.label}
+      aria-pressed={tool === option.tool}
+      onClick={() => {
+        setSelectedId(null)
+        setTool(option.tool)
+      }}
+    >
+      <svg
+        className="tool-icon"
+        viewBox="0 0 24 24"
+        fill="none"
+        stroke="currentColor"
+        strokeWidth="1.7"
+        aria-hidden="true"
+      >
+        <path d={option.path} />
+      </svg>
+      {option.label}
+    </button>
+  )
+
   return (
     <div className="app" onDragOverCapture={event=>{if(event.dataTransfer.types.includes('Files')){event.preventDefault();event.dataTransfer.dropEffect='copy'}}}
       onDropCapture={event=>{
@@ -737,7 +763,16 @@ export default function App() {
       inputEpochRef.current += 1
       setManualSave(current => current?.status === 'saved' ? null : current)
     }}>
-      <header className="toolbar" inert={exportDialogOpen || redactionBusy || openingFile || exportBusy || !!loadingDraftId}>
+      <header
+        className="toolbar"
+        inert={
+          exportDialogOpen ||
+          redactionBusy ||
+          openingFile ||
+          exportBusy ||
+          !!loadingDraftId
+        }
+      >
         <input
           ref={fileInputRef}
           type="file"
@@ -751,128 +786,333 @@ export default function App() {
             if (file) void onOpenFile(file)
           }}
         />
-        <input ref={imageInputRef} type="file" accept="image/png,image/jpeg" className="visually-hidden"
-          tabIndex={-1} aria-hidden="true" onChange={event => {
+        <input
+          ref={imageInputRef}
+          type="file"
+          accept="image/png,image/jpeg"
+          className="visually-hidden"
+          tabIndex={-1}
+          aria-hidden="true"
+          onChange={(event) => {
             const file = event.target.files?.[0]
             event.target.value = ''
             if (file) void onImportImage(file)
-          }} />
-        <button type="button" onClick={() => fileInputRef.current?.click()}>
-          PDF öffnen
-        </button>
-        <DraftsMenu
-          drafts={drafts}
-          activeDraftId={activeDraftId}
-          loadingDraftId={loadingDraftId}
-          error={draftsError}
-          onMenuOpen={onDraftsMenuOpen}
-          onOpenDraft={(id) => void onOpenDraft(id)}
-          onDeleteDraft={(id) => void onDeleteDraft(id)}
-          onNewPdf={() => fileInputRef.current?.click()}
+          }}
         />
-        {pdf && (
-          <>
-            <button type="button" aria-label="Speichern" title="Aktuellen Entwurf auf diesem Gerät speichern"
-              disabled={visibleSave?.status === 'saving'} onClick={() => void onManualSave()}>
-              <svg className="tool-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor"
-                strokeWidth="1.7" aria-hidden="true"><path d="M4 3h13l3 3v15H4zM8 3v6h8V3M8 21v-8h8v8" /></svg>
-              {visibleSave?.status === 'saving' ? 'Speichert …' : 'Speichern'}
+        <div
+          className="toolbar-primary"
+          role="group"
+          aria-label="Datei und Navigation"
+        >
+          <div className="toolbar-file-actions">
+            <button type="button" onClick={() => fileInputRef.current?.click()}>
+              PDF öffnen
             </button>
-            <span className="file-info">
-              {pdf.fileName} · {documentPages?.length ?? pdf.pageCount} {(documentPages?.length ?? pdf.pageCount) === 1 ? 'Seite' : 'Seiten'}
-            </span>
-            <button type="button" aria-pressed={pageManagerOpen} disabled={pageBusy || redactions.length>0} onClick={() => {setSearchOpen(false);setSelectedId(null);setCropActive(false);setPageManagerOpen(open => !open)}}>
-              {pageManagerOpen ? 'Zur Dokumentbearbeitung' : 'Seiten verwalten'}
-            </button>
-            <button ref={searchButtonRef} type="button" disabled={pageBusy || cropActive} aria-pressed={searchOpen} onClick={()=>{setPageManagerOpen(false);setSelectedId(null);setSearchOpen(open=>!open)}} title="Im Dokument suchen (Strg/⌘+F)">Suchen</button>
-            {!pageManagerOpen && <>
-            <button type="button" onClick={() => setZoom((z) => zoomOut(z))}>
-              −
-            </button>
-            <span className="zoom-label">{Math.round(zoom * 100)} %</span>
-            <button type="button" onClick={() => setZoom((z) => zoomIn(z))}>
-              +
-            </button>
-            <span className="separator" />
-            <button type="button" onClick={() => imageInputRef.current?.click()} title="PNG- oder JPG-Bild einfügen · auch per Drag & Drop">
-              + Bild einfügen
-            </button>
-            <button
-              type="button"
-              className="tool"
-              aria-pressed={tool === 'select'}
-              title="Auswahl-Werkzeug (Esc)"
-              onClick={() => setTool('select')}
-            >
-              ⬚ Auswahl
-            </button>
-            <button
-              type="button"
-              className="tool"
-              aria-pressed={tool === 'text'}
-              title="Text-Werkzeug"
-              onClick={() => setTool('text')}
-            >
-              T Text
-            </button>
-            <button type="button" className="tool" aria-pressed={tool==='redact'} onClick={()=>{setSelectedId(null);setTool('redact')}}>Schwärzen</button>
-            {nativeWidgets.length > 0 && <label className="native-highlight-toggle"><input type="checkbox" checked={highlightFields} onChange={event => setHighlightFields(event.target.checked)} /> Felder hervorheben</label>}
-            <SymbolPicker
-              value={symbol}
-              active={tool === 'symbol'}
-              onPick={(nextSymbol) => {
-                setSymbol(nextSymbol)
-                setTool('symbol')
-              }}
+            <DraftsMenu
+              drafts={drafts}
+              activeDraftId={activeDraftId}
+              loadingDraftId={loadingDraftId}
+              error={draftsError}
+              onMenuOpen={onDraftsMenuOpen}
+              onOpenDraft={(id) => void onOpenDraft(id)}
+              onDeleteDraft={(id) => void onDeleteDraft(id)}
+              onNewPdf={() => fileInputRef.current?.click()}
             />
-            <button
-              type="button"
-              className="tool"
-              aria-label="Stift"
-              aria-pressed={tool === 'pen'}
-              onClick={() => {
-                setSelectedId(null)
-                setTool('pen')
-              }}
+            {pdf && (
+              <>
+                <button
+                  type="button"
+                  aria-label="Speichern"
+                  title="Aktuellen Entwurf auf diesem Gerät speichern"
+                  disabled={visibleSave?.status === 'saving'}
+                  onClick={() => void onManualSave()}
+                >
+                  <svg
+                    className="tool-icon"
+                    viewBox="0 0 24 24"
+                    fill="none"
+                    stroke="currentColor"
+                    strokeWidth="1.7"
+                    aria-hidden="true"
+                  >
+                    <path d="M4 3h13l3 3v15H4zM8 3v6h8V3M8 21v-8h8v8" />
+                  </svg>
+                  {visibleSave?.status === 'saving'
+                    ? 'Speichert …'
+                    : 'Speichern'}
+                </button>
+              </>
+            )}
+          </div>
+          {pdf && (
+            <>
+              <span className="file-info">
+                {pdf.fileName} · {documentPages?.length ?? pdf.pageCount}{' '}
+                {(documentPages?.length ?? pdf.pageCount) === 1
+                  ? 'Seite'
+                  : 'Seiten'}
+              </span>
+              <div className="toolbar-navigation">
+                <button
+                  type="button"
+                  aria-pressed={pageManagerOpen}
+                  disabled={pageBusy || redactions.length > 0}
+                  onClick={() => {
+                    setSearchOpen(false)
+                    setSelectedId(null)
+                    setCropActive(false)
+                    setPageManagerOpen((open) => !open)
+                  }}
+                >
+                  {pageManagerOpen
+                    ? 'Zur Dokumentbearbeitung'
+                    : 'Seiten verwalten'}
+                </button>
+                <button
+                  ref={searchButtonRef}
+                  type="button"
+                  disabled={pageBusy || cropActive}
+                  aria-pressed={searchOpen}
+                  onClick={() => {
+                    setPageManagerOpen(false)
+                    setSelectedId(null)
+                    setSearchOpen((open) => !open)
+                  }}
+                  title="Im Dokument suchen (Strg/⌘+F)"
+                >
+                  Suchen
+                </button>
+                {!pageManagerOpen && (
+                  <div className="toolbar-zoom">
+                    <button
+                      type="button"
+                      onClick={() => setZoom((z) => zoomOut(z))}
+                    >
+                      −
+                    </button>
+                    <span className="zoom-label">
+                      {Math.round(zoom * 100)} %
+                    </span>
+                    <button
+                      type="button"
+                      onClick={() => setZoom((z) => zoomIn(z))}
+                    >
+                      +
+                    </button>
+                  </div>
+                )}
+              </div>
+              <div
+                className="toolbar-history"
+                role="group"
+                aria-label="Verlauf"
+              >
+                <button
+                  type="button"
+                  aria-label="Rückgängig"
+                  disabled={!store.canUndo || pageBusy || cropActive}
+                  onClick={() => store.undo()}
+                  title="Rückgängig (Strg+Z)"
+                >
+                  <svg
+                    className="tool-icon"
+                    viewBox="0 0 24 24"
+                    fill="none"
+                    stroke="currentColor"
+                    strokeWidth="1.7"
+                    strokeLinecap="round"
+                    strokeLinejoin="round"
+                    aria-hidden="true"
+                  >
+                    <path d="m9 5-5 5 5 5M4 10h9a6 6 0 0 1 0 12" />
+                  </svg>
+                </button>
+                <button
+                  type="button"
+                  aria-label="Wiederholen"
+                  disabled={!store.canRedo || pageBusy || cropActive}
+                  onClick={() => store.redo()}
+                  title="Wiederholen (Strg+Y)"
+                >
+                  <svg
+                    className="tool-icon"
+                    viewBox="0 0 24 24"
+                    fill="none"
+                    stroke="currentColor"
+                    strokeWidth="1.7"
+                    strokeLinecap="round"
+                    strokeLinejoin="round"
+                    aria-hidden="true"
+                  >
+                    <path d="m15 5 5 5-5 5M20 10h-9a6 6 0 0 0 0 12" />
+                  </svg>
+                </button>
+              </div>
+              <button
+                type="button"
+                className="export-button"
+                disabled={
+                  pageBusy ||
+                  cropActive ||
+                  redactions.length > 0 ||
+                  !documentPages?.length
+                }
+                onClick={() => setExportDialogOpen(true)}
+              >
+                Exportieren
+              </button>
+            </>
+          )}
+        </div>
+        {pdf && !pageManagerOpen && (
+          <div
+            className="toolbar-tools"
+            role="group"
+            aria-label="Bearbeitungswerkzeuge"
+          >
+            <div
+              className="toolbar-tool-group"
+              role="group"
+              aria-label="Einfügen und Auswählen"
             >
-              <svg className="tool-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor"
-                strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
-                <path d="m 4 16 12 -12 4 4 -12 12 -5 1 1 -5 M 13 7 l 4 4" />
-              </svg>
-              Stift
-            </button>
-            <button
-              type="button"
-              className="tool"
-              aria-label="Radierer"
-              aria-pressed={tool === 'eraser'}
-              onClick={() => {
-                setSelectedId(null)
-                setTool('eraser')
-              }}
+              <span className="toolbar-group-label" aria-hidden="true">
+                Einfügen und Auswählen
+              </span>
+              <div className="toolbar-group-actions">
+                <button
+                  type="button"
+                  className="tool"
+                  aria-pressed={tool === 'select'}
+                  title="Auswahl-Werkzeug (Esc)"
+                  onClick={() => setTool('select')}
+                >
+                  ⬚ Auswahl
+                </button>
+                <button
+                  type="button"
+                  className="tool"
+                  aria-pressed={tool === 'text'}
+                  title="Text-Werkzeug"
+                  onClick={() => setTool('text')}
+                >
+                  T Text
+                </button>
+                <button
+                  type="button"
+                  onClick={() => imageInputRef.current?.click()}
+                  title="PNG- oder JPG-Bild einfügen · auch per Drag & Drop"
+                >
+                  + Bild einfügen
+                </button>
+                <SymbolPicker
+                  value={symbol}
+                  active={tool === 'symbol'}
+                  onPick={(nextSymbol) => {
+                    setSymbol(nextSymbol)
+                    setTool('symbol')
+                  }}
+                />
+              </div>
+            </div>
+            <div
+              className="toolbar-tool-group"
+              role="group"
+              aria-label="Zeichnen"
             >
-              <svg className="tool-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor"
-                strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
-                <path d="m 4 14 10 -10 7 7 -10 10 H 7 l -3 -3 Z M 9 9 l 7 7 M 11 21 h 10" />
-              </svg>
-              Radierer
-            </button>
-            {SHAPE_TOOLS.map(option=><button key={option.tool} type="button" className="tool" aria-label={option.label}
-              aria-pressed={tool===option.tool} onClick={()=>{setSelectedId(null);setTool(option.tool)}}>
-              <svg className="tool-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7" aria-hidden="true"><path d={option.path} /></svg>{option.label}
-            </button>)}
-            </>}
-            <span className="separator" />
-            <button type="button" aria-label="Rückgängig" disabled={!store.canUndo || pageBusy || cropActive} onClick={() => store.undo()} title="Rückgängig (Strg+Z)">
-              ↩︎
-            </button>
-            <button type="button" aria-label="Wiederholen" disabled={!store.canRedo || pageBusy || cropActive} onClick={() => store.redo()} title="Wiederholen (Strg+Y)">
-              ↪︎
-            </button>
-            <button type="button" disabled={pageBusy || cropActive || redactions.length>0 || !documentPages?.length} onClick={() => setExportDialogOpen(true)}>
-              Exportieren
-            </button>
-          </>
+              <span className="toolbar-group-label" aria-hidden="true">
+                Zeichnen
+              </span>
+              <div className="toolbar-group-actions">
+                <button
+                  type="button"
+                  className="tool"
+                  aria-label="Stift"
+                  aria-pressed={tool === 'pen'}
+                  onClick={() => {
+                    setSelectedId(null)
+                    setTool('pen')
+                  }}
+                >
+                  <svg
+                    className="tool-icon"
+                    viewBox="0 0 24 24"
+                    fill="none"
+                    stroke="currentColor"
+                    strokeWidth="1.7"
+                    strokeLinecap="round"
+                    strokeLinejoin="round"
+                    aria-hidden="true"
+                  >
+                    <path d="m 4 16 12 -12 4 4 -12 12 -5 1 1 -5 M 13 7 l 4 4" />
+                  </svg>
+                  Stift
+                </button>
+                <button
+                  type="button"
+                  className="tool"
+                  aria-label="Radierer"
+                  aria-pressed={tool === 'eraser'}
+                  onClick={() => {
+                    setSelectedId(null)
+                    setTool('eraser')
+                  }}
+                >
+                  <svg
+                    className="tool-icon"
+                    viewBox="0 0 24 24"
+                    fill="none"
+                    stroke="currentColor"
+                    strokeWidth="1.7"
+                    strokeLinecap="round"
+                    strokeLinejoin="round"
+                    aria-hidden="true"
+                  >
+                    <path d="m 4 14 10 -10 7 7 -10 10 H 7 l -3 -3 Z M 9 9 l 7 7 M 11 21 h 10" />
+                  </svg>
+                  Radierer
+                </button>
+                {SHAPE_TOOLS.filter((option) => option.tool === 'marker').map(
+                  shapeToolButton,
+                )}
+              </div>
+            </div>
+            <div
+              className="toolbar-tool-group toolbar-form-group"
+              role="group"
+              aria-label="Formen"
+            >
+              <span className="toolbar-group-label" aria-hidden="true">
+                Formen
+              </span>
+              <div className="toolbar-group-actions">
+                {SHAPE_TOOLS.filter((option) => option.tool !== 'marker').map(
+                  shapeToolButton,
+                )}
+              </div>
+            </div>
+            <div
+              className="toolbar-tool-group toolbar-confidential-group"
+              role="group"
+              aria-label="Vertraulich"
+            >
+              <span className="toolbar-group-label" aria-hidden="true">
+                Vertraulich
+              </span>
+              <div className="toolbar-group-actions">
+                <button
+                  type="button"
+                  className="tool"
+                  aria-pressed={tool === 'redact'}
+                  onClick={() => {
+                    setSelectedId(null)
+                    setTool('redact')
+                  }}
+                >
+                  Schwärzen
+                </button>
+              </div>
+            </div>
+          </div>
         )}
       </header>
       {pdf && <p className="draft-save-status" role={visibleSave?.status === 'error' ? 'alert' : 'status'}>
@@ -944,12 +1184,35 @@ export default function App() {
       {exportDialogOpen && <ExportDialog onCancel={()=>setExportDialogOpen(false)} onPrepare={prepareExport} onDownload={downloadExport}/> }
       {passwordRequest && <PasswordDialog key={passwordEpoch.current} request={passwordRequest}/>}
       {pdf && !pageManagerOpen && !pageBusy && (
-        <footer className="drawing-footer" inert={exportDialogOpen || redactionBusy || openingFile || exportBusy || !!loadingDraftId}>
-          <button type="button" disabled={!overlays.some(o=>isStroke(o)||isMarker(o))}
+        <footer
+          className="drawing-footer"
+          inert={
+            exportDialogOpen ||
+            redactionBusy ||
+            openingFile ||
+            exportBusy ||
+            !!loadingDraftId
+          }
+        >
+          {nativeWidgets.length > 0 && (
+            <label className="native-highlight-toggle">
+              <input
+                type="checkbox"
+                checked={highlightFields}
+                onChange={(event) => setHighlightFields(event.target.checked)}
+              />{' '}
+              Felder hervorheben
+            </label>
+          )}
+          <button
+            type="button"
+            disabled={!overlays.some((o) => isStroke(o) || isMarker(o))}
             title="Freihandstriche und Textmarker löschen · Formen, Texte, Bilder und PDF bleiben erhalten"
             onClick={() => {
-              if (store.state.overlays.some(o=>isStroke(o)||isMarker(o))) store.dispatch(clearDrawing(store.state.overlays))
-            }}>
+              if (store.state.overlays.some((o) => isStroke(o) || isMarker(o)))
+                store.dispatch(clearDrawing(store.state.overlays))
+            }}
+          >
             Zeichnung löschen
           </button>
         </footer>

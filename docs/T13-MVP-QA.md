@@ -30,11 +30,11 @@ python scripts/verify-mvp-exports.py qa-artifacts/mvp-production
 python scripts/verify-protected-export.py qa-artifacts/search-import-smoke
 ```
 
-`npm run qa:ci` prüft Kern-Tests, Lint, Build und alle 20 synthetischen
+`npm run qa:ci` prüft Kern-Tests, Lint, Build und alle 21 synthetischen
 Browser-Smokes. Echtdokument-Hashes, Echtdokument-Smoke und dessen Produktionslauf
 werden ausdrücklich als **NOT_RUN** ausgewiesen, nicht als bestanden.
 
-`npm run qa` prüft weiterhin Fixture-Hashes, Kern-Tests, Lint, Build, alle 21 Browser-Smokes
+`npm run qa` prüft weiterhin Fixture-Hashes, Kern-Tests, Lint, Build, alle 22 Browser-Smokes
 und denselben echten Formularablauf im **gebauten Produktionsbundle**. Jeder Smoke
 bekommt isolierten Browser-Speicher und ein eigenes Artefaktverzeichnis. Bei Fehlschlägen erscheinen die letzten 60 Logzeilen (inklusive Assertion/Stack)
 direkt im Job-Log; der vollständige Einzel-Log wird vorher vollständig geschrieben.
@@ -136,7 +136,7 @@ Lauf bedeutet nicht automatisch „alle MVP-Kriterien vollständig bestanden“.
 
 `.github/workflows/mvp-qa.yml` führt für Pull Requests und `main` ausschließlich
 `npm run qa:ci` aus: Runner-Regressionen, synthetische Fixtures, Kern-Tests, Lint,
-Build und 20 synthetische Browser-Smokes (Node 22, Playwright-Chromium, Poppler).
+Build und 21 synthetische Browser-Smokes (Node 22, Playwright-Chromium, Poppler).
 Die unabhängige PyMuPDF-Prüfung des **synthetischen** passwortgeschützten und
 geschwärzten Exports bleibt aktiv.
 
