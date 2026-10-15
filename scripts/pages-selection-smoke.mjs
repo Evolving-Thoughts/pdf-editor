@@ -42,6 +42,52 @@ try {
   await p.locator('input[accept="application/pdf"]').setInputFiles({ name: 'many.pdf', mimeType: 'application/pdf', buffer: Buffer.from(await doc.save()) })
   await p.waitForFunction(() => document.querySelector('.pages .page canvas')?.width > 0)
   await btn('Seiten verwalten').click(); await ready(); assert.equal(await p.locator('.page-manager-row').count(), 32)
+  // T14 sidebar A: all nine actions remain; at least half the panel is list.
+  for (const viewport of [
+    { width: 1440, height: 960 },
+    { width: 1280, height: 944 },
+    { width: 1024, height: 768 },
+    { width: 390, height: 844 },
+    { width: 320, height: 844 },
+  ]) {
+    await p.setViewportSize(viewport)
+    await p.locator('.page-manager-panel').scrollIntoViewIfNeeded()
+    const panel = await p.locator('.page-manager-panel').boundingBox()
+    const list = await p.locator('.page-manager-list').boundingBox()
+    assert.ok(list.height >= panel.height * 0.5,
+      `At least 50% list height at ${viewport.width}×${viewport.height}: ${list.height}/${panel.height}`)
+    const controls = p.locator('.page-manager-controls')
+    assert.equal(await controls.getByRole('button').count(), 9)
+    const gridButtons = p.locator('.page-manager-action-grid button')
+    assert.equal(await gridButtons.count(), 6)
+    const boxes = await gridButtons.evaluateAll(nodes => nodes.map(node => {
+      const { x, y, width, height } = node.getBoundingClientRect()
+      return { x, y, width, height }
+    }))
+    assert.ok(Math.abs(boxes[0].y - boxes[2].y) < 1, 'Three columns in first action row')
+    assert.ok(boxes[3].y > boxes[0].y && Math.abs(boxes[3].y - boxes[5].y) < 1,
+      'Three columns in second action row')
+    for (const box of boxes) {
+      assert.ok(box.height >= 44, 'Action buttons keep 44px targets')
+      assert.ok(box.x >= panel.x && box.x + box.width <= panel.x + panel.width,
+        'Action buttons stay within sidebar')
+    }
+    const fixedY = (await controls.boundingBox()).y
+    await p.locator('.page-manager-list').evaluate(el => el.scrollTop = el.scrollHeight)
+    assert.ok(await p.locator('.page-manager-list').evaluate(el => el.scrollTop) > 0)
+    assert.equal((await controls.boundingBox()).y, fixedY)
+    // Short panels may scroll controls, but every action must remain reachable.
+    for (const button of await controls.getByRole('button').all()) {
+      await button.scrollIntoViewIfNeeded()
+      const box = await button.boundingBox(), frame = await controls.boundingBox()
+      assert.ok(box.y >= frame.y - 1 && box.y + box.height <= frame.y + frame.height + 1,
+        `Action can be reached: ${await button.innerText()}`)
+    }
+    await controls.evaluate(el => el.scrollTop = 0)
+    await p.locator('.page-manager-list').evaluate(el => el.scrollTop = 0)
+    await p.screenshot({ path: join(out, `sidebar-${viewport.width}.png`) })
+  }
+  await p.setViewportSize({ width: 1280, height: 1100 })
   await rotationNames(1)
   await title(2); assert.deepEqual(await checked(), [1])
   await title(4, ['Shift']); assert.deepEqual(await checked(), [2, 3, 4])

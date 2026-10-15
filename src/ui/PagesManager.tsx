@@ -376,7 +376,7 @@ export function PagesManager({ nativeWidgets = [], pdf, store, original, busy, o
             </small>
           </div>
         ) : (
-          <div className="page-manager-actions">
+          <div className="page-manager-actions page-manager-action-grid">
             <button
               disabled={busy || working}
               onClick={() => {
@@ -395,7 +395,7 @@ export function PagesManager({ nativeWidgets = [], pdf, store, original, busy, o
                 run(() => store.dispatch(rotatePages(store.state, selection, false)), `${pageCount(selection.length)} um 90° gedreht.`)
               }
             >
-              <RotateIcon clockwise={false} /> 90°
+              <RotateIcon clockwise={false} /> 90° drehen
             </button>
             <button
               disabled={!selection.length || locked}
@@ -404,7 +404,7 @@ export function PagesManager({ nativeWidgets = [], pdf, store, original, busy, o
                 run(() => store.dispatch(rotatePages(store.state, selection, true)), `${pageCount(selection.length)} um 90° gedreht.`)
               }
             >
-              <RotateIcon clockwise /> 90°
+              <RotateIcon clockwise /> 90° drehen
             </button>
             <button
               disabled={selection.length !== 1 || locked}

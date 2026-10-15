@@ -992,3 +992,25 @@
 .export-dialog button:disabled { opacity: .5; cursor: default; }
 .export-error { color: #b91c1c; }
 @media (prefers-color-scheme: dark) { .export-error { color: #f87171; } }
+
+/* T14 sidebar A: compact actions; reserve at least half the panel for pages.
+   Long status text, expanded help and short windows scroll inside controls,
+   independently of the page list; no action is removed or hidden. */
+.page-manager-panel { width: clamp(340px, 32vw, 432px); padding: 10px; gap: 8px; }
+.page-manager-controls { max-height: calc(50% - 24px); min-height: 0; overscroll-behavior: contain; scrollbar-gutter: stable; }
+.page-manager h2 { margin-bottom: 8px; }
+.page-selection-count { box-sizing: border-box; padding: 6px 8px; margin: 0; line-height: 1.35; }
+.page-selection-tools { gap: 6px; }
+.page-manager .page-manager-action-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 6px; margin: 8px 0; }
+.page-manager-action-grid button { min-width: 0; padding: 6px 4px; font-size: 12px; line-height: 1.25; }
+.page-manager-action-grid .tool-icon { width: 15px; height: 15px; vertical-align: middle; }
+.page-a4-global { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 2fr); gap: 4px 8px; margin-top: 8px; padding-top: 6px; align-items: center; }
+.page-a4-global h3 { margin: 0; font-size: 12px; }
+.page-a4-global button { font-size: 12px; }
+.page-a4-global small { grid-column: 1 / -1; margin: 0; line-height: 1.35; }
+.page-manager-message { margin: 6px 0; font-size: 12px; line-height: 1.35; }
+.page-selection-help { margin: 4px 0 0; line-height: 1.4; }
+.page-manager-list { margin-top: 0; min-height: 0; }
+@media (max-width: 700px) {
+  .page-manager-panel { width: 100%; }
+}

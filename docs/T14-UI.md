@@ -88,5 +88,42 @@ sauber. Im geprüften Scope keine verbleibenden blockierenden Findings.
 Große Build-Chunks bleiben eine bereits bestehende Vite-Warnung; kein
 Code-Splitting- oder Architektur-Umbau Teil dieses Tickets.
 
-Lieferstand: lokal implementiert und geprüft; noch nicht auf GitHub gepusht,
-kein PR erstellt und Ticket nicht automatisch geschlossen.
+Zugehöriger Pull Request: [PR #14](https://github.com/Evolving-Thoughts/pdf-editor/pull/14).
+Der Ticket-Abschluss erfolgt nicht automatisch.
+
+
+## Ergänzung – kompakte Seitenverwaltung (Variante A)
+
+Nach drei statischen Entwürfen hat der Owner auch für die Seitenverwaltung
+Variante A gewählt. Die sechs Seitenaktionen stehen nun in einem
+3-spaltigen Raster mit zwei Reihen. Auswahlaktionen bleiben darüber,
+„Für alle Seiten“ und die A4-Aktion stehen kompakt nebeneinander.
+Die Sidebar wird auf breiten Fenstern bis 432 Pixel breit; mobil bleibt sie
+innerhalb des Viewports. Alle neun Aktionsbuttons bleiben vorhanden.
+
+Mindestens die Hälfte der Panelhöhe bleibt für die separat scrollbare
+Seitenliste reserviert. Bei kurzen Fenstern, langen Statusmeldungen oder
+aufgeklappten Formularhinweisen kann der obere Kontrollbereich unabhängig
+scrollen; Aktionen werden nicht entfernt. Die Aktionsbuttons bleiben mindestens
+44 Pixel hoch. Checkboxen, Vorschau, Verschieben und ihre bisherigen Handler
+bleiben unverändert; ebenso sämtliche Disabled-Bedingungen und Seitenoperationen.
+Der vollständige Vergleich von `PagesManager.tsx` gegen den bisherigen PR-Stand
+zeigt ausschließlich eine zusätzliche Grid-Klasse und das sichtbare Wort
+„drehen“ an den beiden Rotationsbuttons.
+
+`pages-selection-smoke` prüft zusätzlich 1440×960, 1280×944, 1024×768,
+390×844 und 320×844: mindestens 50 % Listenhöhe, alle neun Aktionen erreichbar,
+drei Spalten in zwei Aktionsreihen, 44-Pixel-Aktionsziele und unabhängiges
+Listenscrolling. Die bestehenden funktionalen Prüfungen für Auswahl,
+Drehung, Löschen, Extraktion, Undo/Redo und gespeicherte Entwürfe bleiben aktiv.
+Dunkle Desktop- sowie helle Desktop-/Mobilansichten wurden visuell geprüft.
+
+Erneute lokale Verifikation nach der Sidebar-Anpassung: `npm run qa:ci`
+mit **26 PASS, 0 FAIL und 3 NOT_RUN**, darunter **238 Vitest-Tests**,
+Lint, Build und alle **21 synthetischen Browser-Smokes**. Browser diesmal:
+Chromium 153.0.8010.12 mit DejaVu-Sans-Fontkonfiguration. Der unabhängige
+PyMuPDF-Exportcheck ist ebenfalls bestanden. Kein neuer GitHub-CI-Erfolg
+oder Test auf physischen Mobilgeräten wird damit behauptet.
+
+Der Review-Hinweis zur veralteten Lieferstatus-Notiz ist adressiert: Statt
+„nicht gepusht / kein PR“ verweist die Dokumentation neutral auf PR #14.
