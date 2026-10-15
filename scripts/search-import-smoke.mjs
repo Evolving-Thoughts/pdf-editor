@@ -416,9 +416,13 @@ try {
   assert.equal(await p.getByRole('dialog').count(), 0)
   assert.equal(await p.locator('.search-window').count(), 1)
   await btn('Suche schließen').click()
-  assert.equal(
-    await btn('Suchen').evaluate((el) => document.activeElement === el),
-    true,
+  await p.waitForFunction(
+    () =>
+      document.querySelector(
+        '.toolbar-navigation button[title="Im Dokument suchen (Strg/⌘+F)"]',
+      ) === document.activeElement,
+    null,
+    { timeout: 5000 },
   )
   // Search and protected export respect actual T10 rasterization.
   const redact = await PDFDocument.create(),
