@@ -1,7 +1,24 @@
 import { useEffect, useRef, useState } from 'react'
 
 // Verified against pdf-lib's ZapfDingbats encoding (scripts: dingbats check).
-const SYMBOLS = ['✓', '✔', '✕', '✖', '✗', '✘', '■', '❑', '●', '◆', '★', '✦', '➔', '✎', '✉', '☎']
+const SYMBOLS = [
+  '✓',
+  '✔',
+  '✕',
+  '✖',
+  '✗',
+  '✘',
+  '■',
+  '❑',
+  '●',
+  '◆',
+  '★',
+  '✦',
+  '➔',
+  '✎',
+  '✉',
+  '☎',
+]
 
 interface SymbolPickerProps {
   value: string
@@ -34,7 +51,8 @@ export function SymbolPicker({ value, active, onPick }: SymbolPickerProps) {
         title="Symbol auswählen und per Klick platzieren"
         onClick={() => setOpen((isOpen) => !isOpen)}
       >
-        {value}&nbsp;▾
+        <span aria-hidden="true">{value}</span> Symbol
+        <span className="toolbar-chevron" aria-hidden="true" />
       </button>
       {open && (
         <span className="symbol-popover">

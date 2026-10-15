@@ -68,7 +68,7 @@ export function DraftsMenu({
   return (
     <div className="drafts-menu-wrap" ref={wrapRef}>
       <button type="button" aria-expanded={open} onClick={toggle}>
-        Entwürfe&nbsp;▾
+        Entwürfe<span className="toolbar-chevron" aria-hidden="true" />
       </button>
       {open && (
         <div className="drafts-menu" role="group" aria-label="Gespeicherte Entwürfe">

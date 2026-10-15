@@ -76,6 +76,7 @@ try {
     'smoke',
     'drawing-smoke',
     'toolbar-smoke',
+    'editor-layout-smoke',
     'images-smoke',
     'image-rotation-smoke',
     'shapes-smoke',
