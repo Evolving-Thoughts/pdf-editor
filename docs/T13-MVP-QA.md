@@ -129,3 +129,18 @@ Es werden nur Logs und Ergebnislisten als CI-Artefakte hochgeladen, **keine
 Quell-PDFs oder exportierten Formulare**. Der CI-Status ist separat vom lokalen
 Testergebnis zu betrachten; die Definition einer Pipeline ist kein Beleg für
 einen bereits bestandenen GitHub-Lauf.
+
+### Cache für öffentliche Real-PDF-Fixtures
+
+Vor `fixtures:real` stellt `actions/cache@v4` ausschließlich
+`tests/fixtures/real` wieder her. Der Schlüssel enthält Betriebssystem und Hash
+von `scripts/real-fixtures.json`; es gibt keine unpräzisen `restore-keys`.
+`fixtures:real` läuft **auch bei einem Cache-Treffer** und überprüft sämtliche
+SHA-256-Werte. Vorhandene gültige Dateien werden ohne Netzwerk verwendet.
+
+Der Cache enthält nur öffentliche Test-PDFs, keine Nutzerdokumente, Entwürfe,
+Browserprofile oder Passwörter. Diese Dateien liegen im GitHub-Actions-Cache,
+nicht im Repository und nicht in den hochgeladenen Ergebnis-Artefakten.
+Ein kalter/abgelaufener Cache benötigt weiterhin die Anbieter; ein Ausfall oder
+geänderter Inhalt kann dann bewusst zum Fehlschlag führen. Die Abhängigkeit ist
+reduziert, nicht vollständig beseitigt; die Prüfungen bleiben blockierend.
