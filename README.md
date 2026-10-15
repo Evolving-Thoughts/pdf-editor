@@ -21,6 +21,68 @@ npm run build
 npm run preview
 ```
 
+## Auf GitHub Pages veröffentlichen
+
+Die App benötigt nur statisches Hosting. Für dieses Repository lautet die
+Projektadresse: <https://evolving-thoughts.github.io/pdf-editor/>.
+
+Einmalige Einrichtung durch einen Repository-Admin:
+
+1. **Settings → Pages → Build and deployment → Source: GitHub Actions** wählen.
+2. Den Deployment-PR nach `main` mergen. Unter **Actions → Deploy GitHub Pages**
+   den Build und anschließend das Deployment prüfen.
+3. Falls Pages erst nach dem Merge aktiviert wurde: denselben Workflow über
+   **Run workflow** auf `main` erneut starten. Unter **Settings → Pages** steht
+   nach erfolgreicher Veröffentlichung die Website-Adresse.
+
+Kein `gh-pages`-Branch, eigener Server oder persönlicher Token als Secret nötig.
+Der Workflow nutzt den kurzlebigen `GITHUB_TOKEN` mit `pages: write` und
+`id-token: write` ausschließlich im Deployment-Job. Falls die Organisation
+Actions oder das Environment `github-pages` einschränkt, muss ein Admin die
+entsprechenden Freigaben erteilen. Die Website wird nach der Veröffentlichung
+öffentlich erreichbar; das öffentliche Repository allein aktiviert Pages nicht.
+
+`npm run build:pages` baut mit Vites `--base=/pdf-editor/`. Der normale Build,
+`npm run dev` und die bestehende QA behalten `/` als Basis. Vite schreibt damit
+auch die Pfade für Favicon, Styles, PDF.js-Worker und nachgeladene Module passend
+zum Projekt-Unterpfad um. Bei einem anderen Repository-Namen den Pages-Buildpfad
+und den Unterpfad im Produktionstest anpassen; für eine eigene Domain direkt
+unter `/` stattdessen den normalen Build verwenden.
+
+Der Workflow prüft Pull Requests mit Lint, Unit-Tests, Pages-Build und einem
+synthetischen Produktions-Smoke. **Nur `main` wird veröffentlicht**, nie ein PR.
+Der Smoke serviert ausschließlich `dist` unter `/pdf-editor/`, ohne Vite-Devserver
+oder Source-Modul-Fallback, und prüft unter anderem PDF-Worker, Text-Export und
+Passwortfunktionen. Die bestehende MVP-QA bleibt separat unverändert; es werden
+keine externen Echtdokumente für das Deployment geladen.
+
+Lokal prüfen:
+
+```sh
+npm ci
+npx playwright install chromium
+npm run build:pages
+npm run test:pages
+```
+
+Der Smoke startet seinen eigenen lokalen statischen Server und beendet ihn
+anschließend. Zum manuellen Ausprobieren nach dem Pages-Build:
+
+```sh
+npm run preview -- --base=/pdf-editor/
+```
+
+Dann `/pdf-editor/` an der von Vite angezeigten Adresse öffnen. Die öffentliche
+Seite nach dem ersten Deployment ebenfalls kurz prüfen; die lokale Simulation
+ersetzt keinen Test der GitHub-Einstellungen oder der echten HTTPS-Adresse.
+
+PDF-Verarbeitung bleibt clientseitig; das Hosting erhält keine PDF-Uploads von
+der App. Normale Website-Zugriffe können beim Hosting protokolliert werden.
+Entwürfe bleiben unverschlüsselt im Browserspeicher der jeweiligen Website und
+werden nicht von `localhost` auf die öffentliche Adresse übertragen. Derselbe
+Origin wird von mehreren GitHub-Projektseiten eines Owners geteilt; ein URL-Pfad
+ist keine zusätzliche Sicherheitsgrenze für Browser-Speicher.
+
 ## Bedienung
 
 Die Oberfläche trennt Dateiaktionen und Navigation von den Bearbeitungswerkzeugen:
