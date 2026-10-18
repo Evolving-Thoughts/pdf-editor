@@ -5,7 +5,7 @@ import { createServer } from 'node:http'
 import { readFile, stat, mkdir } from 'node:fs/promises'
 import { resolve, extname, sep, join } from 'node:path'
 import { chromium } from 'playwright'
-import { PDFDocument, StandardFonts } from 'pdf-lib'
+import { PDFDocument, PDFName, PDFNumber, StandardFonts } from 'pdf-lib'
 import { PDFDocument as SecureDocument, PDFName as SecureName } from '@cantoo/pdf-lib'
 import { chromiumPath } from './browser-helper.mjs'
 import { confirmDefaultExport, openProtectedExport } from './export-smoke-helper.mjs'
@@ -129,6 +129,19 @@ try {
   assert.equal(encryption.get(SecureName.of('V')).asNumber(), 5)
   assert.equal(encryption.get(SecureName.of('R')).asNumber(), 6)
   assert.equal(decrypted.getForm().getTextField('Name').getText(), 'Protected Grace')
+  // Tiny hostile UserUnit geometry must fail visibly before a giant canvas is
+  // allocated; a subsequent ordinary document must still render successfully.
+  const oversized = await PDFDocument.create()
+  const hugePage = oversized.addPage([14400, 14400])
+  hugePage.node.set(PDFName.of('UserUnit'), PDFNumber.of(75))
+  await upload(await oversized.save(), 'oversized-user-unit.pdf')
+  await page.getByRole('alert').filter({ hasText: 'Seitenabmessungen' }).waitFor()
+  assert.ok(await page.locator('.pages .page canvas').evaluateAll(canvases =>
+    canvases.every(canvas => canvas.width <= 8192 && canvas.height <= 8192 && canvas.width * canvas.height <= 16_000_000),
+  ), 'Oversized PDF never receives an oversized canvas')
+  await upload(bytes, 'recovery.pdf')
+  await ready()
+  await search('Pages fixture')
   await page.waitForLoadState('networkidle')
   assert.ok(requests.some(url => url.includes(`${prefix}assets/pdf.worker`)), 'Production PDF.js worker loaded')
   const js = new Set(requests.filter(url => new URL(url).pathname.endsWith('.js')))
@@ -139,7 +152,7 @@ try {
   assert.deepEqual(failed, [], 'No missing production assets')
   assert.deepEqual(errors, [], 'No browser runtime errors')
   if (out) await page.screenshot({ path: join(out, 'pages-production.png') })
-  console.log('PASS Pages production subpath: static HTML/CSS/favicon, PDF.js worker, native fields, searchable text-overlay export roundtrip, cold password open/retry, lazy crypto chunk, AES-256 export; no external or missing assets/runtime errors.')
+  console.log('PASS Pages production subpath: static HTML/CSS/favicon, PDF.js worker, native fields, searchable text-overlay export roundtrip, cold password open/retry, lazy crypto chunk, AES-256 export, oversized UserUnit rejection and recovery; no external or missing assets/runtime errors.')
 } finally {
   await browser?.close()
   server.closeAllConnections()

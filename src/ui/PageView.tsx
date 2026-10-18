@@ -64,6 +64,7 @@ export function PageView({
   const canvasRef = useRef<HTMLCanvasElement>(null)
   const wrapperRef = useRef<HTMLDivElement>(null)
   const [pageSize, setPageSize] = useState<PageSize | null>(null)
+  const [renderError, setRenderError] = useState<{ pdf: PdfHandle; pageIndex: number; zoom: number; message: string } | null>(null)
   const gestureRef = useRef<DrawingGesture | null>(null)
   const [preview, setPreview] = useState<DrawingGesture | null>(null)
   const previewPoints = preview && preview.pdf === pdf && preview.tool === tool && preview.zoom === zoom && preview.version === store.getVersion()
@@ -84,7 +85,13 @@ export function PageView({
   }, [pdf, pageIndex])
 
   useEffect(() => {
-    if (canvasRef.current) void pdf.renderPage(pageIndex + 1, canvasRef.current, zoom).catch(console.warn)
+    let cancelled = false
+    if (canvasRef.current) void pdf.renderPage(pageIndex + 1, canvasRef.current, zoom).then(() => {
+      if (!cancelled) setRenderError(null)
+    }).catch(error => {
+      if (!cancelled) setRenderError({ pdf, pageIndex, zoom, message: error instanceof Error ? error.message : 'Die Seite konnte nicht angezeigt werden.' })
+    })
+    return () => { cancelled = true }
   }, [pdf, pageIndex, zoom])
 
   const onPagePointerDown = (event: React.PointerEvent<HTMLDivElement>) => {
@@ -211,6 +218,7 @@ export function PageView({
       onLostPointerCapture={cancelDrawing}
     >
       <canvas ref={canvasRef} />
+      {renderError?.pdf === pdf && renderError.pageIndex === pageIndex && renderError.zoom === zoom && <p role="alert">{renderError.message}</p>}
       {pageSize && !!searchHits.length && <svg className="search-highlights" viewBox={`0 0 ${pageSize.width} ${pageSize.height}`} aria-hidden="true">
         {searchHits.flatMap((hit,index)=>hit.polygons.map((polygon,part)=><polygon key={`${index}-${part}`} data-search-active={hit===activeSearchHit?'true':undefined} points={polygon.map(p=>`${p.x},${p.y}`).join(' ')} className={hit===activeSearchHit?'active':''}/>))}
       </svg>}

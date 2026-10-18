@@ -83,6 +83,14 @@ werden nicht von `localhost` auf die öffentliche Adresse übertragen. Derselbe
 Origin wird von mehreren GitHub-Projektseiten eines Owners geteilt; ein URL-Pfad
 ist keine zusätzliche Sicherheitsgrenze für Browser-Speicher.
 
+Die normale Seitenanzeige begrenzt Canvas-Raster auf 16 Millionen Pixel und
+8192 Pixel pro Kante. Bei hohem Zoom oder HiDPI wird nur die Rasterauflösung
+reduziert; Seitengröße und Bearbeitungskoordinaten bleiben unverändert.
+Ungültige Seitenmaße oder Abmessungen über 32768 PDF-Punkte beziehungsweise
+CSS-Pixel werden vor der Canvas-Belegung mit einer Fehlermeldung abgelehnt.
+Diese Limits begrenzen nicht den gesamten Speicherverbrauch beim Parsen oder
+Dekodieren einer PDF und ändern weder Export noch sichere Schwärzung.
+
 ## Bedienung
 
 Die Oberfläche trennt Dateiaktionen und Navigation von den Bearbeitungswerkzeugen:
