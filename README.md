@@ -155,8 +155,14 @@ Inhalte enthalten: **Nur die geprüfte exportierte Kopie weitergeben.**
 XFA-Bearbeitung, PDF-JavaScript, Formularberechnungen, OCR und neue kryptografische
 Signaturen gehören nicht zum MVP. Nicht unterstützte Formularbestandteile werden
 nicht ausgeführt; vorhandene XFA-Daten werden, soweit vom Exportpfad unterstützt,
-erhalten. Schriftwahl und Unicode sind durch die unterstützten Standardfonts
-begrenzt; zusätzliche eingebettete Open-Source-Fonts sind noch offen.
+erhalten. Neben Helvetica, Times und Courier stehen **Noto Sans** und **Noto Serif** zur
+Verfügung, jeweils normal, fett, kursiv und fett-kursiv. Die Noto-Latin-Schriften
+(inklusive deutscher Umlaute und ß) werden über die Fontsource-Pakete lokal
+gebündelt (SIL Open Font License, Lizenzdateien in den jeweiligen Paketen).
+Browser-Vorschau und PDF-Export verwenden dieselben WOFF-Dateien; im PDF werden
+nur die benötigten Glyphen eingebettet. Es gibt keine Google-Fonts-Anfragen.
+Andere Schriftsysteme sind damit nicht abgedeckt; die Standardfonts bleiben
+auf ihre bisherige Zeichenauswahl beschränkt.
 Kompatibilität mit Acrobat, macOS Vorschau und eigenen realen Dokumenten bitte
 anhand der [manuellen Prüfliste](docs/T13-MVP-QA.md) prüfen.
 
@@ -196,3 +202,18 @@ npm run qa
 (Port 5235). Fixtures und QA-Artefakte sind nicht im Repository. Details,
 unabhängige Prüfbefehle und offene manuelle Kriterien:
 [docs/T13-MVP-QA.md](docs/T13-MVP-QA.md).
+
+### Seitenwahl und Zuschnitt
+
+Ein normaler Klick auf einen Seiteneintrag zeigt die Seite an und wählt sie
+allein für Aktionen aus. Checkboxen und Strg/⌘+Klick ändern einzelne Einträge,
+Shift+Klick wählt einen Bereich. Die Checkboxen bleiben sichtbar.
+Beim Zuschneiden nutzt das Formular die Seitenleiste ohne die übliche
+50%-Höhenbegrenzung; die Seitenliste wird dafür vorübergehend ausgeblendet.
+Die Vorschau behält die Größe der unbeschnittenen Seite als Maßstabsreferenz
+(auch bei weiterem Zuschnitt, Undo/Redo und gespeicherten Entwürfen).
+Ein reiner Zuschnitt oben/unten verändert nicht die physische Breite im Export.
+Das stärkste Bildkompressions-Preset heißt **Maximale Kompression**;
+Qualität und Auflösungsgrenzen bleiben unverändert.
+Die Eckgriffe beim Zuschneiden und Schwärzen zeigen wie beim Textmarker nur
+8 × 8 px große Kästchen; die unsichtbare Trefferfläche bleibt 44 × 44 px groß.

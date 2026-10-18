@@ -82,7 +82,7 @@ const box = page.locator('.textbox')
 check('Minibar sichtbar nach Auswahl', await box.locator('.minibar').isVisible())
 
 // 3. Font select offers only the 3 text families; symbols are not formatting
-check('3 Einträge im Schriftart-Select', (await box.locator('select[aria-label="Schriftart"] option').count()) === 3)
+check('5 Einträge im Schriftart-Select', (await box.locator('select[aria-label="Schriftart"] option').count()) === 5)
 check('Kein Symbol-Picker in der Textbox-Leiste', (await box.locator('button[aria-label="Symbol auswählen"]').count()) === 0)
 
 // 4. B/I/U toggle buttons switch styles on AND off again

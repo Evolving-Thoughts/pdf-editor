@@ -10,7 +10,7 @@ import { inspectImage } from '../images/imageFormat'
 export const COMPRESSION_PRESETS = {
   high: { label: 'Hohe Qualität', maxEdge: 2400, jpegQuality: 0.9 },
   balanced: { label: 'Ausgewogen', maxEdge: 1800, jpegQuality: 0.8 },
-  small: { label: 'Kleinere Datei', maxEdge: 1200, jpegQuality: 0.65 },
+  small: { label: 'Maximale Kompression', maxEdge: 1200, jpegQuality: 0.65 },
 } as const
 export type CompressionPreset = keyof typeof COMPRESSION_PRESETS
 export const MAX_COMPRESSION_PIXELS = 16_000_000

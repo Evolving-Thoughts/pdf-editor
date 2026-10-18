@@ -52,6 +52,7 @@ export async function loadPdf(fileName: string, bytes: Uint8Array): Promise<PdfH
     pageCount: pdfDocument.numPages,
 
     renderPage(pageNumber, canvas, zoom) {
+      canvas.dataset.renderState = 'loading'
       const queued = renderQueues.get(canvas) ?? Promise.resolve()
       const run = queued.catch(() => undefined).then(async () => {
         const page = await pdfDocument.getPage(pageNumber)
@@ -62,6 +63,7 @@ export async function loadPdf(fileName: string, bytes: Uint8Array): Promise<PdfH
         canvas.style.width = `${Math.floor(viewport.width / pixelRatio)}px`
         canvas.style.height = `${Math.floor(viewport.height / pixelRatio)}px`
         await page.render({ canvas, viewport }).promise
+        if (renderQueues.get(canvas) === run) canvas.dataset.renderState = 'ready'
       })
       renderQueues.set(canvas, run)
       return run

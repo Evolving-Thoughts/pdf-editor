@@ -86,6 +86,7 @@ try {
     'a4-smoke',
     'page-import-forms-smoke',
     'pages-edges-smoke',
+    'bugs-smoke',
     'pages-selection-smoke',
     'pages-smoke',
     'thumbnails-smoke',

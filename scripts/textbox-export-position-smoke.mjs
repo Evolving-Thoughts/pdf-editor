@@ -61,6 +61,14 @@ const cases = [
   { name: 'zoom-double', font: 'helvetica', zoom: 2 },
   { name: 'times', font: 'times', zoom: 1 },
   { name: 'courier', font: 'courier', zoom: 1 },
+  { name: 'noto-sans-False-False', font: 'noto-sans', zoom: 1, bold: false, italic: false },
+  { name: 'noto-sans-True-False', font: 'noto-sans', zoom: 1, bold: true, italic: false },
+  { name: 'noto-sans-False-True', font: 'noto-sans', zoom: 1, bold: false, italic: true },
+  { name: 'noto-sans-True-True', font: 'noto-sans', zoom: 1, bold: true, italic: true },
+  { name: 'noto-serif-False-False', font: 'noto-serif', zoom: 1, bold: false, italic: false },
+  { name: 'noto-serif-True-False', font: 'noto-serif', zoom: 1, bold: true, italic: false },
+  { name: 'noto-serif-False-True', font: 'noto-serif', zoom: 1, bold: false, italic: true },
+  { name: 'noto-serif-True-True', font: 'noto-serif', zoom: 1, bold: true, italic: true },
   { name: 'bold-italic', font: 'helvetica', zoom: 1, bold: true, italic: true },
   { name: 'multiline', font: 'helvetica', zoom: 1, text: 'HgE Korrektur\nHgE zweite Zeile' },
   {
@@ -126,6 +134,8 @@ try {
       await page.getByRole('button', { name: '⬚ Auswahl', exact: true }).click()
       await page.locator('.textbox .drag-surface').first().click()
     }
+    await page.evaluate(() => document.fonts.ready)
+    await page.waitForTimeout(100) // Font completion remeasures the textarea baseline.
     // Only glyph paint is compared; the edit minibar is outside document content.
     await page.addStyleTag({ content: '.minibar { visibility: hidden; }' })
     const before = await glyphBounds(page, await capture(page, test.name + '-editor-before.png', test.zoom))
@@ -196,7 +206,7 @@ try {
     await page.getByText('baked-position.pdf · 1 Seite', { exact: true }).waitFor()
     await page.waitForFunction((zoom) => {
       const c = document.querySelector('.page canvas')
-      if (!c?.width) return false
+      if (!c?.width || c.dataset.renderState !== 'ready') return false
       const d = c.getContext('2d').getImageData(200 * zoom, 380 * zoom, 150 * zoom, 60 * zoom).data
       return d.some((v, i) => i % 4 !== 3 && v < 100)
     }, test.zoom)

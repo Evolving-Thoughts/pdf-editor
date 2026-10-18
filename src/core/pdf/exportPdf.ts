@@ -4,6 +4,7 @@ import {
   BlendMode, LineCapStyle, LineJoinStyle, PDFDocument, PDFName, PDFNumber, popGraphicsState, pushGraphicsState,
   clip, endPath, moveTo, lineTo, closePath, degrees, rgb, setLineJoin, StandardFonts, type Color, type PDFFont, type PDFImage, type PDFPage,
 } from 'pdf-lib'
+import { bundledFontUrl, isBundledFont, loadBundledFont } from '../fonts'
 import { resolvedOverlayClips } from '../overlayClipping'
 import { TEXT_LINE_HEIGHT } from '../textLayout'
 import { strokeToSvgPath } from '../drawing'
@@ -12,7 +13,7 @@ import { isImage, isShape, isStroke, type Overlay, type OverlayFont, type ShapeO
 
 // Bold/italic map to the matching PDF standard font; underline has no font
 // variant and is drawn as a line below the text.
-const FONT_VARIANTS: Record<OverlayFont, { plain: StandardFonts; bold: StandardFonts; italic: StandardFonts; boldItalic: StandardFonts }> = {
+const FONT_VARIANTS: Record<Exclude<OverlayFont, 'noto-sans' | 'noto-serif'>, { plain: StandardFonts; bold: StandardFonts; italic: StandardFonts; boldItalic: StandardFonts }> = {
   helvetica: {
     plain: StandardFonts.Helvetica,
     bold: StandardFonts.HelveticaBold,
@@ -63,6 +64,7 @@ function sanitizeFor(font: PDFFont, text: string, fontKey: OverlayFont): string 
 }
 
 function variantFor(overlay: Textbox): StandardFonts {
+  if (isBundledFont(overlay.font)) throw new Error('Gebündelte Schrift separat einbetten.')
   const variants = FONT_VARIANTS[overlay.font]
   if (overlay.bold && overlay.italic) return variants.boldItalic
   if (overlay.bold) return variants.bold
@@ -72,7 +74,7 @@ function variantFor(overlay: Textbox): StandardFonts {
 
 export async function exportPdf(bytes: Uint8Array, overlays: Overlay[] = []): Promise<Uint8Array> {
   const doc = await PDFDocument.load(bytes)
-  const fonts = new Map<StandardFonts, PDFFont>()
+  const fonts = new Map<string, PDFFont>()
   const images = new Map<string, PDFImage>()
   for (const overlay of overlays) {
     const page = doc.getPage(overlay.pageIndex)
@@ -116,10 +118,15 @@ export async function exportPdf(bytes: Uint8Array, overlays: Overlay[] = []): Pr
         continue
       }
       if (overlay.text.trim().length === 0) continue
-      const variant = variantFor(overlay)
+      const custom = isBundledFont(overlay.font)
+      const variant = custom ? bundledFontUrl(overlay) : variantFor(overlay)
       let font = fonts.get(variant)
       if (!font) {
-        font = await doc.embedFont(variant)
+        if (custom) {
+          const { default: fontkit } = await import('@pdf-lib/fontkit')
+          doc.registerFontkit(fontkit)
+          font = await doc.embedFont(await loadBundledFont(variant), { subset: true })
+        } else font = await doc.embedFont(variant)
         fonts.set(variant, font)
       }
       const text = sanitizeFor(font, overlay.text, overlay.font)
