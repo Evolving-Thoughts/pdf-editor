@@ -1,4 +1,5 @@
 import './fonts.css'
+import { fontSupportsItalic } from '../core/fonts'
 import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react'
 import { moveTextbox, removeTextbox, updateTextbox } from '../core/commands'
 import type { EditorStore } from '../core/editorStore'
@@ -18,6 +19,11 @@ const FONT_CSS: Record<OverlayFont, string> = {
   courier: "'Courier New', Courier, monospace",
   'noto-sans': "'Noto Sans', sans-serif",
   'noto-serif': "'Noto Serif', serif",
+  'carlito': "'Carlito', sans-serif",
+  'lato': "'Lato', sans-serif",
+  'eb-garamond': "'EB Garamond', serif",
+  'roboto-mono': "'Roboto Mono', monospace",
+  'caveat': "'Caveat', cursive",
   // Browsers have no ZapfDingbats; the box stores Unicode symbols anyway,
   // so the editor renders them with system fonts. Export maps to the font.
   zapfdingbats: 'system-ui, sans-serif',
@@ -29,6 +35,11 @@ const FONT_OPTIONS: Array<{ value: OverlayFont; label: string }> = [
   { value: 'courier', label: 'Courier' },
   { value: 'noto-sans', label: 'Noto Sans' },
   { value: 'noto-serif', label: 'Noto Serif' },
+  { value: 'carlito', label: 'Carlito' },
+  { value: 'lato', label: 'Lato' },
+  { value: 'eb-garamond', label: 'EB Garamond' },
+  { value: 'roboto-mono', label: 'Roboto Mono' },
+  { value: 'caveat', label: 'Caveat' },
 ]
 
 const SIZE_PRESETS = [8, 10, 12, 14, 18, 24, 36]
@@ -176,13 +187,13 @@ export function TextboxView({ box, zoom, pageHeightPts, selected, tool, store, o
   const fontCss: FontCss = {
     fontFamily: FONT_CSS[box.font],
     fontWeight: box.bold ? 'bold' : undefined,
-    fontStyle: box.italic ? 'italic' : undefined,
+    fontStyle: box.italic && fontSupportsItalic(box.font) ? 'italic' : undefined,
   }
 
   const [fontRevision, setFontRevision] = useState(0)
   useEffect(() => {
     let cancelled = false
-    void document.fonts.load(`${box.italic ? 'italic' : 'normal'} ${box.bold ? 700 : 400} 16px ${FONT_CSS[box.font]}`).then(() => {
+    void document.fonts.load(`${box.italic && fontSupportsItalic(box.font) ? 'italic' : 'normal'} ${box.bold ? 700 : 400} 16px ${FONT_CSS[box.font]}`).then(() => {
       if (!cancelled) setFontRevision(value => value + 1)
     }).catch(console.warn)
     return () => { cancelled = true }
@@ -199,7 +210,7 @@ export function TextboxView({ box, zoom, pageHeightPts, selected, tool, store, o
       {
         fontFamily: FONT_CSS[box.font],
         fontWeight: box.bold ? 'bold' : undefined,
-        fontStyle: box.italic ? 'italic' : undefined,
+        fontStyle: box.italic && fontSupportsItalic(box.font) ? 'italic' : undefined,
       },
       px,
     )
@@ -309,9 +320,10 @@ export function TextboxView({ box, zoom, pageHeightPts, selected, tool, store, o
             <select
               aria-label="Schriftart"
               value={box.font}
-              onChange={(event) =>
-                store.dispatch(updateTextbox(box.id, { font: box.font }, { font: event.target.value as OverlayFont }))
-              }
+              onChange={(event) => {
+                const font = event.target.value as OverlayFont
+                store.dispatch(updateTextbox(box.id, { font: box.font, italic: box.italic }, { font, italic: box.italic && fontSupportsItalic(font) }))
+              }}
             >
               {FONT_OPTIONS.map((option) => (
                 <option key={option.value} value={option.value}>
@@ -337,8 +349,9 @@ export function TextboxView({ box, zoom, pageHeightPts, selected, tool, store, o
                 type="button"
                 className="style-toggle"
                 aria-label="Kursiv"
-                aria-pressed={box.italic}
-                title="Kursiv"
+                aria-pressed={box.italic && fontSupportsItalic(box.font)}
+                disabled={!fontSupportsItalic(box.font)}
+                title={fontSupportsItalic(box.font) ? 'Kursiv' : 'Caveat bietet keinen kursiven Schnitt'}
                 onClick={() => store.dispatch(updateTextbox(box.id, { italic: box.italic }, { italic: !box.italic }))}
               >
                 <i>I</i>

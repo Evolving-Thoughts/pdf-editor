@@ -6,3 +6,21 @@
 @font-face { font-family: 'Noto Serif'; font-style: normal; font-weight: 700; src: url('@fontsource/noto-serif/files/noto-serif-latin-700-normal.woff') format('woff'); font-display: block; }
 @font-face { font-family: 'Noto Serif'; font-style: italic; font-weight: 400; src: url('@fontsource/noto-serif/files/noto-serif-latin-400-italic.woff') format('woff'); font-display: block; }
 @font-face { font-family: 'Noto Serif'; font-style: italic; font-weight: 700; src: url('@fontsource/noto-serif/files/noto-serif-latin-700-italic.woff') format('woff'); font-display: block; }
+@font-face { font-family: 'Carlito'; font-style: normal; font-weight: 400; src: url('@fontsource/carlito/files/carlito-latin-400-normal.woff') format('woff'); font-display: block; }
+@font-face { font-family: 'Carlito'; font-style: normal; font-weight: 700; src: url('@fontsource/carlito/files/carlito-latin-700-normal.woff') format('woff'); font-display: block; }
+@font-face { font-family: 'Carlito'; font-style: italic; font-weight: 400; src: url('@fontsource/carlito/files/carlito-latin-400-italic.woff') format('woff'); font-display: block; }
+@font-face { font-family: 'Carlito'; font-style: italic; font-weight: 700; src: url('@fontsource/carlito/files/carlito-latin-700-italic.woff') format('woff'); font-display: block; }
+@font-face { font-family: 'Lato'; font-style: normal; font-weight: 400; src: url('@fontsource/lato/files/lato-latin-400-normal.woff') format('woff'); font-display: block; }
+@font-face { font-family: 'Lato'; font-style: normal; font-weight: 700; src: url('@fontsource/lato/files/lato-latin-700-normal.woff') format('woff'); font-display: block; }
+@font-face { font-family: 'Lato'; font-style: italic; font-weight: 400; src: url('@fontsource/lato/files/lato-latin-400-italic.woff') format('woff'); font-display: block; }
+@font-face { font-family: 'Lato'; font-style: italic; font-weight: 700; src: url('@fontsource/lato/files/lato-latin-700-italic.woff') format('woff'); font-display: block; }
+@font-face { font-family: 'EB Garamond'; font-style: normal; font-weight: 400; src: url('@fontsource/eb-garamond/files/eb-garamond-latin-400-normal.woff') format('woff'); font-display: block; }
+@font-face { font-family: 'EB Garamond'; font-style: normal; font-weight: 700; src: url('@fontsource/eb-garamond/files/eb-garamond-latin-700-normal.woff') format('woff'); font-display: block; }
+@font-face { font-family: 'EB Garamond'; font-style: italic; font-weight: 400; src: url('@fontsource/eb-garamond/files/eb-garamond-latin-400-italic.woff') format('woff'); font-display: block; }
+@font-face { font-family: 'EB Garamond'; font-style: italic; font-weight: 700; src: url('@fontsource/eb-garamond/files/eb-garamond-latin-700-italic.woff') format('woff'); font-display: block; }
+@font-face { font-family: 'Roboto Mono'; font-style: normal; font-weight: 400; src: url('@fontsource/roboto-mono/files/roboto-mono-latin-400-normal.woff') format('woff'); font-display: block; }
+@font-face { font-family: 'Roboto Mono'; font-style: normal; font-weight: 700; src: url('@fontsource/roboto-mono/files/roboto-mono-latin-700-normal.woff') format('woff'); font-display: block; }
+@font-face { font-family: 'Roboto Mono'; font-style: italic; font-weight: 400; src: url('@fontsource/roboto-mono/files/roboto-mono-latin-400-italic.woff') format('woff'); font-display: block; }
+@font-face { font-family: 'Roboto Mono'; font-style: italic; font-weight: 700; src: url('@fontsource/roboto-mono/files/roboto-mono-latin-700-italic.woff') format('woff'); font-display: block; }
+@font-face { font-family: 'Caveat'; font-style: normal; font-weight: 400; src: url('@fontsource/caveat/files/caveat-latin-400-normal.woff') format('woff'); font-display: block; }
+@font-face { font-family: 'Caveat'; font-style: normal; font-weight: 700; src: url('@fontsource/caveat/files/caveat-latin-700-normal.woff') format('woff'); font-display: block; }

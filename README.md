@@ -155,10 +155,19 @@ Inhalte enthalten: **Nur die geprüfte exportierte Kopie weitergeben.**
 XFA-Bearbeitung, PDF-JavaScript, Formularberechnungen, OCR und neue kryptografische
 Signaturen gehören nicht zum MVP. Nicht unterstützte Formularbestandteile werden
 nicht ausgeführt; vorhandene XFA-Daten werden, soweit vom Exportpfad unterstützt,
-erhalten. Neben Helvetica, Times und Courier stehen **Noto Sans** und **Noto Serif** zur
-Verfügung, jeweils normal, fett, kursiv und fett-kursiv. Die Noto-Latin-Schriften
-(inklusive deutscher Umlaute und ß) werden über die Fontsource-Pakete lokal
-gebündelt (SIL Open Font License, Lizenzdateien in den jeweiligen Paketen).
+erhalten. Neben Helvetica, Times und Courier stehen **Noto Sans**, **Noto Serif**,
+**Carlito**, **Lato**, **EB Garamond**, **Roboto Mono** und **Caveat** zur Verfügung.
+Alle bieten Normal und Fett; bis auf Caveat auch Kursiv und Fett-Kursiv.
+Caveat hat keinen nativen kursiven Schnitt: Beim Wechsel zu Caveat wird Kursiv
+im selben Undo-Schritt ausgeschaltet, und die Kursiv-Schaltfläche ist deaktiviert.
+Die Latin-Schriften (inklusive deutscher Umlaute und ß) werden über die
+Fontsource-Pakete lokal gebündelt. Alle sieben Fontsource-Schriftfamilien stehen
+unter der **SIL Open Font License 1.1**; die unveränderten Copyright- und
+Lizenztexte liegen unter [public/licenses/fonts](public/licenses/fonts) und
+werden im statischen Build unter `licenses/fonts/` mit ausgeliefert.
+Die OFL erlaubt auch kommerzielle Nutzung, Software-Bündelung und
+PDF-Einbettung unter Beachtung ihrer Bedingungen. Erstellte PDF-Dokumente
+müssen dadurch nicht selbst unter die OFL gestellt werden.
 Browser-Vorschau und PDF-Export verwenden dieselben WOFF-Dateien; im PDF werden
 nur die benötigten Glyphen eingebettet. Es gibt keine Google-Fonts-Anfragen.
 Andere Schriftsysteme sind damit nicht abgedeckt; die Standardfonts bleiben

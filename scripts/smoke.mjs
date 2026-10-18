@@ -81,8 +81,8 @@ await page.keyboard.press('Escape')
 const box = page.locator('.textbox')
 check('Minibar sichtbar nach Auswahl', await box.locator('.minibar').isVisible())
 
-// 3. Font select offers only the 3 text families; symbols are not formatting
-check('5 Einträge im Schriftart-Select', (await box.locator('select[aria-label="Schriftart"] option').count()) === 5)
+// 3. Font select offers ten text families; symbols are not formatting
+check('10 Einträge im Schriftart-Select', (await box.locator('select[aria-label="Schriftart"] option').count()) === 10)
 check('Kein Symbol-Picker in der Textbox-Leiste', (await box.locator('button[aria-label="Symbol auswählen"]').count()) === 0)
 
 // 4. B/I/U toggle buttons switch styles on AND off again
@@ -96,6 +96,17 @@ await italicBtn.click()
 check('I aktiviert Kursiv', (await box.evaluate((el) => getComputedStyle(el).fontStyle)) === 'italic')
 await italicBtn.click()
 check('I erneut deaktiviert Kursiv', (await box.evaluate((el) => getComputedStyle(el).fontStyle)) === 'normal')
+await italicBtn.click()
+const fontSelect = box.getByRole('combobox', { name: 'Schriftart', exact: true })
+await fontSelect.selectOption('caveat')
+check('Caveat deaktiviert nicht vorhandenes Kursiv', await italicBtn.isDisabled() && await italicBtn.getAttribute('aria-pressed') === 'false')
+check('Caveat verwendet keinen synthetischen Kursivstil', (await box.evaluate(el => getComputedStyle(el).fontStyle)) === 'normal')
+await page.getByRole('button', { name: 'Rückgängig', exact: true }).click()
+check('Undo stellt Schrift und Kursiv gemeinsam wieder her', await fontSelect.inputValue() === 'helvetica' && await italicBtn.getAttribute('aria-pressed') === 'true')
+await page.getByRole('button', { name: 'Wiederholen', exact: true }).click()
+check('Redo stellt Caveat ohne Kursiv wieder her', await fontSelect.inputValue() === 'caveat' && await italicBtn.isDisabled())
+await fontSelect.selectOption('helvetica')
+
 const underlineBtn = box.locator('button[aria-label="Unterstrichen"]')
 const ta = box.locator('textarea')
 await underlineBtn.click()

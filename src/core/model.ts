@@ -4,7 +4,7 @@ import type { DocumentPage, PageSource } from './pages'
 // Domain model for overlay elements. Pure data, no framework, no PDF libraries.
 
 /** 'zapfdingbats' = symbol font; the text then holds Unicode symbols (✓, ■, …). */
-export type OverlayFont = 'helvetica' | 'times' | 'courier' | 'noto-sans' | 'noto-serif' | 'zapfdingbats'
+export type OverlayFont = 'helvetica' | 'times' | 'courier' | 'noto-sans' | 'noto-serif' | 'carlito' | 'lato' | 'eb-garamond' | 'roboto-mono' | 'caveat' | 'zapfdingbats'
 
 /** Clipping polygons in element-local coordinates; strokes use page coordinates. */
 export interface OverlayClipping { clips?: StrokePoint[][] }
