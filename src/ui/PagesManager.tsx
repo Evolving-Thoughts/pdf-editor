@@ -525,7 +525,7 @@ export function PagesManager({ nativeWidgets = [], pdf, store, original, busy, o
           ))}
         </div>
       </aside>
-      <div className="page-manager-preview" ref={previewRef}>
+      <div className="page-manager-preview" ref={previewRef} data-fit-width={available.width} data-fit-height={available.height}>
         {!page ? (
           <div className="page-manager-empty">
             <h2>Keine Seiten</h2>

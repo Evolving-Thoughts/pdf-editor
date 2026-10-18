@@ -3,9 +3,9 @@
 // (core/UI boundary, ADR-004).
 import { getDocument, GlobalWorkerOptions } from 'pdfjs-dist'
 import workerUrl from 'pdfjs-dist/build/pdf.worker.min.mjs?url'
-import type { Overlay, OverlayFont } from '../model'
+import type { OverlayFont } from '../model'
 import type { Redaction } from '../redactions'
-import { exportPdf } from './exportPdf'
+import { renderPlan, validatePageSize } from './renderBudget'
 import type { SearchFragment } from '../search'
 
 GlobalWorkerOptions.workerSrc = workerUrl
@@ -25,8 +25,6 @@ export interface PdfHandle {
   getPageSize(pageNumber: number): Promise<PageSize>
   /** Text and geometry from PDF.js; raster/image pages return no text. */
   getSearchText(pageNumber: number): Promise<SearchFragment[]>
-  /** Exports the document with the given overlays baked in as real text. */
-  exportBytes(overlays?: Overlay[]): Promise<Uint8Array>
   /** Lossless 300-dpi pixels with outward-rounded opaque masks; never returns source content. */
   rasterizePage(pageNumber:number, marks:Redaction[]):Promise<RasterizedPage>
   /** Releases worker resources; call when switching or closing documents. */
@@ -56,12 +54,13 @@ export async function loadPdf(fileName: string, bytes: Uint8Array): Promise<PdfH
       const queued = renderQueues.get(canvas) ?? Promise.resolve()
       const run = queued.catch(() => undefined).then(async () => {
         const page = await pdfDocument.getPage(pageNumber)
-        const pixelRatio = window.devicePixelRatio || 1
-        const viewport = page.getViewport({ scale: zoom * pixelRatio })
-        canvas.width = Math.floor(viewport.width)
-        canvas.height = Math.floor(viewport.height)
-        canvas.style.width = `${Math.floor(viewport.width / pixelRatio)}px`
-        canvas.style.height = `${Math.floor(viewport.height / pixelRatio)}px`
+        const base = page.getViewport({ scale: 1 })
+        const plan = renderPlan(base.width, base.height, zoom, window.devicePixelRatio ?? 1)
+        const viewport = page.getViewport({ scale: plan.scale })
+        canvas.width = Math.max(1, Math.floor(viewport.width))
+        canvas.height = Math.max(1, Math.floor(viewport.height))
+        canvas.style.width = `${Math.floor(plan.cssWidth)}px`
+        canvas.style.height = `${Math.floor(plan.cssHeight)}px`
         await page.render({ canvas, viewport }).promise
         if (renderQueues.get(canvas) === run) canvas.dataset.renderState = 'ready'
       })
@@ -74,6 +73,7 @@ export async function loadPdf(fileName: string, bytes: Uint8Array): Promise<PdfH
       if (cached) return cached
       const page = await pdfDocument.getPage(pageNumber)
       const viewport = page.getViewport({ scale: 1 })
+      validatePageSize(viewport.width, viewport.height)
       const size = { width: viewport.width, height: viewport.height }
       sizeCache.set(pageNumber, size)
       return size
@@ -142,7 +142,6 @@ export async function loadPdf(fileName: string, bytes: Uint8Array): Promise<PdfH
       } finally {canvas.width=1;canvas.height=1;page.cleanup()}
     },
 
-    exportBytes: (overlays) => exportPdf(bytes, overlays),
     destroy: () => loadingTask.destroy(),
   }
 }

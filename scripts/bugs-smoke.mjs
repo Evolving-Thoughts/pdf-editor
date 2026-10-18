@@ -14,7 +14,39 @@ p.on('pageerror', e => errors.push(String(e)))
 const button = name => p.getByRole('button', { name, exact: true })
 const mm = 72 / 25.4
 async function ready() {
-  await p.waitForFunction(() => document.querySelector('.page-manager-preview canvas')?.width > 0 && !document.querySelector('.page-manager-message')?.textContent.includes('aktualisiert'))
+  const state = await p.evaluateHandle(() => ({ snapshot: null, frames: 0 }))
+  try {
+    await p.waitForFunction(({ state, viewport }) => {
+      const snapshot = () => {
+        if (innerWidth !== viewport.width || innerHeight !== viewport.height) return null
+        const preview = document.querySelector('.page-manager-preview')
+        const paper = preview?.querySelector('.page-preview-paper')
+        const canvas = paper?.querySelector('canvas')
+        if (!paper || !canvas || canvas.dataset.renderState !== 'ready' ||
+            preview.querySelector('[role="status"]') || document.querySelector('header')?.inert) return null
+        const style = getComputedStyle(preview)
+        const contentWidth = preview.clientWidth - parseFloat(style.paddingLeft) - parseFloat(style.paddingRight)
+        const contentHeight = preview.clientHeight - parseFloat(style.paddingTop) - parseFloat(style.paddingBottom)
+        // Wait until the fit calculation has consumed this viewport's observer
+        // measurement, including after mounting/restoring a draft.
+        const fitWidth = Number(preview.dataset.fitWidth), fitHeight = Number(preview.dataset.fitHeight)
+        if (!Number.isFinite(fitWidth) || !Number.isFinite(fitHeight) ||
+            Math.abs(fitWidth - contentWidth) >= 1 || Math.abs(fitHeight - contentHeight) >= 1) return null
+        const bounds = paper.getBoundingClientRect(), raster = canvas.getBoundingClientRect()
+        if (Math.abs(bounds.width - raster.width) >= 1 || Math.abs(bounds.height - raster.height) >= 1) return null
+        return JSON.stringify([bounds.width, bounds.height, canvas.width, canvas.height, preview.clientWidth, preview.clientHeight])
+      }
+      const current = snapshot()
+      // ResizeObserver, React layout and PDF.js rendering complete independently.
+      // Do not accept a previously allocated canvas or a single transient frame.
+      if (!current || current !== state.snapshot) {
+        state.snapshot = current
+        state.frames = 0
+        return false
+      }
+      return ++state.frames >= 3
+    }, { state, viewport: p.viewportSize() })
+  } finally { await state.dispose() }
 }
 try {
   const doc = await PDFDocument.create()
@@ -33,7 +65,7 @@ try {
   await p.locator('.page-manager-select').first().click()
   assert.equal(await p.locator('.page-manager-row').count(), 1)
   for (const viewport of [{ width: 1280, height: 720 }, { width: 1024, height: 600 }, { width: 390, height: 844 }, { width: 320, height: 740 }]) {
-    await p.setViewportSize(viewport)
+    await p.setViewportSize(viewport); await ready()
     await button('Zuschneiden').click()
     await p.waitForSelector('.page-manager.cropping')
     const gripStyle = await p.locator('.page-crop-grip').first().evaluate(el => ({ target: el.getBoundingClientRect().width, visible: getComputedStyle(el, '::after').width }))
@@ -54,8 +86,8 @@ try {
   await p.getByLabel('Oben · mm', { exact: true }).fill('99')
   await button('Zuschnitt anwenden').click(); await ready()
   const after = await p.locator('.page-preview-paper').boundingBox()
-  assert.ok(Math.abs(after.width - before.width) < 1, 'Top crop does not visually enlarge width')
-  assert.ok(Math.abs(after.height / before.height - 2 / 3) < 0.005)
+  assert.ok(Math.abs(after.width - before.width) < 1, `Top crop does not visually enlarge width: before=${before.width}, after=${after.width}`)
+  assert.ok(Math.abs(after.height / before.height - 2 / 3) < 0.005, `Top crop preserves height ratio: before=${before.height}, after=${after.height}`)
   const event = p.waitForEvent('download'); await button('Extrahieren').click()
   const path = join(out, 'crop.pdf'); await (await event).saveAs(path)
   const exported = await PDFDocument.load(readFileSync(path)), box = exported.getPage(0).getCropBox()
