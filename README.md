@@ -99,7 +99,11 @@ Die Oberfläche trennt Dateiaktionen und Navigation von den Bearbeitungswerkzeug
 
 Auf schmalen Bildschirmen umbrechen die Gruppen. Die Werkzeugoptionen erscheinen
 weiterhin kontextbezogen in den vorhandenen verschiebbaren Paletten bzw. an der
-Textbox. In der Seitenverwaltung sind die Bearbeitungswerkzeuge ausgeblendet.
+Textbox. Nach der Schriftwahl kehrt der Fokus an die bisherige Cursorposition
+im Textfeld zurück. Ein weiterer Klick ins Dokument im Textwerkzeug erstellt
+ein neues, direkt ausgewähltes Textfeld mit Formatierungsleiste; ein vorheriges
+leeres Feld wird dabei entfernt, ohne die neue Auswahl zu verlieren.
+In der Seitenverwaltung sind die Bearbeitungswerkzeuge ausgeblendet.
 
 ### Vorhandene Funktionen
 

@@ -98,7 +98,15 @@ const cases = [
   },
 ]
 try {
-  for (const test of cases) {
+  // Keep each CI step bounded as the font matrix grows; direct invocation still runs all cases.
+  const group = process.env.TEXTBOX_FONT_GROUP ?? 'all'
+  assert.ok(['all', 'standard', 'noto', 'additional'].includes(group), `Unknown font group: ${group}`)
+  const standard = new Set(['helvetica', 'times', 'courier'])
+  const chosenCases = cases.filter(test => group === 'all' ||
+    (group === 'standard' ? standard.has(test.font) : group === 'noto' ? test.font.startsWith('noto-') : !standard.has(test.font) && !test.font.startsWith('noto-')))
+  assert.ok(chosenCases.length > 0, 'Font regression group must not be empty')
+  console.log(`Font regression group: ${group} (${chosenCases.length} cases)`)
+  for (const test of chosenCases) {
     const page = await browser.newPage({ viewport: { width: 1600, height: 1400 }, acceptDownloads: true })
     page.on('pageerror', (e) => errors.push(String(e)))
     const pdf = await PDFDocument.create()

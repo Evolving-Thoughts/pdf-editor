@@ -1,6 +1,6 @@
 import './fonts.css'
 import { fontSupportsItalic } from '../core/fonts'
-import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react'
+import { useCallback, useEffect, useLayoutEffect, useRef, useState, type Dispatch, type SetStateAction } from 'react'
 import { moveTextbox, removeTextbox, updateTextbox } from '../core/commands'
 import type { EditorStore } from '../core/editorStore'
 import { isTextbox, patchOverlay, type OverlayFont, type Textbox } from '../core/model'
@@ -168,7 +168,7 @@ interface TextboxViewProps {
   selected: boolean
   tool: Tool
   store: EditorStore
-  onSelect: (id: string | null) => void
+  onSelect: Dispatch<SetStateAction<string | null>>
 }
 
 export function TextboxView({ box, zoom, pageHeightPts, selected, tool, store, onSelect }: TextboxViewProps) {
@@ -253,7 +253,9 @@ export function TextboxView({ box, zoom, pageHeightPts, selected, tool, store, o
       // minibar (e.g. to set the font size first) must keep the empty box.
       if (removeIfEmpty) {
         store.dispatch(removeTextbox(box))
-        onSelect(null)
+        // A new textbox may already own the selection when its autofocus blurs us.
+        // Cleanup can only clear our own selection, never the newer one.
+        onSelect(current => current === box.id ? null : current)
       }
       return
     }
@@ -323,6 +325,8 @@ export function TextboxView({ box, zoom, pageHeightPts, selected, tool, store, o
               onChange={(event) => {
                 const font = event.target.value as OverlayFont
                 store.dispatch(updateTextbox(box.id, { font: box.font, italic: box.italic }, { font, italic: box.italic && fontSupportsItalic(font) }))
+                // Continue typing at the existing caret after committing the font choice.
+                textareaRef.current?.focus({ preventScroll: true })
               }}
             >
               {FONT_OPTIONS.map((option) => (

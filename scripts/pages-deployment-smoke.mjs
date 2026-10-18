@@ -87,6 +87,8 @@ try {
   await page.keyboard.type('Pages Overlay')
   await page.keyboard.press('Escape')
   await page.getByRole('combobox', { name: 'Schriftart', exact: true }).selectOption('eb-garamond')
+  assert.equal(await page.locator('.textbox textarea').evaluate(el => el === document.activeElement), true, 'Font selection returns typing focus in the production build')
+  await page.keyboard.type(' Font')
   await page.evaluate(() => document.fonts.ready)
   await button('Exportieren').click()
   assert.equal(await page.getByRole('checkbox', { name: /Bilddaten komprimieren/ }).isChecked(), false)
@@ -95,7 +97,7 @@ try {
   assert.equal((await PDFDocument.load(plain)).getForm().getTextField('Name').getText(), 'Grace')
   await upload(plain, 'roundtrip.pdf')
   await ready()
-  await search('Pages Overlay')
+  await search('Pages Overlay Font')
   await search('Pages fixture')
 
   // A fresh navigation forces lazy encryption code to load from the built subpath.
