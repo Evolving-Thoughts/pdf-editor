@@ -72,8 +72,14 @@ try {
   }
   if (!ready) throw new Error('QA server did not become ready')
   const browser = chromiumPath()
+  const textboxSuites = {
+    'textbox-export-standard-smoke': 'standard',
+    'textbox-export-noto-smoke': 'noto',
+    'textbox-export-additional-smoke': 'additional',
+  }
   const scripts = [
     'smoke',
+    'textbox-focus-smoke',
     'drawing-smoke',
     'toolbar-smoke',
     'editor-layout-smoke',
@@ -81,11 +87,12 @@ try {
     'image-rotation-smoke',
     'shapes-smoke',
     'shapes-repeat-smoke',
-    'textbox-export-position-smoke',
+    ...Object.keys(textboxSuites),
     'manual-save-smoke',
     'a4-smoke',
     'page-import-forms-smoke',
     'pages-edges-smoke',
+    'bugs-smoke',
     'pages-selection-smoke',
     'pages-smoke',
     'thumbnails-smoke',
@@ -99,7 +106,10 @@ try {
   for (const name of scripts) {
     const out = join(root, name)
     mkdirSync(out, { recursive: true })
-    await run(name, process.execPath, [`scripts/${name}.mjs`], {
+    const fontGroup = textboxSuites[name]
+    const script = fontGroup ? 'textbox-export-position-smoke' : name
+    await run(name, process.execPath, [`scripts/${script}.mjs`], {
+      TEXTBOX_FONT_GROUP: fontGroup ?? 'all',
       SMOKE_URL: url,
       CHROMIUM_PATH: browser,
       SMOKE_ARTIFACT_DIR: out,

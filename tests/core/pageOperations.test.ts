@@ -221,3 +221,21 @@ test('form fields with no visible widget retain their values during page operati
   const out = await PDFDocument.load(await composePages(bytes, [], [{ ...plan[0], rotation: 90 }]))
   expect(out.getForm().getTextField('hidden.total').getText()).toBe('42')
 })
+
+test('top-only A4 crop exports the same physical width at every rotation and UserUnit', async () => {
+  const { EditorStore } = await import('../../src/core/editorStore')
+  const { cropPage, A4_WIDTH, A4_HEIGHT } = await import('../../src/core/pages')
+  for (const rotation of [0, 90, 180, 270]) {
+    const doc = await PDFDocument.create(), rotated = rotation % 180 !== 0
+    const page = doc.addPage([500, 500])
+    page.setCropBox(12, 17, (rotated ? A4_HEIGHT : A4_WIDTH) / 2, (rotated ? A4_WIDTH : A4_HEIGHT) / 2)
+    page.setRotation(degrees(rotation)); page.node.set(PDFName.of('UserUnit'), PDFNumber.of(2))
+    const bytes = await doc.save(), store = new EditorStore()
+    store.state.pages = await inspectPages(bytes, 'original')
+    store.dispatch(cropPage(store.state, store.state.pages[0].id, { left: 0, right: 0, bottom: 0, top: A4_HEIGHT / 3 }))
+    const output = await composePages(bytes, [], store.state.pages!)
+    const [exported] = await inspectPages(output, 'result')
+    expect(pageSize(exported).width).toBeCloseTo(A4_WIDTH, 7)
+    expect(pageSize(exported).height).toBeCloseTo(A4_HEIGHT * 2 / 3, 7)
+  }
+})

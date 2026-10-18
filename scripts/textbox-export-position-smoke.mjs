@@ -61,6 +61,32 @@ const cases = [
   { name: 'zoom-double', font: 'helvetica', zoom: 2 },
   { name: 'times', font: 'times', zoom: 1 },
   { name: 'courier', font: 'courier', zoom: 1 },
+  { name: 'noto-sans-False-False', font: 'noto-sans', zoom: 1, bold: false, italic: false },
+  { name: 'noto-sans-True-False', font: 'noto-sans', zoom: 1, bold: true, italic: false },
+  { name: 'noto-sans-False-True', font: 'noto-sans', zoom: 1, bold: false, italic: true },
+  { name: 'noto-sans-True-True', font: 'noto-sans', zoom: 1, bold: true, italic: true },
+  { name: 'noto-serif-False-False', font: 'noto-serif', zoom: 1, bold: false, italic: false },
+  { name: 'noto-serif-True-False', font: 'noto-serif', zoom: 1, bold: true, italic: false },
+  { name: 'noto-serif-False-True', font: 'noto-serif', zoom: 1, bold: false, italic: true },
+  { name: 'noto-serif-True-True', font: 'noto-serif', zoom: 1, bold: true, italic: true },
+  { name: 'carlito-regular', font: 'carlito', zoom: 1, bold: false, italic: false, text: 'Grüße Würzburg ÄÖÜ ß' },
+  { name: 'carlito-bold', font: 'carlito', zoom: 1, bold: true, italic: false, text: 'Grüße Würzburg ÄÖÜ ß' },
+  { name: 'carlito-regular-italic', font: 'carlito', zoom: 1, bold: false, italic: true, text: 'Grüße Würzburg ÄÖÜ ß' },
+  { name: 'carlito-bold-italic', font: 'carlito', zoom: 1, bold: true, italic: true, text: 'Grüße Würzburg ÄÖÜ ß' },
+  { name: 'lato-regular', font: 'lato', zoom: 1, bold: false, italic: false, text: 'Grüße Würzburg ÄÖÜ ß' },
+  { name: 'lato-bold', font: 'lato', zoom: 1, bold: true, italic: false, text: 'Grüße Würzburg ÄÖÜ ß' },
+  { name: 'lato-regular-italic', font: 'lato', zoom: 1, bold: false, italic: true, text: 'Grüße Würzburg ÄÖÜ ß' },
+  { name: 'lato-bold-italic', font: 'lato', zoom: 1, bold: true, italic: true, text: 'Grüße Würzburg ÄÖÜ ß' },
+  { name: 'eb-garamond-regular', font: 'eb-garamond', zoom: 1, bold: false, italic: false, text: 'Grüße Würzburg ÄÖÜ ß' },
+  { name: 'eb-garamond-bold', font: 'eb-garamond', zoom: 1, bold: true, italic: false, text: 'Grüße Würzburg ÄÖÜ ß' },
+  { name: 'eb-garamond-regular-italic', font: 'eb-garamond', zoom: 1, bold: false, italic: true, text: 'Grüße Würzburg ÄÖÜ ß' },
+  { name: 'eb-garamond-bold-italic', font: 'eb-garamond', zoom: 1, bold: true, italic: true, text: 'Grüße Würzburg ÄÖÜ ß' },
+  { name: 'roboto-mono-regular', font: 'roboto-mono', zoom: 1, bold: false, italic: false, text: 'Grüße Würzburg ÄÖÜ ß' },
+  { name: 'roboto-mono-bold', font: 'roboto-mono', zoom: 1, bold: true, italic: false, text: 'Grüße Würzburg ÄÖÜ ß' },
+  { name: 'roboto-mono-regular-italic', font: 'roboto-mono', zoom: 1, bold: false, italic: true, text: 'Grüße Würzburg ÄÖÜ ß' },
+  { name: 'roboto-mono-bold-italic', font: 'roboto-mono', zoom: 1, bold: true, italic: true, text: 'Grüße Würzburg ÄÖÜ ß' },
+  { name: 'caveat-regular', font: 'caveat', zoom: 1, bold: false, italic: false, text: 'Grüße Würzburg ÄÖÜ ß' },
+  { name: 'caveat-bold', font: 'caveat', zoom: 1, bold: true, italic: false, text: 'Grüße Würzburg ÄÖÜ ß' },
   { name: 'bold-italic', font: 'helvetica', zoom: 1, bold: true, italic: true },
   { name: 'multiline', font: 'helvetica', zoom: 1, text: 'HgE Korrektur\nHgE zweite Zeile' },
   {
@@ -72,7 +98,15 @@ const cases = [
   },
 ]
 try {
-  for (const test of cases) {
+  // Keep each CI step bounded as the font matrix grows; direct invocation still runs all cases.
+  const group = process.env.TEXTBOX_FONT_GROUP ?? 'all'
+  assert.ok(['all', 'standard', 'noto', 'additional'].includes(group), `Unknown font group: ${group}`)
+  const standard = new Set(['helvetica', 'times', 'courier'])
+  const chosenCases = cases.filter(test => group === 'all' ||
+    (group === 'standard' ? standard.has(test.font) : group === 'noto' ? test.font.startsWith('noto-') : !standard.has(test.font) && !test.font.startsWith('noto-')))
+  assert.ok(chosenCases.length > 0, 'Font regression group must not be empty')
+  console.log(`Font regression group: ${group} (${chosenCases.length} cases)`)
+  for (const test of chosenCases) {
     const page = await browser.newPage({ viewport: { width: 1600, height: 1400 }, acceptDownloads: true })
     page.on('pageerror', (e) => errors.push(String(e)))
     const pdf = await PDFDocument.create()
@@ -126,6 +160,8 @@ try {
       await page.getByRole('button', { name: '⬚ Auswahl', exact: true }).click()
       await page.locator('.textbox .drag-surface').first().click()
     }
+    await page.evaluate(() => document.fonts.ready)
+    await page.waitForTimeout(100) // Font completion remeasures the textarea baseline.
     // Only glyph paint is compared; the edit minibar is outside document content.
     await page.addStyleTag({ content: '.minibar { visibility: hidden; }' })
     const before = await glyphBounds(page, await capture(page, test.name + '-editor-before.png', test.zoom))
@@ -196,7 +232,7 @@ try {
     await page.getByText('baked-position.pdf · 1 Seite', { exact: true }).waitFor()
     await page.waitForFunction((zoom) => {
       const c = document.querySelector('.page canvas')
-      if (!c?.width) return false
+      if (!c?.width || c.dataset.renderState !== 'ready') return false
       const d = c.getContext('2d').getImageData(200 * zoom, 380 * zoom, 150 * zoom, 60 * zoom).data
       return d.some((v, i) => i % 4 !== 3 && v < 100)
     }, test.zoom)

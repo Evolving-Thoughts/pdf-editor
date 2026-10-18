@@ -8,6 +8,10 @@ import {
   rotatePage,
   cropPage,
   pageSize,
+  pagePreviewSize,
+  commonPreviewScale,
+  A4_WIDTH,
+  A4_HEIGHT,
   type DocumentPage,
 } from '../../src/core/pages'
 import { addTextbox } from '../../src/core/commands'
@@ -180,3 +184,24 @@ test('unsupported XFA page edits fail before changing editor state', () => {
   expect(() => deletePage(store.state, 'a')).toThrow('XFA-Formulare')
   expect(store.state).toEqual(before)
 })
+
+for (const rotation of [0, 90, 180, 270] as const) {
+  test(`top-only crop preserves A4 width and preview scale at rotation ${rotation}, including repeated crop and undo`, () => {
+    const store = new EditorStore(), rotated = rotation % 180 !== 0
+    store.state.pages = [{ ...pages()[0], box: { x: 23, y: 41,
+      width: (rotated ? A4_HEIGHT : A4_WIDTH) / 2,
+      height: (rotated ? A4_WIDTH : A4_HEIGHT) / 2 }, unit: 2, rotation }]
+    const original = structuredClone(store.state.pages[0])
+    const before = pageSize(original), available = { width: 800, height: 650 }
+    const initialScale = commonPreviewScale([pagePreviewSize(original)], available)
+    for (const top of [before.height / 3, 20]) {
+      store.dispatch(cropPage(store.state, original.id, { left: 0, right: 0, bottom: 0, top }))
+      expect(pageSize(store.state.pages![0]).width).toBeCloseTo(A4_WIDTH, 7)
+      expect(commonPreviewScale([pagePreviewSize(store.state.pages![0])], available)).toBe(initialScale)
+    }
+    store.undo(); store.undo()
+    expect(store.state.pages![0]).toEqual(original)
+    store.redo()
+    expect(pageSize(store.state.pages![0]).height).toBeCloseTo(before.height * 2 / 3, 7)
+  })
+}

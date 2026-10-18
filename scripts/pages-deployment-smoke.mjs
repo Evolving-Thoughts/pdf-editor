@@ -71,6 +71,11 @@ try {
   field.setText('Ada')
   field.addToPage(sheet, { x: 50, y: 600, width: 200, height: 30 })
   const bytes = await doc.save()
+  for (const font of ['noto-sans', 'noto-serif', 'carlito', 'lato', 'eb-garamond', 'roboto-mono', 'caveat']) {
+    const response = await page.request.get(`${origin}${prefix}licenses/fonts/${font}.txt`)
+    assert.equal(response.status(), 200, `${font} license is distributed`)
+    assert.match(await response.text(), /SIL OPEN FONT LICENSE Version 1.1/)
+  }
   await page.goto(origin + prefix)
   assert.equal(await page.locator('link[rel=icon]').getAttribute('href'), `${prefix}favicon.svg`)
   await upload(bytes, 'pages.pdf')
@@ -81,6 +86,10 @@ try {
   await page.locator('.pages .page').first().click({ position: { x: 100, y: 350 } })
   await page.keyboard.type('Pages Overlay')
   await page.keyboard.press('Escape')
+  await page.getByRole('combobox', { name: 'Schriftart', exact: true }).selectOption('eb-garamond')
+  assert.equal(await page.locator('.textbox textarea').evaluate(el => el === document.activeElement), true, 'Font selection returns typing focus in the production build')
+  await page.keyboard.type(' Font')
+  await page.evaluate(() => document.fonts.ready)
   await button('Exportieren').click()
   assert.equal(await page.getByRole('checkbox', { name: /Bilddaten komprimieren/ }).isChecked(), false)
   assert.equal(await page.getByRole('checkbox', { name: /Mit Passwort schützen/ }).isChecked(), false)
@@ -88,7 +97,7 @@ try {
   assert.equal((await PDFDocument.load(plain)).getForm().getTextField('Name').getText(), 'Grace')
   await upload(plain, 'roundtrip.pdf')
   await ready()
-  await search('Pages Overlay')
+  await search('Pages Overlay Font')
   await search('Pages fixture')
 
   // A fresh navigation forces lazy encryption code to load from the built subpath.
@@ -123,6 +132,8 @@ try {
   await page.waitForLoadState('networkidle')
   assert.ok(requests.some(url => url.includes(`${prefix}assets/pdf.worker`)), 'Production PDF.js worker loaded')
   const js = new Set(requests.filter(url => new URL(url).pathname.endsWith('.js')))
+  assert.ok(requests.some(url => url.includes('eb-garamond') && url.endsWith('.woff')), 'Bundled EB Garamond font loaded below project prefix')
+  assert.ok(requests.some(url => url.includes('fontkit')), 'Lazy PDF font embedding chunk loaded')
   assert.ok(js.size >= 2, 'Main and lazy encryption chunks loaded')
   assert.ok(requests.filter(url => /^https?:/.test(url)).every(url => new URL(url).origin === origin && new URL(url).pathname.startsWith(prefix)), 'All network resources remain local and below the project prefix')
   assert.deepEqual(failed, [], 'No missing production assets')

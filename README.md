@@ -99,7 +99,11 @@ Die Oberfläche trennt Dateiaktionen und Navigation von den Bearbeitungswerkzeug
 
 Auf schmalen Bildschirmen umbrechen die Gruppen. Die Werkzeugoptionen erscheinen
 weiterhin kontextbezogen in den vorhandenen verschiebbaren Paletten bzw. an der
-Textbox. In der Seitenverwaltung sind die Bearbeitungswerkzeuge ausgeblendet.
+Textbox. Nach der Schriftwahl kehrt der Fokus an die bisherige Cursorposition
+im Textfeld zurück. Ein weiterer Klick ins Dokument im Textwerkzeug erstellt
+ein neues, direkt ausgewähltes Textfeld mit Formatierungsleiste; ein vorheriges
+leeres Feld wird dabei entfernt, ohne die neue Auswahl zu verlieren.
+In der Seitenverwaltung sind die Bearbeitungswerkzeuge ausgeblendet.
 
 ### Vorhandene Funktionen
 
@@ -155,8 +159,23 @@ Inhalte enthalten: **Nur die geprüfte exportierte Kopie weitergeben.**
 XFA-Bearbeitung, PDF-JavaScript, Formularberechnungen, OCR und neue kryptografische
 Signaturen gehören nicht zum MVP. Nicht unterstützte Formularbestandteile werden
 nicht ausgeführt; vorhandene XFA-Daten werden, soweit vom Exportpfad unterstützt,
-erhalten. Schriftwahl und Unicode sind durch die unterstützten Standardfonts
-begrenzt; zusätzliche eingebettete Open-Source-Fonts sind noch offen.
+erhalten. Neben Helvetica, Times und Courier stehen **Noto Sans**, **Noto Serif**,
+**Carlito**, **Lato**, **EB Garamond**, **Roboto Mono** und **Caveat** zur Verfügung.
+Alle bieten Normal und Fett; bis auf Caveat auch Kursiv und Fett-Kursiv.
+Caveat hat keinen nativen kursiven Schnitt: Beim Wechsel zu Caveat wird Kursiv
+im selben Undo-Schritt ausgeschaltet, und die Kursiv-Schaltfläche ist deaktiviert.
+Die Latin-Schriften (inklusive deutscher Umlaute und ß) werden über die
+Fontsource-Pakete lokal gebündelt. Alle sieben Fontsource-Schriftfamilien stehen
+unter der **SIL Open Font License 1.1**; die unveränderten Copyright- und
+Lizenztexte liegen unter [public/licenses/fonts](public/licenses/fonts) und
+werden im statischen Build unter `licenses/fonts/` mit ausgeliefert.
+Die OFL erlaubt auch kommerzielle Nutzung, Software-Bündelung und
+PDF-Einbettung unter Beachtung ihrer Bedingungen. Erstellte PDF-Dokumente
+müssen dadurch nicht selbst unter die OFL gestellt werden.
+Browser-Vorschau und PDF-Export verwenden dieselben WOFF-Dateien; im PDF werden
+nur die benötigten Glyphen eingebettet. Es gibt keine Google-Fonts-Anfragen.
+Andere Schriftsysteme sind damit nicht abgedeckt; die Standardfonts bleiben
+auf ihre bisherige Zeichenauswahl beschränkt.
 Kompatibilität mit Acrobat, macOS Vorschau und eigenen realen Dokumenten bitte
 anhand der [manuellen Prüfliste](docs/T13-MVP-QA.md) prüfen.
 
@@ -196,3 +215,18 @@ npm run qa
 (Port 5235). Fixtures und QA-Artefakte sind nicht im Repository. Details,
 unabhängige Prüfbefehle und offene manuelle Kriterien:
 [docs/T13-MVP-QA.md](docs/T13-MVP-QA.md).
+
+### Seitenwahl und Zuschnitt
+
+Ein normaler Klick auf einen Seiteneintrag zeigt die Seite an und wählt sie
+allein für Aktionen aus. Checkboxen und Strg/⌘+Klick ändern einzelne Einträge,
+Shift+Klick wählt einen Bereich. Die Checkboxen bleiben sichtbar.
+Beim Zuschneiden nutzt das Formular die Seitenleiste ohne die übliche
+50%-Höhenbegrenzung; die Seitenliste wird dafür vorübergehend ausgeblendet.
+Die Vorschau behält die Größe der unbeschnittenen Seite als Maßstabsreferenz
+(auch bei weiterem Zuschnitt, Undo/Redo und gespeicherten Entwürfen).
+Ein reiner Zuschnitt oben/unten verändert nicht die physische Breite im Export.
+Das stärkste Bildkompressions-Preset heißt **Maximale Kompression**;
+Qualität und Auflösungsgrenzen bleiben unverändert.
+Die Eckgriffe beim Zuschneiden und Schwärzen zeigen wie beim Textmarker nur
+8 × 8 px große Kästchen; die unsichtbare Trefferfläche bleibt 44 × 44 px groß.

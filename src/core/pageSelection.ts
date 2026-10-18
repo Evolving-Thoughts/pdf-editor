@@ -15,6 +15,6 @@ export function selectPages(order: readonly string[], ids: readonly string[], an
     const checked = gesture.checked ?? !selected.has(target)
     return { ids: order.filter(id => id === target ? checked : selected.has(id)), anchor: target }
   }
-  // A plain title click previews the page without discarding checked pages.
-  return { ids: current, anchor: target }
+  // A plain click focuses and selects this page; modifiers/checkboxes build a multi-selection.
+  return { ids: [target], anchor: target }
 }

@@ -14,6 +14,8 @@ export interface DocumentPage {
   unit: number
   rotation: number
   cropped?: boolean
+  /** Pre-crop source box keeps the management preview at a stable physical scale. */
+  previewBox?: DocumentPage['box']
   /** Rebuilt solely from masked pixels; the original source remains only in local drafts/history. */
   redacted?: boolean
   /** Source contains native AcroForm fields; preserved on page operations/export. */
@@ -30,6 +32,10 @@ export function pageSize(page: DocumentPage) {
   return page.rotation % 180
     ? { width: height * page.unit, height: width * page.unit }
     : { width: width * page.unit, height: height * page.unit }
+}
+/** Cropping removes paper; it must not enlarge the remaining paper in the preview. */
+export function pagePreviewSize(page: DocumentPage) {
+  return pageSize(page.previewBox ? { ...page, box: page.previewBox } : page)
 }
 /** Match the preceding visible sheet, or the first sheet when inserting at the start. */
 export function insertionPageSize(pages: DocumentPage[], index: number) {
@@ -192,6 +198,7 @@ export function cropPage(state: EditorState, id: string, m: CropMargins): Comman
   const a = sourcePoint(page, m.left, m.bottom),
     b = sourcePoint(page, size.width - m.right, size.height - m.top)
   return pageCommand(state, 'Crop page', (next) => {
+    next.pages[index].previewBox ??= { ...page.box }
     next.pages[index].cropped = true
     next.pages[index].box = {
       x: Math.min(a.x, b.x),

@@ -1,8 +1,8 @@
 import { expect, test } from 'vitest'
 import { selectPages } from '../../src/core/pageSelection'
 const order = ['a', 'b', 'c', 'd', 'e']
-test('preview click changes range anchor but preserves the checked selection', () => {
-  expect(selectPages(order, ['a', 'e'], 'a', 'c')).toEqual({ ids: ['a', 'e'], anchor: 'c' })
+test('plain click focuses the target and replaces the checked selection', () => {
+  expect(selectPages(order, ['a', 'e'], 'a', 'c')).toEqual({ ids: ['c'], anchor: 'c' })
 })
 test('Ctrl/Meta toggle individual pages and checkbox changes preserve other checks', () => {
   expect(selectPages(order, ['a'], 'a', 'd', { toggle: true })).toEqual({ ids: ['a', 'd'], anchor: 'd' })

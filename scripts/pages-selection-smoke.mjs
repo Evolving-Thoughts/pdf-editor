@@ -89,7 +89,7 @@ try {
   }
   await p.setViewportSize({ width: 1280, height: 1100 })
   await rotationNames(1)
-  await title(2); assert.deepEqual(await checked(), [1])
+  await title(2); assert.deepEqual(await checked(), [2])
   await title(4, ['Shift']); assert.deepEqual(await checked(), [2, 3, 4])
   await title(15, ['Control']); assert.deepEqual(await checked(), [2, 3, 4, 15])
   await title(3, ['Control']); assert.deepEqual(await checked(), [2, 4, 15])

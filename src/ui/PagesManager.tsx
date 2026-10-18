@@ -13,6 +13,7 @@ import {
   insertionPageSize,
   movePage,
   pageSize,
+  pagePreviewSize,
   rotatePages,
   type CropMargins,
 } from '../core/pages'
@@ -82,7 +83,7 @@ export function PagesManager({ nativeWidgets = [], pdf, store, original, busy, o
   const size = page ? pageSize(page) : { width: 595, height: 842 }
   // A common scale makes physical dimensions comparable between selections.
   const shownSize = a4Open ? a4Size(size) : size
-  const scale = commonPreviewScale(pages.map(p => a4Open ? a4Size(pageSize(p)) : pageSize(p)), available)
+  const scale = commonPreviewScale(pages.map(p => a4Open ? a4Size(pageSize(p)) : pagePreviewSize(p)), available)
   const marginsFit = (m: CropMargins) =>
     Object.values(m).every((v) => Number.isFinite(v) && v >= 0) &&
     size.width - m.left - m.right >= 20 * MM - 1e-6 &&
@@ -108,7 +109,7 @@ export function PagesManager({ nativeWidgets = [], pdf, store, original, busy, o
     if (!el) return
     const observer = new ResizeObserver((entries) => {
       const r = entries[0].contentRect
-      setAvailable({ width: r.width, height: Math.max(420, r.height) })
+      setAvailable({ width: r.width, height: Math.max(1, r.height) })
     })
     observer.observe(el)
     return () => observer.disconnect()
@@ -146,7 +147,7 @@ export function PagesManager({ nativeWidgets = [], pdf, store, original, busy, o
       setCheckedIds(next.ids)
       anchor.current = next.anchor
     }
-    setMessage(activeCrop ? 'Offenen Zuschnitt verworfen.' : a4Open ? 'A4-Vorschau: Erst Anwenden verändert die Seiten.' : gesture.range || gesture.toggle || gesture.checked !== undefined ? 'Gemeinsame Seitenauswahl aktualisiert.' : 'Vorschau und Bereichsanker gewechselt; Auswahl unverändert.')
+    setMessage(activeCrop ? 'Offenen Zuschnitt verworfen.' : a4Open ? 'A4-Vorschau: Erst Anwenden verändert die Seiten.' : gesture.range || gesture.toggle || gesture.checked !== undefined ? 'Gemeinsame Seitenauswahl aktualisiert.' : 'Seite für Vorschau und Aktionen ausgewählt.')
   }
   const pageProps = {
     nativeWidgets,
@@ -274,7 +275,7 @@ export function PagesManager({ nativeWidgets = [], pdf, store, original, busy, o
     el.addEventListener('lostpointercapture', end)
   }
   return (
-    <section className="page-manager" aria-label="Seiten verwalten">
+    <section className={`page-manager${activeCrop ? ' cropping' : ''}`} aria-label="Seiten verwalten">
       <aside className="page-manager-panel">
         <div className="page-manager-controls">
         <h2>Seiten verwalten</h2>
@@ -371,7 +372,7 @@ export function PagesManager({ nativeWidgets = [], pdf, store, original, busy, o
               </button>
             </div>
             <small>
-              Nur sichtbarer Ausschnitt — keine sichere Schwärzung. Ein Seitenwechsel verwirft den offenen
+              Nur sichtbarer Ausschnitt — keine sichere Schwärzung. Abbrechen oder Esc verwirft den offenen
               Zuschnitt.
             </small>
           </div>
@@ -444,7 +445,7 @@ export function PagesManager({ nativeWidgets = [], pdf, store, original, busy, o
         <p className="page-manager-message" role="status">
           {busy ? 'Seitenansicht wird aktualisiert …' : working ? 'Datei wird verarbeitet …' : message}
         </p>
-        <small className="page-selection-help">Checkbox: auswählen · Klick: Vorschau/Anker.<br />Shift+Klick: Bereich · Strg/⌘+Klick: einzeln dazu/weg.</small>
+        <small className="page-selection-help">Klick: Vorschau und Auswahl · Checkbox: dazu/weg.<br />Shift+Klick: Bereich · Strg/⌘+Klick: einzeln dazu/weg.</small>
         </div>
         <div className="page-manager-list" aria-label="Seitenliste" role="region" tabIndex={0}>
           {pages.map((p, i) => (

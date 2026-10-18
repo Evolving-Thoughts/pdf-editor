@@ -3,7 +3,7 @@ import { RedactionView } from './RedactionView'
 import { createRedaction,replaceRedactions,type Redaction } from '../core/redactions'
 import type { NativeWidget } from '../core/forms'
 import { NativeFormLayer } from './NativeFormLayer'
-import { useEffect, useRef, useState, type ReactNode } from 'react'
+import { useEffect, useRef, useState, type ReactNode, type Dispatch, type SetStateAction } from 'react'
 import { resolvedOverlayClips } from '../core/overlayClipping'
 import { addShape, addStroke, addTextbox, replaceOverlays } from '../core/commands'
 import { eraseStrokes, strokeToSvgPath } from '../core/drawing'
@@ -34,7 +34,7 @@ interface PageViewProps {
   overlays: Overlay[]
   store: EditorStore
   selectedId: string | null
-  onSelect: (id: string | null) => void
+  onSelect: Dispatch<SetStateAction<string | null>>
   strokeColor?: string
   strokeWidth?: number
   onImageDrop: (file: File, pageIndex: number, point: StrokePoint) => void

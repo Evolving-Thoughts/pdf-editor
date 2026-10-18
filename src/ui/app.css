@@ -843,7 +843,7 @@
 .page-miniature .page { overflow: hidden; }
 .page-crop-layer { position: absolute; inset: 0; pointer-events: none; }
 .page-crop-frame { position: absolute; border: 2px solid var(--accent-border); box-sizing: border-box; background: #9344ff0a; }
-.page-manager .page-crop-grip { position: absolute; width: 24px; height: 24px; min-height: 24px; padding: 0; background: white; border: 2px solid var(--accent-border); border-radius: 2px; transform: translate(-50%,-50%); touch-action: none; pointer-events: auto; }
+.page-manager .page-crop-grip { position: absolute; width: 44px; height: 44px; min-height: 44px; padding: 0; background: transparent; border: 0; border-radius: 0; transform: translate(-50%,-50%); display: grid; place-items: center; touch-action: none; pointer-events: auto; }
 .page-crop-grip.tl { left: 0; top: 0; cursor: nwse-resize; }
 .page-crop-grip.tr { left: 100%; top: 0; cursor: nesw-resize; }
 .page-crop-grip.bl { left: 0; top: 100%; cursor: nesw-resize; }
@@ -921,8 +921,8 @@
 .redaction-confirm::backdrop{background:#211c3070}.redaction-confirm h2{font-size:20px}.redaction-confirm>div{display:flex;gap:8px}.redaction-confirm p{font-size:14px;line-height:1.5}.redaction-confirm button{flex:1}
 .redaction-overlay{position:absolute;box-sizing:border-box;border:2px dashed #9b43d5;background:#1118;touch-action:none;cursor:move;z-index:4}
 .redaction-overlay.white{background:#ffffffba}.redaction-overlay.selected{outline:1px solid #a65cff}.redaction-overlay.preview{border-style:solid}
-.redaction-grip{position:absolute;width:22px;height:22px;min-height:0;padding:0;border:2px solid #a65cff;background:white;border-radius:2px;touch-action:none}
-.redaction-grip.nw{left:-12px;top:-12px;cursor:nwse-resize}.redaction-grip.ne{right:-12px;top:-12px;cursor:nesw-resize}.redaction-grip.sw{left:-12px;bottom:-12px;cursor:nesw-resize}.redaction-grip.se{right:-12px;bottom:-12px;cursor:nwse-resize}
+.redaction-grip{position:absolute;width:44px;height:44px;min-height:0;padding:0;border:0;background:transparent;border-radius:0;touch-action:none;display:grid;place-items:center}
+.redaction-grip.nw{left:-22px;top:-22px;cursor:nwse-resize}.redaction-grip.ne{right:-22px;top:-22px;cursor:nesw-resize}.redaction-grip.sw{left:-22px;bottom:-22px;cursor:nesw-resize}.redaction-grip.se{right:-22px;bottom:-22px;cursor:nwse-resize}
 .page.redact-tool .textbox,.page.redact-tool .textbox *,.page.redact-tool .image-overlay,.page.redact-tool .image-overlay *,.page.redact-tool .shape-overlay,.page.redact-tool .shape-overlay *{pointer-events:none!important}
 .redaction-notice{font-size:12px;padding:6px 12px;margin:0;background:var(--accent-bg);flex-shrink:0}
 
@@ -1014,3 +1014,22 @@
 @media (max-width: 700px) {
   .page-manager-panel { width: 100%; }
 }
+
+/* Crop is a focused task: give its controls the sidebar instead of the 50% list cap. */
+.page-manager.cropping .page-manager-controls { max-height: 100%; }
+.page-manager.cropping .page-manager-list, .page-manager.cropping .page-selection-help { display: none; }
+.page-manager.cropping .page-form-info { display: none; }
+.page-manager.cropping .page-crop-controls .page-manager-actions { position: sticky; bottom: 0; background: var(--bg); padding: 6px 0; z-index: 1; }
+@media(max-width:700px) {
+  .page-manager.cropping .page-manager-panel { height: auto; max-height: none; }
+  .page-manager.cropping .page-manager-controls { max-height: none; overflow: visible; }
+  .page-manager.cropping .page-crop-controls > p, .page-manager.cropping .page-crop-controls > small,
+  .page-manager.cropping .page-manager-message { margin: 5px 0; font-size: 12px; line-height: 1.3; }
+}
+
+/* Match textmarker handles: small visible corners, generous pointer targets. */
+.page-manager .page-crop-grip::after, .redaction-grip::after {
+  content: ''; width: 8px; height: 8px; box-sizing: border-box;
+  border: 2px solid var(--accent); background: var(--bg); pointer-events: none;
+}
+.redaction-grip:focus-visible { outline: 2px solid var(--accent); border-radius: 4px; }
