@@ -1033,3 +1033,35 @@
   border: 2px solid var(--accent); background: var(--bg); pointer-events: none;
 }
 .redaction-grip:focus-visible { outline: 2px solid var(--accent); border-radius: 4px; }
+
+/* T16, approved sidebar/context layout. Review never hides following content. */
+.source-correction { display:grid; grid-template-columns:minmax(280px,350px) minmax(0,1fr); width:100%; align-items:start; background:var(--bg,#fff); }
+.source-editor { padding:20px; border-right:1px solid #ddd; background:var(--panel,#fff); }
+.source-editor h2,.source-context h2 { font-size:20px; margin:0 0 12px; }
+.source-editor p,.source-context>p { font-size:14px; line-height:1.5; }
+.source-editor label { display:block; margin:16px 0; font-size:14px; }
+.source-editor select,.source-editor textarea { display:block; width:100%; margin-top:6px; padding:10px; border:1px solid #aaa; border-radius:6px; font:inherit; background:inherit; color:inherit; }
+.source-editor textarea { min-height:150px; resize:vertical; }
+.source-editor .source-check { display:flex; gap:10px; align-items:start; }
+.source-check input { flex-shrink:0; width:20px; height:20px; }
+.source-editor button { min-height:44px; }
+.source-actions { display:flex; flex-wrap:wrap; gap:8px; }
+.source-context { min-width:0; padding:20px; background:#f4f2ec; color:#28232e; }
+.source-pdf-preview { max-width:100%; overflow:auto; padding:16px 0; }
+.source-pdf-preview canvas { display:block; max-width:100%; height:auto!important; background:white; box-shadow:0 2px 8px #0002; }
+@media(max-width:760px) { .source-correction { grid-template-columns:1fr; } .source-editor { border-right:0; border-bottom:1px solid #ddd; } .source-context { padding:16px; } }
+.source-zoom { display:flex; gap:12px; align-items:center; }
+.source-zoom button { min-width:44px; min-height:44px; }
+.source-editor button,.source-zoom button { border:1px solid var(--border,#aaa); padding:10px; border-radius:6px; background:var(--bg,#fff); color:var(--text-h,#262130); cursor:pointer; }
+.source-editor button:disabled,.source-zoom button:disabled { opacity:.5; cursor:not-allowed; }
+.source-editor button.export-button { background:#7936bb; color:white; }
+.source-editor [role=alert] { padding:12px; border:1px solid #b3293d; border-radius:6px; }
+.source-correction { height:100%; overflow:auto; }
+.source-editor { background:var(--bg,#fff); }
+.source-context h2 { color:#28232e; }
+.source-correction { text-align:left; align-items:stretch; }
+.source-correction * { box-sizing:border-box; }
+.source-editor { overflow:auto; }
+.source-editor select,.source-editor textarea { max-width:100%; }
+.source-context { overflow:auto; }
+.source-context>button { min-height:44px; padding:8px 12px; border:1px solid #aaa; background:white; color:#28232e; border-radius:6px; margin-bottom:12px; }

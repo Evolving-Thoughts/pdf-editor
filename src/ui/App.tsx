@@ -1,3 +1,4 @@
+import { SourceTextPanel } from './SourceTextPanel'
 import { ExportDialog, type PreparedExport } from './ExportDialog'
 import { compressPdf, checkExportAbort, type CompressionPreset } from '../core/pdf/compressPdf'
 import { encodeCompressedImage } from '../core/images/compressImage'
@@ -66,6 +67,7 @@ function draftSummary(record: DraftRecord): DraftSummary {
 }
 
 export default function App() {
+  const [sourceTextOpen, setSourceTextOpen] = useState(false)
   const [exportDialogOpen, setExportDialogOpen] = useState(false)
   const [exportBusy, setExportBusy] = useState(false)
   const [searchOpen, setSearchOpen] = useState(false)
@@ -302,6 +304,7 @@ export default function App() {
       const previous = pdfRef.current
       pdfRef.current = next
       draftRef.current = draft
+      setSourceTextOpen(false)
       setActiveDraftId(draft.id)
       setManualSave(null)
       manualSaveRequestRef.current = null
@@ -568,7 +571,7 @@ export default function App() {
     const onKeyDown = (event: KeyboardEvent) => {
       const target = event.target as HTMLElement
       if (target.closest('dialog')) return
-      if (loadingDraftId || exportBusy || openingFile || redactionBusy || pageBusy || (pageManagerOpen && cropActive)) return
+      if (sourceTextOpen || loadingDraftId || exportBusy || openingFile || redactionBusy || pageBusy || (pageManagerOpen && cropActive)) return
       if (pdf && (event.ctrlKey || event.metaKey) && event.key.toLowerCase()==='f') {
         event.preventDefault();setPageManagerOpen(false);setSelectedId(null);setSearchOpen(true);return
       }
@@ -632,7 +635,7 @@ export default function App() {
     }
     window.addEventListener('keydown', onKeyDown)
     return () => window.removeEventListener('keydown', onKeyDown)
-  }, [store, selectedId, zoom, pageBusy, pageManagerOpen, cropActive, redactionBusy, openingFile, exportBusy, loadingDraftId, pdf])
+  }, [sourceTextOpen, store, selectedId, zoom, pageBusy, pageManagerOpen, cropActive, redactionBusy, openingFile, exportBusy, loadingDraftId, pdf])
 
   const onSearchJump = useCallback(
     (hit: SearchHit) => {
@@ -858,6 +861,7 @@ export default function App() {
                   aria-pressed={pageManagerOpen}
                   disabled={pageBusy || redactions.length > 0}
                   onClick={() => {
+                    setSourceTextOpen(false)
                     setSearchOpen(false)
                     setSelectedId(null)
                     setCropActive(false)
@@ -874,6 +878,7 @@ export default function App() {
                   disabled={pageBusy || cropActive}
                   aria-pressed={searchOpen}
                   onClick={() => {
+                    setSourceTextOpen(false)
                     setPageManagerOpen(false)
                     setSelectedId(null)
                     setSearchOpen((open) => !open)
@@ -902,6 +907,7 @@ export default function App() {
                   </div>
                 )}
               </div>
+              {!pageManagerOpen && <button aria-label="Originaltext korrigieren" title="Originaltext in derselben Schrift korrigieren" disabled={pageBusy || cropActive || !!redactions.length} aria-pressed={sourceTextOpen} onClick={() => { setPageManagerOpen(false); setSearchOpen(false); setSelectedId(null); setTool('select'); setSourceTextOpen(value => !value) }}>Textkorrektur</button>}
               <div
                 className="toolbar-history"
                 role="group"
@@ -964,7 +970,7 @@ export default function App() {
             </>
           )}
         </div>
-        {pdf && !pageManagerOpen && (
+        {pdf && !pageManagerOpen && !sourceTextOpen && (
           <div
             className="toolbar-tools"
             role="group"
@@ -1140,7 +1146,8 @@ export default function App() {
       <div className="workspace" ref={workspaceRef} inert={exportDialogOpen || redactionBusy || openingFile || exportBusy || !!loadingDraftId}>
         {pdf && searchOpen && !pageManagerOpen && !pageBusy && <SearchWindow pdf={pdf} overlays={overlays} onClose={closeSearch} onHits={onSearchHits} onJump={onSearchJump}/>}
         {pdf && pageManagerOpen && originalBytes && <PagesManager nativeWidgets={nativeWidgets} key={activeDraftId} pdf={pdf} store={store} original={originalBytes} busy={pageBusy} onCropActive={setCropActive} />}
-        {!pageManagerOpen && <>
+        {pdf && sourceTextOpen && originalBytes && !pageBusy && <SourceTextPanel key={activeDraftId} store={store} original={originalBytes} onClose={() => setSourceTextOpen(false)} />}
+        {!pageManagerOpen && !sourceTextOpen && <>
         {pageBusy && <p role="status" className="hint">Seitenansicht wird aktualisiert …</p>}
         {pdf && !pageBusy && (
           <DrawingToolbar workspaceRef={workspaceRef} tool={tool} color={strokeColor} width={strokeWidth}
@@ -1183,7 +1190,7 @@ export default function App() {
       </div>
       {exportDialogOpen && <ExportDialog onCancel={()=>setExportDialogOpen(false)} onPrepare={prepareExport} onDownload={downloadExport}/> }
       {passwordRequest && <PasswordDialog key={passwordEpoch.current} request={passwordRequest}/>}
-      {pdf && !pageManagerOpen && !pageBusy && (
+      {pdf && !pageManagerOpen && !sourceTextOpen && !pageBusy && (
         <footer
           className="drawing-footer"
           inert={

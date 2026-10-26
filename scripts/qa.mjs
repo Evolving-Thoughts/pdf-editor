@@ -80,6 +80,7 @@ try {
   const scripts = [
     'smoke',
     'textbox-focus-smoke',
+    'source-text-smoke',
     'drawing-smoke',
     'toolbar-smoke',
     'editor-layout-smoke',
