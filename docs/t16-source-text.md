@@ -27,25 +27,49 @@ comparison, cancellation and rejection do not modify the document or draft.
 
 ## Supported subset and explicit refusals
 
-- Horizontal, unrotated, text-only PDFs with explicit font and identity text
-  matrix, supported colour operations and balanced graphics/text states.
-- The 12 standard Helvetica/Times/Courier Type1 WinAnsi variants.
-- Verified embedded TrueType/CIDFontType2 subsets using Type0 Identity-H, a fully
-  consumed supported bfchar ToUnicode CMap, explicit/Identity CIDToGID mapping and
-  valid widths. Check the actual font program, referenced non-.notdef glyphs and
-  outlines, not just a claimed Unicode map. Reuse ORIGINAL codes/resources.
-- ASCII, German umlauts/ß/ẞ and supported punctuation, only when the original
-  encoding contains the required unambiguous glyph. No raw UTF-8 PDF strings,
-  substitute font, question-mark replacement, compression or shrinking.
-- No shaping/ligature reconstruction, TJ positioning arrays, custom spacing,
-  unsupported transformations, ambiguous maps, CFF/Type3/simple custom fonts,
-  inherited CMaps/bfrange, scans/OCR, forms, tagged PDFs, active actions or shared
-  content streams. These fail closed; this is not universal PDF text editing.
-- Any unsupported graphics/image operation or unknown resource rejects analysis;
-  the engine does not pretend text-only extraction proves surrounding space free.
-- Editor pages with user overlays, pending/applied redactions, manual crop,
-  rotation or non-unit UserUnit are refused. These are deliberate safety limits,
-  not silently ignored objects. Existing ordinary editing remains available.
+The original uniform text-block adapter is retained for proved paragraph reflow.
+A second, page-scoped adapter handles ordinary mixed-content PDFs without
+requiring all pages/resources to use that same narrow grammar.
+
+- The 12 standard Helvetica/Times/Courier Type1 WinAnsi variants, verified
+  embedded TrueType/CIDFontType2 subsets (Type0 Identity-H) and embedded one-byte
+  TrueType/WinAnsi subsets. Actual glyph programs, widths and code mappings are
+  checked. No extracted font is installed, bundled or substituted.
+- Bounded, fully consumed bfchar and bfrange ToUnicode mappings (sequential and
+  array destinations). Ligature mappings may be decoded/preserved as obstacles,
+  but are not reconstructed into editable glyph sequences.
+- Horizontal source correction supports Tj/TJ, explicit/relative Tm/Td/TD/T*,
+  existing character/word spacing and simple text state. Original kerning is
+  retained for unchanged prefix/suffix pairs, never reassigned to new pairs or
+  squeezed to fit. The original post-show text matrix is restored so a shorter
+  or longer replacement does not unexpectedly move other positioned fragments.
+- Unchanged marked-content tags/MCIDs and the existing structure tree are kept.
+  ActualText/expansion caches are refused with an explicit reason because they
+  would need a synchronized semantic update. This is not accessibility repair.
+- Images, Form XObjects, vector paths and link rectangles are preserved and
+  conservatively treated as protected obstacles. Form contents are not edited;
+  their transformed BBox protects the complete form. Unknown painting, complex
+  clipping/transparency, inline images, font/shaping states and unproved metrics
+  fail closed **on the selected page**, with a concrete reason/operator/page.
+- A blank unembedded WinAnsi space-only font may be preserved using its declared
+  width; it is never offered as editable text. No other glyph is invented.
+- Unshared content refs are replaced in place, not left as orphaned old text.
+  Shared content uses copy-on-write so unrelated pages stay unchanged.
+- ASCII, German umlauts/ß/ẞ and supported punctuation are editable only when the
+  original encoding contains the required unambiguous glyph. No raw UTF-8 PDF
+  strings, fallback font, shrinking, horizontal squeezing or font-menu dependency.
+- Forms/signatures/encryption, CFF/Type3, unsupported CMaps, unproved transforms,
+  scans/OCR and unknown selected-page operators remain explicit refusal cases.
+- Editor pages with overlays, redactions, manual crop, rotation or non-unit
+  UserUnit still require separate preservation support; ordinary editing remains
+  available. Document-level signature/form/semantic safety checks still apply.
+
+**Important distinction:** a Word-produced line may consist of many independent
+positioned fragments, sometimes in different font subsets. Supported fragments
+can be corrected without rejecting the PDF as a whole. They are not automatically
+merged into a paragraph. The existing proved uniform paragraph model below is
+still required for reflow; a user checkbox alone does not prove reconstruction.
+New text must fit without reducing protected separation from other fragments.
 
 ## Paragraph model and protected space
 
@@ -81,6 +105,8 @@ A complete paragraph must fit; partial edits are never returned/applied.
 - `streams.ts`: native streaming Flate decompression with output limits; no
   unbounded library inflate or stacked/unknown filters.
 - `sourceFonts.ts`: standard-font metrics and actual embedded-font/CMap proofs.
+- `mixedPdf.ts`: selected-page mixed-content interpreter, original TJ/font-state
+  correction, protected graphics/link bounds, copy-on-write and candidate checks.
 - `simplePdf.ts`: conservative operator analysis, paragraph validation, collision
   checks, replacement of the original stream object, candidate save/reopen check.
 - `sourceText.worker.ts` / `client.ts`: one disposable dedicated worker per job,
@@ -91,7 +117,8 @@ A complete paragraph must fit; partial edits are never returned/applied.
   explicit review, original/candidate comparison and atomic commit guards.
 
 Bounds: input 16 MiB/200 pages; content streams 512 KiB compressed/decoded and
-2 MiB total decoded content; 4096 source runs; 50,000 lexer tokens per stream;
+2 MiB decoded content per selected mixed page (legacy: total); 4096 legacy /
+10,000 mixed source runs; 32 mixed fonts / 131,072 total mapped glyphs; 50,000 lexer tokens per stream;
 4096 input characters/256 planned lines; font program 4 MiB; CMap 256 KiB;
 CID/GID/width tables limited to 65,536 entries. Parser/font errors, stale revision
 (SHA-256 + run ID + expected text), document/page/input changes, worker failure,
@@ -106,7 +133,7 @@ server; workers process local copied buffers.
 
 ## Validation
 
-- 294 unit/integration tests, including real standard-font and embedded Noto Sans
+- 308 unit/integration tests, including real standard-font and embedded Noto Sans
   subset DE/EN correction, missing/ambiguous glyph refusals, actual paragraph
   growth/shrink/overflow, intentional breaks/hyphens, unchanged neighbour baseline,
   no retained old text stream, source copies, overlays, undo/redo, IndexedDB and
@@ -115,11 +142,24 @@ server; workers process local copied buffers.
   comparison, paragraph shrink, export, undo/redo, manual save/reopen, embedded
   subset, invalidated input, rejected overflow and document switch. Desktop and
   390px mobile screenshots, zoom and no horizontal document overflow.
+- `scripts/source-text-mixed-smoke.mjs`: selected page, tagged/TJ source,
+  worker/candidate/review/apply/export. Optional local-only `SOURCE_TEXT_PDF`,
+  `SOURCE_TEXT_FIND`, `SOURCE_TEXT_REPLACE` exercise a supplied file without
+  committing it, its text, or its embedded fonts. Additional unit regressions
+  cover images/paths/links, another unsupported page, relative positioning,
+  shared streams, no orphan old text, bfrange bounds and concrete refusals.
 - Registered in `npm run qa:ci`; existing shape/crop tests are retained. The new
   header action is compact and omitted in page management, so crop confirmation
   still fits at 320px without scrolling its controls.
 - Also test the STATIC Pages build under `/pdf-editor/`, including source-worker
   and fontkit assets, not merely the development module server.
+
+An eight-page supplied Word-style PDF was tested locally: editable fragments
+were found on all eight pages, and a real typo correction passed the browser,
+actual preview and independently extracted export. Independent MuPDF rendering
+of the source candidate left pages 1–7 pixel-identical and all image resources
+unchanged. This is evidence for that fixture, not a claim of universal support.
+The supplied document and extracted proprietary fonts are NOT in the repository.
 
 `prototypes/t16-correction-review.html` retains the original three synthetic UI
 variants as design history only. It is outside production entry points and is not

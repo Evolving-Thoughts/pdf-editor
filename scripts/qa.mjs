@@ -81,6 +81,7 @@ try {
     'smoke',
     'textbox-focus-smoke',
     'source-text-smoke',
+    'source-text-mixed-smoke',
     'drawing-smoke',
     'toolbar-smoke',
     'editor-layout-smoke',

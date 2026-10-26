@@ -50,7 +50,7 @@ export function SourceTextPanel({ store, original, onClose }: { store: EditorSto
     if (!page || !source || page.cropped || page.rotation !== 0 || page.unit !== 1 || page.redacted || store.state.redactions?.length || store.state.overlays.some(overlay => overlay.pageIndex === index)) {
       queueMicrotask(() => { if (!controller.signal.aborted) { setError('Diese Seite ist derzeit nicht unterstützt: Drehung, Zuschnitt, Schwärzungen oder Overlays verhindern eine sichere Originaltext-Korrektur.'); setBusy(false) } }); return () => controller.abort()
     }
-    void inspectSource(source, controller.signal).then(result => {
+    void inspectSource(source, controller.signal, page.sourceIndex).then(result => {
       if (controller.signal.aborted || epoch.current !== current) return
       const runs = result.runs.filter(value => value.pageIndex === page.sourceIndex)
       setAnalysis({ ...result, runs }); setSelected(runs[0]?.id ?? ''); setText(runs[0]?.text ?? '')

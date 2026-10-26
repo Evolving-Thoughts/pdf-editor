@@ -1,12 +1,12 @@
 /** Strict content lexer for the initial simple-text adapter, not a general PDF parser. */
-export interface ContentToken { kind: 'number' | 'name' | 'string' | 'operator'; raw: string; start: number; end: number; bytes?: Uint8Array }
+export interface ContentToken { kind: 'number' | 'name' | 'string' | 'operator' | 'array' | 'dict'; raw: string; start: number; end: number; bytes?: Uint8Array; items?: ContentToken[] }
 const whitespace = new Set(['\0', '\t', '\n', '\f', '\r', ' '])
 const white = (c: string) => whitespace.has(c)
 const delimiter = (c: string) => white(c) || '()<>[]{}/%'.includes(c)
 const bad = (): never => { throw new Error('Nicht unterstützte oder beschädigte PDF-Textstruktur.') }
 
-export function contentTokens(content: string): ContentToken[] {
-  if (content.length > 512 * 1024) bad()
+export function contentTokens(content: string, composite = false, level = 0): ContentToken[] {
+  if (level > 16 || content.length > 512 * 1024) bad()
   const tokens: ContentToken[] = []
   let i = 0
   while (i < content.length) {
@@ -16,6 +16,24 @@ export function contentTokens(content: string): ContentToken[] {
     const start = i
     const first = content[i++]
     let kind: ContentToken['kind'], bytes: Uint8Array | undefined
+    if (composite && (first === '[' || (first === '<' && content[i] === '<'))) {
+      const dict = first === '<', endMark = dict ? '>>' : ']'
+      if (dict) i++
+      const bodyStart = i
+      // Find the closing delimiter through the same lexer, respecting strings.
+      let cursor = i, nesting = 1
+      while (cursor < content.length && nesting) {
+        if (content[cursor] === '%') { while (cursor < content.length && !/[\r\n]/.test(content[cursor])) cursor++; continue }
+        if (content[cursor] === '(') { let d = 1; cursor++; while (cursor < content.length && d) { const c = content[cursor++]; if (c === '\\') cursor++; else if (c === '(') d++; else if (c === ')') d-- } if (d) bad(); continue }
+        if (content.startsWith(dict ? '<<' : '[', cursor)) { if (++nesting > 16) bad(); cursor += dict ? 2 : 1; continue }
+        if (content.startsWith(endMark, cursor)) { if (--nesting === 0) break; cursor += endMark.length; continue }
+        cursor++
+      }
+      if (nesting) bad()
+      const items = contentTokens(content.slice(bodyStart, cursor), true, level + 1)
+      const shift = (values: ContentToken[]) => { for (const value of values) { value.start += bodyStart; value.end += bodyStart; if (value.items) shift(value.items) } }; shift(items)
+      i = cursor + endMark.length; tokens.push({ kind: dict ? 'dict' : 'array', raw: content.slice(start,i), start, end:i, items }); continue
+    }
     if (first === '(') {
       kind = 'string'
       const decoded: number[] = []
