@@ -21,6 +21,15 @@ import {
 } from './simplePdf'
 import type { SimpleSourceRun, SourceSelection } from './simplePdf'
 import { supportedSourceText } from './encoding'
+import {
+  buildBlocks,
+  editBlock,
+  emitBlock,
+  inkBox,
+  placeLine,
+  wrapBlock,
+} from './mixedBlocks'
+import type { BlockInput, PlacedLine, SourceBlock } from './mixedBlocks'
 
 type Matrix = [number, number, number, number, number, number]
 interface Rect {
@@ -34,6 +43,8 @@ interface State {
   tm: Matrix
   lm: Matrix
   font?: SourceFont
+  fontRaw?: string
+  fill: string
   size: number
   tc: number
   tw: number
@@ -57,6 +68,12 @@ interface Run {
   advance: number
   adjustments: number[]
   codes: number[]
+  fontRaw: string
+  fill: string
+  bt: number
+  mc: number
+  tagged: boolean
+  paint: number
 }
 const n = PDFName.of,
   identity = (): Matrix => [1, 0, 0, 1, 0, 0]
@@ -142,6 +159,7 @@ function initial(): State {
     ctm: identity(),
     tm: identity(),
     lm: identity(),
+    fill: '0 g',
     size: 0,
     tc: 0,
     tw: 0,
@@ -294,7 +312,11 @@ async function analyze(input: Uint8Array, pageIndex: number) {
     total = 0,
     path: Rect | undefined,
     pendingClip = false,
-    rectangularPath = false
+    rectangularPath = false,
+    btId = 0,
+    mcCounter = 0,
+    paint = 0
+  const marks: { id: number; tagged: boolean }[] = []
   const stack: State[] = [],
     fonts = new Map<string, SourceFont>(),
     ops: ContentToken[] = []
@@ -325,8 +347,10 @@ async function analyze(input: Uint8Array, pageIndex: number) {
           r = { left: p[0], right: p[0], bottom: p[1], top: p[1] }
         path = path ? union(path, r) : r
       }
+      const paintCount = () => paint++
       const finishPath = (paint: boolean) => {
         if (path && paint) {
+          paintCount()
           const pad =
             state.lineWidth *
             state.miter *
@@ -384,6 +408,7 @@ async function analyze(input: Uint8Array, pageIndex: number) {
           if (inText)
             fail('Verschachtelte Textobjekte werden nicht unterstützt.')
           inText = true
+          btId++
           state.tm = identity()
           state.lm = identity()
           break
@@ -398,6 +423,7 @@ async function analyze(input: Uint8Array, pageIndex: number) {
           const key = name(ops[0])
           if (!fonts.has(key) && fonts.size >= 32)
             fail('Die Seite verwendet mehr als 32 Schriftressourcen.')
+          state.fontRaw = ops[0].raw
           state.size = numeric(ops[1])
           if (state.size <= 0 || state.size > 512)
             fail('Die Schriftgröße wird nicht unterstützt.')
@@ -502,6 +528,7 @@ async function analyze(input: Uint8Array, pageIndex: number) {
             matrix = mul(state.ctm, state.tm)
           if (runs.length >= 10000)
             fail('Die Seite enthält zu viele einzelne Textstellen.')
+          const mark = marks.at(-1)
           const view: SimpleSourceRun = {
             id: `mixed:${pageIndex}:${runs.length}`,
             pageIndex,
@@ -524,6 +551,12 @@ async function analyze(input: Uint8Array, pageIndex: number) {
             advance: measured.advance,
             adjustments,
             codes,
+            fontRaw: state.fontRaw ?? '',
+            fill: state.fill,
+            bt: btId,
+            mc: mark?.id ?? 0,
+            tagged: !!mark?.tagged,
+            paint,
           })
           state.tm = mul(state.tm, [1, 0, 0, 1, measured.advance, 0])
           break
@@ -570,6 +603,7 @@ async function analyze(input: Uint8Array, pageIndex: number) {
             )
           } else fail('Dieser XObject-Typ wird noch nicht unterstützt.')
           obstacles.push(r)
+          paintCount()
           break
         }
         case 'gs': {
@@ -668,14 +702,17 @@ async function analyze(input: Uint8Array, pageIndex: number) {
           numeric(ops[1])
           break
         case 'rg':
+        case 'g':
+        case 'k':
+          nums(op === 'rg' ? 3 : op === 'g' ? 1 : 4)
+          state.fill = `${ops.map((t) => t.raw).join(' ')} ${op}`
+          break
         case 'RG':
           nums(3)
           break
-        case 'g':
         case 'G':
           nums(1)
           break
-        case 'k':
         case 'K':
           nums(4)
           break
@@ -687,6 +724,7 @@ async function analyze(input: Uint8Array, pageIndex: number) {
           if (ops.length !== 1) fail('Ungültiges Struktur-Tag.')
           name(ops[0])
           if (++markDepth > 32) fail('Zu tief verschachtelte Struktur-Tags.')
+          marks.push({ id: ++mcCounter, tagged: false })
           break
         case 'BDC': {
           if (ops.length !== 2) fail('Ungültiges Struktur-Tag.')
@@ -707,11 +745,18 @@ async function analyze(input: Uint8Array, pageIndex: number) {
               'Ein Struktur-Tag besitzt eigenen Ersatztext (ActualText/Alt). Dieser muss gemeinsam aktualisiert werden.',
             )
           if (++markDepth > 32) fail('Zu tief verschachtelte Struktur-Tags.')
+          marks.push({
+            id: ++mcCounter,
+            tagged: !!props.items?.some(
+              (t) => t.kind === 'name' && t.raw === '/MCID',
+            ),
+          })
           break
         }
         case 'EMC':
           nums(0)
           if (--markDepth < 0) fail('Unausgeglichene Struktur-Tags.')
+          marks.pop()
           break
         default:
           fail(
@@ -729,7 +774,67 @@ async function analyze(input: Uint8Array, pageIndex: number) {
     fail(
       'Die Seite enthält einen nicht abgeschlossenen Text-, Grafik- oder Clipzustand.',
     )
-  return { doc, page, runs, obstacles, revision, refs }
+  const inputs: BlockInput[] = runs.map((run, index) => ({
+    index,
+    text: run.view.text,
+    codes: run.codes,
+    adjustments: run.adjustments,
+    font: run.font,
+    fontRaw: run.fontRaw,
+    fill: run.fill,
+    size: run.state.size,
+    tc: run.state.tc,
+    tw: run.state.tw,
+    x: run.view.x,
+    baseline: run.view.baseline,
+    advance: run.advance,
+    eligible: blockEligible(run),
+    bt: run.bt,
+    key: [
+      run.mc,
+      run.paint,
+      JSON.stringify(run.clip ?? null),
+      run.state.ctm.join(','),
+      run.state.size,
+    ].join('|'),
+    tagged: run.tagged,
+  }))
+  const blocks = buildBlocks(inputs, pageIndex)
+  return { doc, page, runs, obstacles, revision, refs, blocks, inputs }
+}
+/** A fragment may join a reconstructed block only in the plain Word-like form:
+ * unscaled horizontal text without Tc/Tw/rise and
+ * 1:1 proved glyph-to-character mappings that the original font can encode. */
+function blockEligible(run: Run) {
+  const c = run.state.ctm,
+    t = run.state.tm
+  return (
+    !!run.fontRaw &&
+    run.codes.length > 0 &&
+    [c, t].every(
+      (m) =>
+        Math.abs(m[0] - 1) < 1e-8 &&
+        Math.abs(m[1]) < 1e-8 &&
+        Math.abs(m[2]) < 1e-8 &&
+        Math.abs(m[3] - 1) < 1e-8,
+    ) &&
+    run.state.hz === 1 &&
+    run.state.rise === 0 &&
+    Math.abs(run.state.tc) <= run.state.size &&
+    Math.abs(run.state.tw) <= run.state.size &&
+    supportedSourceText(run.view.text) &&
+    // Ligatures are kept as original glyphs; their width must be proved.
+    run.codes.every((code) => {
+      const char = run.font.decode.get(code) ?? ''
+      return (
+        !!char &&
+        Array.from(char).length <= 4 &&
+        (Array.from(char).length === 1
+          ? run.font.codec.encode(char).ok
+          : Number.isFinite(run.font.advances?.get(code)))
+      )
+    })
+  )
 }
 function editable(run: Run) {
   const m = mul(run.state.ctm, run.state.tm)
@@ -744,7 +849,6 @@ function editable(run: Run) {
     run.codes.every(
       (code) => Array.from(run.font.decode.get(code) ?? '').length === 1,
     ) &&
-    run.view.text.trim() === run.view.text &&
     !!run.view.text.trim() &&
     run.font.codec.encode(run.view.text).ok
   )
@@ -760,22 +864,64 @@ export async function inspectPageSource(bytes: Uint8Array, pageIndex: number) {
   } catch {
     /* The selected page may still be editable; do not reject for another page. */
   }
-  const result = await analyze(bytes, pageIndex),
-    runs = result.runs.filter(editable).map((r) => {
-      let offset = 0
-      const characters = r.codes.map((code, i) => {
-        // Preserve original TJ positioning and Tc/Tw, not replacement metrics.
-        offset -= (r.adjustments[i] ?? 0) * r.state.size / 1000
-        const char = r.font.decode.get(code)!, encoded = r.font.codec.encode(char)
-        const advance = r.font.advances?.get(code) ?? (encoded.ok ? encoded.value.advance : 0)
-        const width = advance * r.state.size / 1000 + r.state.tc + (r.font.codeBytes === 1 && code === 32 ? r.state.tw : 0)
-        const value = { offset, width }
-        offset += width
-        return value
-      })
-      const safe = characters.every((c, i) => Number.isFinite(c.offset) && Number.isFinite(c.width) && c.width > 0 && (i === 0 || c.offset >= characters[i - 1].offset))
-      return { ...r.view, selection: safe ? { characters } : undefined }
+  const result = await analyze(bytes, pageIndex)
+  const geometry = (r: Run) => {
+    let offset = 0
+    const characters = r.codes.flatMap((code, i) => {
+      // Preserve original TJ positioning and Tc/Tw, not replacement metrics.
+      offset -= ((r.adjustments[i] ?? 0) * r.state.size) / 1000
+      const char = r.font.decode.get(code)!,
+        encoded = r.font.codec.encode(char)
+      const advance =
+        r.font.advances?.get(code) ?? (encoded.ok ? encoded.value.advance : 0)
+      const width =
+        (advance * r.state.size) / 1000 +
+        r.state.tc +
+        (r.font.codeBytes === 1 && code === 32 ? r.state.tw : 0)
+      // A ligature glyph is split evenly for selection geometry only.
+      const parts = Array.from(char).length
+      const value = Array.from({ length: parts }, (_, k) => ({
+        offset: offset + (width * k) / parts,
+        width: width / parts,
+      }))
+      offset += width
+      return value
     })
+    return characters.length === r.view.text.length && characters.every(
+      (c, i) =>
+        Number.isFinite(c.offset) &&
+        Number.isFinite(c.width) &&
+        c.width > 0 &&
+        (i === 0 || c.offset >= characters[i - 1].offset),
+    )
+      ? characters
+      : undefined
+  }
+  const views = result.runs.map(geometry),
+    member = new Map<number, SourceBlock>()
+  // A block is offered only as a whole; one unsafe member keeps it fragment-only.
+  for (const block of result.blocks)
+    if (block.members.every((i) => views[i])) for (const i of block.members) member.set(i, block)
+  const runs: SimpleSourceRun[] = []
+  result.runs.forEach((r, i) => {
+    const block = member.get(i)
+    if (!block && !editable(r)) return
+    const characters = views[i]
+    runs.push({
+      ...r.view,
+      selection: characters ? { characters, groupId: block?.id } : undefined,
+      paragraph: block
+        ? {
+            text: block.text,
+            lineCount: block.lines.length,
+            leading: block.leading,
+            width: block.right - block.lines[0].left,
+            separator: '',
+            automatic: block.tagged || block.lines.length === 1,
+          }
+        : undefined,
+    })
+  })
   if (!runs.length)
     fail(
       `Seite ${pageIndex + 1}: Keine sicher kodierbare, horizontal bearbeitbare Textstelle gefunden. Scans benötigen OCR; Ligaturen oder andere Schriftzustände können einzelne Stellen ausschließen.`,
@@ -800,19 +946,25 @@ export async function previewPageSource(
     run.view.text !== selection.expectedText
   )
     fail('Die Textauswahl ist veraltet. Bitte die Textstelle erneut auswählen.')
-  if (selection.scope === 'paragraph')
-    fail(
-      'Diese Textstelle ist in mehrere unabhängig positionierte PDF-Fragmente aufgeteilt. Ein sicherer Absatzumbruch ist hier noch nicht nachgewiesen.',
-    )
+  if (selection.scope === 'paragraph') {
+    const index = runs.indexOf(run),
+      block = result.blocks.find((b) => b.members.includes(index))
+    if (!block)
+      fail(
+        'Diese Textstelle ist keinem nachgewiesenen Absatz zugeordnet. Sie kann nur als einzelnes Textfragment korrigiert werden.',
+      )
+    if (!block.tagged && block.lines.length > 1 && !selection.confirmReflow)
+      fail(
+        'Dieser Absatz ist nicht als Struktur-Absatz ausgezeichnet. Ein Neuumbruch muss ausdrücklich bestätigt werden.',
+      )
+    return previewBlock(result, block, replacement, pageIndex)
+  }
   if (!editable(run))
     fail(
       'Der Schrift- oder Transformationszustand dieser Textstelle ist nicht sicher bearbeitbar.',
     )
-  if (
-    !supportedSourceText(replacement) ||
-    replacement.trim() !== replacement ||
-    !replacement
-  )
+  // Edge spaces of a fragment are ordinary text; only a blank result is refused.
+  if (!supportedSourceText(replacement) || !replacement.trim())
     fail('Dieser Ersatztext wird nicht unterstützt.')
   const encoded = run.font.codec.encode(replacement)
   if (!encoded.ok)
@@ -902,25 +1054,7 @@ export async function previewPageSource(
     run.stream.text.slice(0, run.token.start) +
     operand +
     run.stream.text.slice(run.end)
-  // Reuse an unshared ref so the old text stream is not left orphaned in
-  // the saved PDF. Clone only when another page/content slot actually uses it.
-  let uses = 0
-  for (const p of doc.getPages()) {
-    const c = p.node.get(n('Contents')),
-      v = doc.context.lookup(c),
-      values = v instanceof PDFArray ? v.asArray() : c ? [c] : []
-    uses += values.filter(
-      (r) => r.toString() === run.stream.ref.toString(),
-    ).length
-  }
-  if (uses === 1)
-    doc.context.assign(run.stream.ref, doc.context.flateStream(changed))
-  else {
-    const newRef = doc.context.register(doc.context.flateStream(changed)),
-      newRefs = [...refs]
-    newRefs[run.stream.index] = newRef
-    page.node.set(n('Contents'), doc.context.obj(newRefs))
-  }
+  writeStreams(doc, page, refs, [{ stream: run.stream, text: changed }])
   const bytes = await doc.save({ updateFieldAppearances: false }),
     checked = await analyze(bytes, pageIndex)
   if (checked.runs.length !== runs.length)
@@ -939,5 +1073,194 @@ export async function previewPageSource(
         'Die Ergebnisprüfung fand eine unerwartete Text- oder Positionsänderung.',
       )
   }
+  return bytes
+}
+
+type Analysis = Awaited<ReturnType<typeof analyze>>
+/** Replace changed content streams in place when unshared, copy-on-write otherwise. */
+function writeStreams(
+  doc: PDFDocument,
+  page: Analysis['page'],
+  refs: Analysis['refs'],
+  changes: { stream: Run['stream']; text: string }[],
+) {
+  const newRefs = [...refs]
+  let replaced = false
+  for (const { stream, text } of changes) {
+    let uses = 0
+    for (const p of doc.getPages()) {
+      const c = p.node.get(n('Contents')),
+        v = doc.context.lookup(c),
+        values = v instanceof PDFArray ? v.asArray() : c ? [c] : []
+      uses += values.filter((r) => r.toString() === stream.ref.toString()).length
+    }
+    if (uses === 1) doc.context.assign(stream.ref, doc.context.flateStream(text))
+    else {
+      newRefs[stream.index] = doc.context.register(doc.context.flateStream(text))
+      replaced = true
+    }
+  }
+  if (replaced) page.node.set(n('Contents'), doc.context.obj(newRefs))
+}
+const pageRect = (b: { x: number; y: number; width: number; height: number }) => ({
+  left: b.x,
+  right: b.x + b.width,
+  bottom: b.y,
+  top: b.y + b.height,
+})
+const separation = (a: Rect, b: Rect) =>
+  Math.max(
+    b.left - a.right,
+    a.left - b.right,
+    b.bottom - a.top,
+    a.bottom - b.top,
+    0,
+  )
+/** Re-lay out a reconstructed paragraph block: whole words move between its
+ * lines, following fragments move with the text, and nothing outside the block
+ * moves. The block stays top anchored; extra lines need proved free space. */
+async function previewBlock(
+  result: Analysis,
+  block: SourceBlock,
+  replacement: string,
+  pageIndex: number,
+) {
+  const { doc, page, runs, obstacles, refs } = result
+  if (!supportedSourceText(replacement) || !replacement.trim())
+    fail('Dieser Ersatztext wird nicht unterstützt.')
+  if (replacement === block.text) fail('Der Absatz wurde nicht verändert.')
+  const edited = editBlock(block, replacement)
+  if (!edited.ok)
+    fail(
+      `Das Zeichen „${edited.char}“ fehlt in der Originalschrift dieses Absatzes oder ist nicht eindeutig kodierbar.`,
+    )
+  const glyphs = edited.glyphs,
+    size = block.size,
+    lefts = block.lines.map((l) => l.left)
+  const plan = wrapBlock(glyphs, lefts, block.right, size, block.lines.length === 1)
+  if (!plan)
+    fail(
+      'Ein Wort ist breiter als der Absatz. Es wird nicht verkleinert, gestaucht oder neu getrennt.',
+    )
+  const lastBaseline = block.lines.at(-1)!.baseline
+  const placed: PlacedLine[] = plan.map((line, i) => {
+    const left = lefts[Math.min(i, lefts.length - 1)],
+      baseline =
+        i < block.lines.length
+          ? block.lines[i].baseline
+          : Number(
+              (lastBaseline - (i - block.lines.length + 1) * block.leading).toFixed(6),
+            )
+    return { ...line, left, baseline, ...placeLine(glyphs, line.from, line.to, left, size) }
+  })
+  const members = new Set(block.members),
+    memberRuns = block.members.map((i) => runs[i])
+  const oldBoxes = block.lines.map((line) => {
+    let r: Rect | undefined
+    for (const i of line.runs)
+      if (runs[i].view.text.trim()) r = r ? union(r, runs[i].bounds) : runs[i].bounds
+    return r
+  })
+  // Existing line slots keep origin and baseline. They are compared as
+  // full-font bands from the unchanged origin, so glyph side bearings and
+  // ascender/descender differences are not treated as movement; only a longer
+  // line can approach other content. New lines below use real ink boxes.
+  const fonts = new Set([...block.glyphs, ...glyphs].map((g) => g.font)),
+    bandBottom = Math.min(...[...fonts].map((f) => (f.bbox[1] * size) / 1000)),
+    bandTop = Math.max(...[...fonts].map((f) => (f.bbox[3] * size) / 1000))
+  const slot = (left: number, baseline: number, right: number): Rect => ({
+    left,
+    right: Math.max(left, right),
+    bottom: baseline + Math.min(0, bandBottom),
+    top: baseline + Math.max(0, bandTop),
+  })
+  const oldSlots = block.lines.map((l, i) =>
+    slot(
+      l.left,
+      l.baseline,
+      Math.max(
+        placeLine(block.glyphs, l.from, l.to, l.left, size).extent,
+        oldBoxes[i]?.right ?? -Infinity,
+      ),
+    ),
+  )
+  const whole = oldBoxes.reduce<Rect | undefined>((a, b) => (a && b ? union(a, b) : a ?? b), undefined)
+  const others = [
+    ...runs.filter((r, i) => !members.has(i) && r.view.text.trim()).map((r) => r.bounds),
+    ...obstacles,
+  ]
+  const clip = memberRuns[0].clip,
+    limits = [page.getMediaBox(), page.getCropBox()].map(pageRect)
+  placed.forEach((line, i) => {
+    const ink = inkBox(glyphs, line, size)
+    if (!ink) return
+    if (limits.some((l) => !contains(l, ink)))
+      fail('Der Absatz würde die Seiten- oder Zuschnittgrenze überschreiten.')
+    if (clip && !contains(clip, ink))
+      fail('Der Absatz würde außerhalb der ursprünglichen Clipfläche liegen.')
+    const old = oldSlots[i]
+    const now = old ? slot(line.left, line.baseline, Math.max(line.extent, ink.right)) : ink
+    for (const other of others) {
+      if (old && overlap(old, other)) {
+        // Existing overlaps (e.g. the bounding box of an image beside a
+        // contour-wrapped line) may not grow toward that content.
+        if (overlap(now, other) && Math.min(now.right, other.right) > Math.min(old.right, other.right) + 0.001)
+          fail('Der Absatz würde stärker als bisher mit anderen Inhalten überlappen.')
+        continue
+      }
+      const need = old
+        ? Math.min(3, separation(old, other))
+        : Math.max(3, Math.min(whole ? separation(whole, other) : 3, block.leading / 2))
+      if (overlap(now, other, Math.max(0, need - 0.001)))
+        fail(
+          i >= block.lines.length
+            ? 'Für die zusätzliche Absatzzeile ist unter dem Absatz nicht genug freier Platz. Nachfolgende Inhalte werden nicht verschoben.'
+            : 'Die Korrektur würde den geschützten Abstand zu benachbartem Text, Bild, Link oder einer Grafik unterschreiten.',
+        )
+    }
+  })
+  const first = memberRuns[0],
+    ctm = first.state.ctm
+  const emitted = emitBlock(glyphs, placed, size, [ctm[4], ctm[5]], {
+    fontRaw: first.fontRaw,
+    fill: first.fill,
+    tc: first.state.tc,
+    tw: first.state.tw,
+  })
+  const edits = new Map<Run['stream'], { start: number; end: number; text: string }[]>()
+  memberRuns.forEach((r, i) => {
+    const list = edits.get(r.stream) ?? []
+    // Operands may directly follow an operator (e.g. `0.2 Tc[...]TJ`): always delimit.
+    list.push({ start: r.token.start, end: r.end, text: i ? ' ' : `\n${emitted.content}` })
+    edits.set(r.stream, list)
+  })
+  const changes = [...edits].map(([stream, list]) => {
+    let text = stream.text
+    for (const e of list.sort((a, b) => b.start - a.start))
+      text = text.slice(0, e.start) + e.text + text.slice(e.end)
+    return { stream, text }
+  })
+  writeStreams(doc, page, refs, changes)
+  const bytes = await doc.save({ updateFieldAppearances: false }),
+    checked = await analyze(bytes, pageIndex)
+  const expected: { text: string; fontName: string; x: number; baseline: number; advance?: number }[] = []
+  runs.forEach((r, i) => {
+    if (i === block.members[0]) expected.push(...emitted.expected)
+    else if (!members.has(i))
+      expected.push({ text: r.view.text, fontName: r.view.fontName, x: r.view.x, baseline: r.view.baseline, advance: r.advance })
+  })
+  if (checked.runs.length !== expected.length)
+    fail('Die Ergebnisprüfung fand eine unerwartete Anzahl von Textstellen.')
+  checked.runs.forEach((after, i) => {
+    const e = expected[i]
+    if (
+      after.view.text !== e.text ||
+      after.view.fontName !== e.fontName ||
+      Math.abs(after.view.x - e.x) > 1e-4 ||
+      Math.abs(after.view.baseline - e.baseline) > 1e-5 ||
+      (e.advance !== undefined && Math.abs(after.advance - e.advance) > 1e-5)
+    )
+      fail('Die Ergebnisprüfung fand eine unerwartete Text- oder Positionsänderung.')
+  })
   return bytes
 }
