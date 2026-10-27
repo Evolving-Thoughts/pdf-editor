@@ -44,10 +44,22 @@ export function SourceTextSelection({ runs, size, fragments, selection, onSelect
   if (selectedGroup) for (const run of runs) {
     if (run.selection?.groupId !== selectedGroup) continue
     prefixes.set(run.id, prefix)
-    prefix += run.text.length + 1
+    prefix += run.text.length + (run.paragraph?.separator ?? ' ').length
   }
+  // One outline per proved paragraph/source block; its member runs carry the
+  // selectable characters but no frames of their own.
+  const groups = new Map<string, typeof boxes>()
+  for (const b of boxes) {
+    const id = b.run.selection?.groupId
+    if (id) groups.set(id, [...(groups.get(id) ?? []), b])
+  }
+  // Keep reading order: a block renders where its first member appears.
+  const order = boxes.filter(b => { const id = b.run.selection?.groupId; return !id || groups.get(id)![0] === b })
   function choose(run: SimpleSourceRun) {
-    const value = directSelection(selectable, run.id, 0)
+    const members = run.paragraph?.automatic && run.selection?.groupId ? groups.get(run.selection.groupId) ?? [] : []
+    const value = members.length
+      ? directSelection(selectable, members[0].run.id, 0, members.at(-1)!.run.id)
+      : directSelection(selectable, run.id, 0)
     if (value) onSelect(value)
   }
   function finish() {
@@ -85,21 +97,37 @@ export function SourceTextSelection({ runs, size, fragments, selection, onSelect
       const w = Math.max(...f.quad.map(p => p.x)) - x, h = Math.max(...f.quad.map(p => p.y)) - y
       return <button key={i} className="source-unknown-hit" style={{ left: percent(x), top: percent(y, 'y'), width: percent(w), height: percent(h, 'y') }} aria-label={`Unterstützung nicht nachgewiesen: ${f.text.slice(0, 80)}`} onClick={() => onReject('Dieser Bereich ist nicht als sicher markierbarer Originaltext nachgewiesen. Schriftkodierung, Ligaturen, Textstruktur oder das Markierungslimit können die Ursache sein. Er bleibt unverändert.')} />
     })}
-    {boxes.map(b => {
-      const run = b.run, active = selection?.runId === run.id
-      const group = selection?.requiresReflow && run.selection?.groupId && run.selection.groupId === selectedGroup
-      return <div key={run.id} className={`source-run-hit ${run.paragraph ? 'source-paragraph' : 'source-fragment'} ${active || group ? 'source-picked' : ''}`} data-source-id={run.id} role="button" tabIndex={0} aria-label={`Textstelle auswählen: ${run.text}`} title={run.paragraph ? 'Unterstützter Absatz · markieren oder mit Enter auswählen' : 'Nur dieses Textfragment unterstützt · markieren oder mit Enter auswählen'} style={{ left: percent(b.x), top: percent(b.y, 'y'), width: percent(b.width), height: percent(b.height, 'y') }} onKeyDown={event => {
-        if (event.key === 'Enter' || event.key === ' ') { event.preventDefault(); choose(run) }
-      }} onClick={() => {
-        if (dragged.current) { dragged.current = false; return }
-        choose(run)
-      }}>
-        {Array.from(run.text).map((char, i) => {
-          const c = run.selection!.characters[i], at = (prefixes.get(run.id) ?? 0) + i
-          const picked = group ? at >= selection!.paragraphFrom! && at < selection!.paragraphTo! : active && i >= selection!.from && i < selection!.to
-          return <span key={i} className={picked ? 'source-char-picked' : ''} style={{ position: 'absolute', left: `${(position(run).x + c.offset - b.x) / b.width * 100}%`, width: `${c.width / b.width * 100}%`, height: '100%', fontSize: `${run.fontSize / b.height * 100}cqh` }}>{char}</span>
-        })}
+    {order.map(first => {
+      const id = first.run.selection?.groupId
+      if (!id) return hit(first, true)
+      const members = groups.get(id)!
+      const x = Math.min(...members.map(b => b.x)), y = Math.min(...members.map(b => b.y))
+      const width = Math.max(...members.map(b => b.x + b.width)) - x, height = Math.max(...members.map(b => b.y + b.height)) - y
+      const picked = selectedGroup === id
+      return <div key={id} className="source-block" data-block-id={id}>
+        <div className={`source-block-outline ${picked ? 'source-picked' : ''}`} aria-hidden="true" style={{ left: percent(x), top: percent(y, 'y'), width: percent(width), height: percent(height, 'y') }} />
+        {members.map((b, i) => hit(b, i === 0))}
       </div>
     })}
   </div>
+  function hit(b: typeof boxes[number], primary: boolean) {
+    const run = b.run, active = selection?.runId === run.id
+    const grouped = !!run.selection?.groupId, automatic = grouped && !!run.paragraph?.automatic
+    const group = selection?.requiresReflow && grouped && run.selection!.groupId === selectedGroup
+    const label = automatic ? `${run.paragraph!.lineCount > 1 ? 'Absatz' : 'Zeile'} auswählen: ${run.paragraph!.text.slice(0, 120)}` : `Textstelle auswählen: ${run.text}`
+    const title = automatic ? 'Zusammenhängender Absatz · klicken wählt den ganzen Block, Markieren wählt einen Teil' : run.paragraph ? 'Unterstützter Absatz · markieren oder mit Enter auswählen' : 'Nur dieses Textfragment unterstützt · markieren oder mit Enter auswählen'
+    const focusable = !automatic || primary
+    return <div key={run.id} className={`source-run-hit ${grouped ? 'source-member' : ''} ${run.paragraph ? 'source-paragraph' : 'source-fragment'} ${!grouped && active ? 'source-picked' : ''}`} data-source-id={run.id} role={focusable ? 'button' : undefined} aria-hidden={focusable ? undefined : true} tabIndex={focusable ? 0 : -1} aria-label={focusable ? label : undefined} title={title} style={{ left: percent(b.x), top: percent(b.y, 'y'), width: percent(b.width), height: percent(b.height, 'y') }} onKeyDown={event => {
+      if (event.key === 'Enter' || event.key === ' ') { event.preventDefault(); choose(run) }
+    }} onClick={() => {
+      if (dragged.current) { dragged.current = false; return }
+      choose(run)
+    }}>
+      {Array.from(run.text).map((char, i) => {
+        const c = run.selection!.characters[i], at = (prefixes.get(run.id) ?? 0) + i
+        const picked = group ? at >= selection!.paragraphFrom! && at < selection!.paragraphTo! : active && i >= selection!.from && i < selection!.to
+        return <span key={i} className={picked ? 'source-char-picked' : ''} style={{ position: 'absolute', left: `${(position(run).x + c.offset - b.x) / b.width * 100}%`, width: `${c.width / b.width * 100}%`, height: '100%', fontSize: `${run.fontSize / b.height * 100}cqh` }}>{char}</span>
+      })}
+    </div>
+  }
 }

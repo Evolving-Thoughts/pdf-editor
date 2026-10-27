@@ -21,7 +21,7 @@ export interface SimpleSourceRun {
   baseline: number
   width: number
   selection?: { characters: { offset: number; width: number }[]; groupId?: string }
-  paragraph?: { text: string; lineCount: number; leading: number; width: number }
+  paragraph?: { text: string; lineCount: number; leading: number; width: number; separator?: string; automatic?: boolean }
 }
 export interface SourceSelection { digest: string; runId: string; expectedText: string; scope?: 'line' | 'paragraph'; confirmReflow?: boolean }
 interface Rect { left: number; right: number; bottom: number; top: number }

@@ -25,15 +25,18 @@ export function directSelection(
   const group = first.selection.groupId
   if (a !== b && (!group || group !== last.selection.groupId || runs.slice(a, b + 1).some(run => run.selection?.groupId !== group))) return null
   const members = group ? runs.filter(run => run.selection?.groupId === group) : []
+  // Line-based paragraphs join their runs with a space; reconstructed source
+  // blocks own every character (including spaces) and use no separator.
+  const separator = first.paragraph?.separator ?? ' '
   const prefix = (id: string) => {
     let length = 0
-    for (const run of members) { if (run.id === id) return length; length += run.text.length + 1 }
+    for (const run of members) { if (run.id === id) return length; length += run.text.length + separator.length }
     return -1
   }
   const paragraphFrom = members.length ? prefix(first.id) + from : undefined
   const paragraphTo = members.length ? prefix(last.id) + to : undefined
   // A truncated/filtered group must not silently become a complete paragraph.
-  if (members.length && members.map(run => run.text).join(' ') !== first.paragraph?.text) return null
+  if (members.length && members.map(run => run.text).join(separator) !== first.paragraph?.text) return null
   const text = a === b ? first.text.slice(from, to) : first.paragraph!.text.slice(paragraphFrom, paragraphTo)
   if (!text.trim()) return null
   return { runId: first.id, from, to: a === b ? to : first.text.length, text, paragraphFrom, paragraphTo, requiresReflow: a !== b }
