@@ -238,7 +238,7 @@ test('stale selections, paragraph requests on fragmented source and missing glyp
       { ...s, scope: 'paragraph', confirmReflow: true },
       'new',
     ),
-  ).rejects.toThrow(/Fragmente/)
+  ).rejects.toThrow(/keinem nachgewiesenen Absatz/)
   await expect(previewPageSource(b, s, 'ẞ')).rejects.toThrow(/Originalschrift/)
 })
 test('bounded composite lexer respects literal strings and absolute offsets', () => {
@@ -266,7 +266,7 @@ test('bounded bfrange supports sequential and array ranges and leaves ligatures 
   ).toThrow()
 })
 
-test('original ligature glyphs remain protected, not silently reconstructed as separate letters', async () => {
+test('original ligature glyphs stay byte-identical and are never silently split into missing letters', async () => {
   const d = await PDFDocument.create()
   d.registerFontkit(fontkit)
   const f = await d.embedFont(
@@ -278,9 +278,21 @@ test('original ligature glyphs remain protected, not silently reconstructed as s
   const p = d.addPage([600, 800])
   p.drawText('office', { font: f, size: 12, x: 60, y: 700 })
   p.drawText('safe text', { font: f, size: 12, x: 60, y: 640 })
-  const a = await inspectPageSource(await d.save(), 0)
+  const b = await d.save(),
+    a = await inspectPageSource(b, 0)
   expect(a.runs.some((r) => r.text === 'safe text')).toBe(true)
-  expect(a.runs.some((r) => r.text === 'office')).toBe(false)
+  const r = a.runs.find((x) => x.text === 'office')!
+  // Only the block path may touch ligature glyphs; the fragment path refuses.
+  expect(r.paragraph?.automatic).toBe(true)
+  const s = { digest: a.digest, runId: r.id, expectedText: r.text }
+  await expect(previewPageSource(b, s, 'ofice')).rejects.toThrow(/nicht sicher bearbeitbar/)
+  // Splitting the ligature would need an unembedded "i": rejected, not faked.
+  await expect(
+    previewPageSource(b, { ...s, scope: 'paragraph' }, 'ofice'),
+  ).rejects.toThrow(/„i“ fehlt/)
+  // An untouched ligature keeps its original glyph code.
+  const out = await previewPageSource(b, { ...s, scope: 'paragraph' }, 'offices')
+  expect((await inspectPageSource(out, 0)).runs.map((x) => x.text)).toEqual(['offices', 'safe text'])
 })
 test('structure-tree replacement text is not left as a stale accessibility cache', async () => {
   const d = await PDFDocument.load(await fixture({ tags: true }))
