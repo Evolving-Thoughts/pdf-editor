@@ -114,6 +114,43 @@ Minimum clearance is 3 physical source points (rotation/UserUnit restricted to
 checked against every nonmember text block, including neighbouring columns.
 A complete paragraph must fit; partial edits are never returned/applied.
 
+## Reconstructed source blocks (Word-style fragments)
+
+Word and similar producers write every line fragment (often each word group,
+every style change and even a final period) as its own clipped `BT/ET` with an
+absolute `Tm`. Editing such fragments individually leaves gaps or overlaps, so
+`src/core/sourceText/mixedBlocks.ts` rebuilds the paragraph from its glyphs:
+
+- Consecutive fragments join a block only in the plain form: unscaled horizontal
+  text (CTM/Tm unit scale, Tz 100, no rise, |Tc|,|Tw| ≤ size), decodable codes,
+  same marked-content sequence, clip, CTM and size, and no painted content in
+  between. Fragments on one baseline must be contiguous within 0.12 × size; the
+  measured residual becomes that pair's kern, so unchanged text stays exactly in
+  place.
+- A new line continues the block only if the previous one ended on a space or a
+  word hyphen and the baseline advance matches the block leading. Tagged blocks
+  may change their left edge per line (text flowing around an image).
+- Greedy rewrapping at the column width must reproduce every original break;
+  where the next word would have fitted, the break is intentional and the block
+  splits. Otherwise the group degrades to independent single-line blocks.
+- A block owns all text shows of its BT objects. It is re-emitted into the first
+  member's BT (one `Tm` per line, `Tf`/fill/`Tc`/`Tw` per style run, TJ kerning);
+  other members' shows are blanked. The result is re-analyzed: the edited block
+  must be found again and every non-member show must be unchanged.
+- Edits are diffed per glyph. New characters take the style of the text they
+  replace (italic stays italic), falling back only to a sibling subset of the
+  same family and colour. Untouched ligature glyphs keep their original code;
+  splitting one needs the separate letters in the font, otherwise it is refused.
+
+Structure-tagged multi-line blocks and every single-line block reflow without
+confirmation; the UI shows one outline per block and one click selects it.
+Untagged multi-line blocks still require the explicit reflow confirmation.
+Single-line blocks (headings, code lines) never wrap: following text on the
+line moves with the edit. Existing lines keep their origin and baseline and are
+compared as full-font bands, so only a longer line can approach other content;
+extra lines below are added only into free space with the contextual gap above.
+Following paragraphs never move.
+
 ## Architecture and safety boundaries
 
 - `encoding.ts`: immutable validated one-/two-byte original-font codec.
@@ -153,7 +190,8 @@ server; workers process local copied buffers.
 
 ## Validation
 
-- 308 unit/integration tests, including real standard-font and embedded Noto Sans
+- 324 unit/integration tests (including `tests/core/mixedBlocks.test.ts` for
+  Word-like fragment blocks), including real standard-font and embedded Noto Sans
   subset DE/EN correction, missing/ambiguous glyph refusals, actual paragraph
   growth/shrink/overflow, intentional breaks/hyphens, unchanged neighbour baseline,
   no retained old text stream, source copies, overlays, undo/redo, IndexedDB and
@@ -193,4 +231,7 @@ native CropBox offsets, zoom, focus, persistent highlighting, dirty-selection
 confirmation, keyboard/mobile use, unproved text, page switches and stale preview
 rejection. The existing T16 suite also drags across proved paragraph lines and
 rejects cross-paragraph selections; reflow, undo/redo, save/drafts and embedded-font
-export remain covered. All three T16 suites are part of `qa:ci`.
+export remain covered. `source-text-blocks-smoke.mjs` covers a Word-like tagged
+fragment layout: one outline and keyboard stop per paragraph, a single click
+selects the block, no confirmation, and shortening `handelt.` to `hande.` pulls
+the period along in the exported PDF. All four T16 suites are part of `qa:ci`.
