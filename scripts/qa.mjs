@@ -83,6 +83,7 @@ try {
     'source-text-smoke',
     'source-text-mixed-smoke',
     'source-text-selection-smoke',
+    'source-text-blocks-smoke',
     'drawing-smoke',
     'toolbar-smoke',
     'editor-layout-smoke',

@@ -1079,6 +1079,13 @@
 .source-run-hit span::selection { background:#9456d780; color:transparent; }
 .source-run-hit.source-picked { outline:2px solid #7936bb; outline-offset:1px; }
 .source-char-picked { background:#9856dc40; }
+.source-block { position:absolute; inset:0; pointer-events:none; }
+.source-block > .source-run-hit { pointer-events:auto; }
+.source-block-outline { position:absolute; z-index:1; border:1px solid #7936bb80; border-radius:2px; pointer-events:none; }
+.source-run-hit.source-member { border-color:transparent; }
+.source-run-hit.source-member:hover,.source-run-hit.source-member:focus-visible { outline:none; background:transparent; }
+.source-block:hover .source-block-outline,.source-block:focus-within .source-block-outline { outline:2px solid #7936bb; outline-offset:2px; background:#ad75db12; }
+.source-block-outline.source-picked { outline:2px solid #7936bb; outline-offset:2px; }
 .source-unknown-hit { position:absolute; z-index:1; opacity:0; border:0; padding:0; background:transparent; cursor:not-allowed; }
 .source-unknown-hit:focus-visible { opacity:1; outline:2px dotted #555; background:#7772; }
 .source-legend { display:flex; flex-wrap:wrap; gap:8px 16px; padding:12px; margin:12px 0; border:1px solid #d8d1de; border-radius:6px; font-size:13px; background:#fff9; }
