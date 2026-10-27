@@ -93,6 +93,13 @@ function cmap(body: string) {
 test('page-scoped analysis does not reject a supported page for unrelated operators on another page', async () => {
   const b = await fixture({ otherBad: true }),
     a = await inspectPageSource(b, 0)
+  const chars = a.runs[0].selection!.characters
+  expect(chars).toHaveLength(a.runs[0].text.length)
+  expect(chars[0].width).toBeCloseTo(8.004 + 0.1, 8) // A at 12pt plus original Tc
+  expect(chars[12].offset).toBeCloseTo(chars[11].offset + chars[11].width - 0.06, 8) // TJ 5
+  expect(chars.at(-1)!.offset + chars.at(-1)!.width).toBeCloseTo(a.runs[0].width, 8)
+  expect(a.runs[0].selection!.groupId).toBeUndefined() // never invent paragraph support
+
   expect(a.runs[0].text).toBe('A small typo here')
   await expect(inspectPageSource(b, 1)).rejects.toThrow(
     /Seite 2.*UnsupportedOperation/,

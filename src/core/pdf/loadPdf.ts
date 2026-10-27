@@ -14,6 +14,10 @@ export interface PageSize {
   width: number
   height: number
 }
+export interface SourcePageGeometry extends PageSize {
+  /** Source-PDF to displayed page coordinates, including native CropBox. */
+  sourceTransform: number[]
+}
 
 export interface RasterizedPage { png: Uint8Array; replacements: {markId:string;x:number;y:number;fontSize:number;font:OverlayFont;rotation:number}[] }
 export interface PdfHandle {
@@ -23,6 +27,8 @@ export interface PdfHandle {
   renderPage(pageNumber: number, canvas: HTMLCanvasElement, zoom: number): Promise<void>
   /** Page size in PDF points (1-based page number), cached after first call. */
   getPageSize(pageNumber: number): Promise<PageSize>
+  /** Opt-in source mapping; keep the existing size-only contract unchanged. */
+  getPageGeometry(pageNumber: number): Promise<SourcePageGeometry>
   /** Text and geometry from PDF.js; raster/image pages return no text. */
   getSearchText(pageNumber: number): Promise<SearchFragment[]>
   /** Lossless 300-dpi pixels with outward-rounded opaque masks; never returns source content. */
@@ -77,6 +83,13 @@ export async function loadPdf(fileName: string, bytes: Uint8Array): Promise<PdfH
       const size = { width: viewport.width, height: viewport.height }
       sizeCache.set(pageNumber, size)
       return size
+    },
+
+    async getPageGeometry(pageNumber) {
+      const page = await pdfDocument.getPage(pageNumber)
+      const viewport = page.getViewport({ scale: 1 })
+      validatePageSize(viewport.width, viewport.height)
+      return { width: viewport.width, height: viewport.height, sourceTransform: [...viewport.transform] }
     },
 
     async getSearchText(pageNumber) {
