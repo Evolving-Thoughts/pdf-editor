@@ -20,6 +20,7 @@ export interface SimpleSourceRun {
   x: number
   baseline: number
   width: number
+  selection?: { characters: { offset: number; width: number }[]; groupId?: string }
   paragraph?: { text: string; lineCount: number; leading: number; width: number }
 }
 export interface SourceSelection { digest: string; runId: string; expectedText: string; scope?: 'line' | 'paragraph'; confirmReflow?: boolean }
@@ -161,7 +162,18 @@ async function analyze(input: Uint8Array) {
 
 export async function inspectSimpleSourceText(bytes: Uint8Array): Promise<{ digest: string; runs: SimpleSourceRun[] }> {
   const result = await analyze(bytes)
-  return { digest: result.revision, runs: result.runs.map(run => ({ ...run.view })) }
+  return { digest: result.revision, runs: result.runs.map(run => {
+    let offset = 0
+    const characters = Array.from(run.view.text).map(character => {
+      const encoded = run.font.codec.encode(character)
+      const width = encoded.ok ? encoded.value.advance * run.view.fontSize / 1000 : 0
+      const value = { offset, width }
+      offset += width
+      return value
+    })
+    const safe = characters.every(c => Number.isFinite(c.offset) && Number.isFinite(c.width) && c.width > 0)
+    return { ...run.view, selection: safe ? { characters, groupId: run.view.paragraph ? run.block : undefined } : undefined }
+  }) }
 }
 
 /** Makes a new, real candidate PDF. Does not commit any editor/draft state. */

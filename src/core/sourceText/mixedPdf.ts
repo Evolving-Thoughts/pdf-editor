@@ -761,7 +761,21 @@ export async function inspectPageSource(bytes: Uint8Array, pageIndex: number) {
     /* The selected page may still be editable; do not reject for another page. */
   }
   const result = await analyze(bytes, pageIndex),
-    runs = result.runs.filter(editable).map((r) => r.view)
+    runs = result.runs.filter(editable).map((r) => {
+      let offset = 0
+      const characters = r.codes.map((code, i) => {
+        // Preserve original TJ positioning and Tc/Tw, not replacement metrics.
+        offset -= (r.adjustments[i] ?? 0) * r.state.size / 1000
+        const char = r.font.decode.get(code)!, encoded = r.font.codec.encode(char)
+        const advance = r.font.advances?.get(code) ?? (encoded.ok ? encoded.value.advance : 0)
+        const width = advance * r.state.size / 1000 + r.state.tc + (r.font.codeBytes === 1 && code === 32 ? r.state.tw : 0)
+        const value = { offset, width }
+        offset += width
+        return value
+      })
+      const safe = characters.every((c, i) => Number.isFinite(c.offset) && Number.isFinite(c.width) && c.width > 0 && (i === 0 || c.offset >= characters[i - 1].offset))
+      return { ...r.view, selection: safe ? { characters } : undefined }
+    })
   if (!runs.length)
     fail(
       `Seite ${pageIndex + 1}: Keine sicher kodierbare, horizontal bearbeitbare Textstelle gefunden. Scans benötigen OCR; Ligaturen oder andere Schriftzustände können einzelne Stellen ausschließen.`,
