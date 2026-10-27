@@ -7,11 +7,28 @@ Branch: `feat/t16-source-text-corrections`.
 
 Open **Textkorrektur** (accessible name: **Originaltext korrigieren**). The approved
 layout A places the editor sidebar beside a large actual PDF preview. Select a
-page and an original text line. The original font/size are retained; no font-menu
+page, then highlight text directly on the original PDF or click/focus an outlined
+run (Tab/Enter/Space). The selected substring is copied into the focused sidebar
+textarea; unchanged text outside the selection is preserved. A full proved
+paragraph can also be selected explicitly. The original font/size are retained; no font-menu
 match or replacement font is needed. Enter corrected text, generate the candidate
 PDF, inspect the paragraph and following content, and explicitly confirm review
 before applying. Compare original/candidate without discarding the input; zoom
 and scroll the actual rendered PDF on desktop/mobile.
+
+Support is visible before selecting: solid outlines mean proved paragraphs,
+dashed outlines mean fragment-only correction. Other extracted text is dimmed and
+can be clicked for an explanation; while analysis runs its status is unknown.
+PDF.js extraction never authorizes an edit: the invisible native-selection layer
+uses original-font character advances from the trusted adapter, including TJ,
+Tc/Tw and the native CropBox viewport transform. Nonmonotone/invalid geometry is
+not selectable. The selection DOM is limited to 40,000 proved characters per page;
+a paragraph is not partially offered when this budget would cut its group.
+Independent fragments and unsupported ranges cannot be silently joined. Selection
+within one proved paragraph maps to full-paragraph offsets, but still needs reflow
+confirmation for a cross-line edit. Draft changes require explicit confirmation
+before switching selection/page or using the sidebar close action. Candidate/review state is invalidated
+on input or selection changes; candidate geometry is never used for a new edit.
 
 Supported multiline text blocks also offer paragraph reflow. This is OFF by
 default: the user must confirm that the block is flowing prose, not intentionally
@@ -113,6 +130,9 @@ A complete paragraph must fit; partial edits are never returned/applied.
   abort termination and a 30-second deadline, including parser/font work. Copy
   input before transfer, never detach the editor's original bytes.
 - `revision.ts`: selected-page source replacement as one undo/redo command.
+- `directSelection.ts`: pure source-run/paragraph range binding and partial replacement.
+- `SourceTextSelection.tsx`: source-bound native text selection, persistent highlights,
+  support outlines and a separate extraction-based dimming mask.
 - `SourceTextPanel.tsx`: version/selection-bound async UI, actual PDF.js preview,
   explicit review, original/candidate comparison and atomic commit guards.
 
@@ -164,3 +184,13 @@ The supplied document and extracted proprietary fonts are NOT in the repository.
 `prototypes/t16-correction-review.html` retains the original three synthetic UI
 variants as design history only. It is outside production entry points and is not
 an alternative PDF engine. Actual test outcomes are recorded in the PR.
+
+## Direct-selection regression coverage
+
+`source-text-selection-smoke.mjs` exercises real mouse dragging (not an injected
+DOM selection), substring-only DE/EN export independently read with PDF.js,
+native CropBox offsets, zoom, focus, persistent highlighting, dirty-selection
+confirmation, keyboard/mobile use, unproved text, page switches and stale preview
+rejection. The existing T16 suite also drags across proved paragraph lines and
+rejects cross-paragraph selections; reflow, undo/redo, save/drafts and embedded-font
+export remain covered. All three T16 suites are part of `qa:ci`.

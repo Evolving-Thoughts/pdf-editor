@@ -29,7 +29,7 @@ async function load(name = 'source-text.pdf', buffer = input) {
 async function openPanel() {
   await page.getByRole('button', { name: 'Originaltext korrigieren', exact: true }).click()
   await page.getByLabel('Ersatztext', { exact: true }).waitFor()
-  await page.waitForFunction(() => !document.querySelector('.source-editor textarea')?.disabled)
+  await page.locator('.source-run-hit').first().waitFor(); await page.locator('.source-run-hit').first().click()
 }
 async function generate(text) {
   await page.getByLabel('Ersatztext', { exact: true }).fill(text)
@@ -47,8 +47,21 @@ async function downloadText() {
 }
 try {
   await page.goto(base); await load(); await openPanel()
+  // Real drag across two proved lines; unrelated following text must reject.
+  const sourceRuns=page.locator('.source-run-hit')
+  async function dragBetween(first,from,last,to) {
+    const a=await first.locator('span').nth(from).boundingBox(),b=await last.locator('span').nth(to-1).boundingBox()
+    await page.mouse.move(a.x+.05,a.y+a.height*.55);await page.mouse.down()
+    await page.mouse.move(b.x+b.width-.05,b.y+b.height*.55,{steps:15});await page.mouse.up()
+  }
+  await dragBetween(sourceRuns.first(),5,sourceRuns.last(),5)
+  await page.locator('.source-editor [role="alert"]').waitFor()
+  assert.equal(await page.getByLabel('Ersatztext',{exact:true}).inputValue(),lines[0],'cross-paragraph selection does not silently combine text')
+  await dragBetween(sourceRuns.first(),5,sourceRuns.nth(1),5)
+  assert.equal(await page.getByLabel('Ersatztext',{exact:true}).inputValue(),lines[0].slice(5)+' '+lines[1].slice(0,5),'native cross-line selection uses proved paragraph offsets')
   const confirm = page.getByRole('checkbox', { name: /Diese .* Zeilen sind ein Fließtextabsatz/ })
   assert.equal(await confirm.count(), 1, 'supported paragraph recognized')
+  await page.getByRole('button', { name: 'Ganzen Absatz auswählen' }).click()
   await confirm.check()
   await generate('This paragraph contains short words.')
   assert.equal(await page.getByRole('button', { name: 'Korrektur übernehmen', exact: true }).isDisabled(), true, 'actual PDF must be reviewed first')

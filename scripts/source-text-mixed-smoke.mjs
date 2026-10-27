@@ -70,22 +70,17 @@ try {
     .click()
   if (index)
     await page.getByLabel('Seite', { exact: true }).selectOption({ index })
-  await page.waitForFunction(
-    () => !document.querySelector('#source-run')?.disabled,
-  )
-  const options = await page
-      .locator('#source-run option')
-      .evaluateAll((list) =>
-        list.map((o) => ({ value: o.value, text: o.textContent })),
-      ),
-    target = options.find((o) => o.text.includes(find))
-  assert.ok(
-    target,
-    'source typo is offered, not rejected as an entire document',
-  )
-  await page
-    .getByLabel('Textstelle', { exact: true })
-    .selectOption(target.value)
+  await page.locator('.source-run-hit').first().waitFor()
+  const target = page.locator('.source-run-hit').filter({hasText:find}).first()
+  assert.equal(await target.count(), 1, 'source typo can be selected directly')
+  await target.scrollIntoViewIfNeeded()
+  const original = await target.textContent(), from = original.indexOf(find)
+  const a = await target.locator('span').nth(from).boundingBox(), b = await target.locator('span').nth(from + find.length - 1).boundingBox()
+  await page.mouse.move(a.x + .05, a.y + a.height * .55)
+  await page.mouse.down()
+  await page.mouse.move(b.x + b.width - .05, b.y + b.height * .55, { steps: 15 })
+  await page.mouse.up()
+  assert.equal(await page.getByLabel('Ersatztext', {exact:true}).inputValue(), find, 'mixed-font/TJ source selection copies exact substring')
   const old = await page.getByLabel('Ersatztext', { exact: true }).inputValue(),
     updated = old.replace(find, replacement)
   await page.getByLabel('Ersatztext', { exact: true }).fill(updated)

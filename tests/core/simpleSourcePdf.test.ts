@@ -49,6 +49,11 @@ test('inspects real DE/EN standard-font source text without treating Unicode as 
   expect(result.digest).toMatch(/^[a-f0-9]{64}$/)
   expect(result.runs.map(run => run.text)).toEqual(['Grüße Würzburg. A small typo.', 'Unveränderter Folgeabsatz.'])
   expect(result.runs[0]).toMatchObject({ fontName: 'Helvetica', fontSize: 12, x: 50, baseline: 700 })
+  const run = result.runs[0], characters = run.selection!.characters
+  expect(characters).toHaveLength(run.text.length)
+  expect(characters[0].offset).toBe(0)
+  expect(characters.at(-1)!.offset + characters.at(-1)!.width).toBeCloseTo(run.width, 8)
+  for (let i = 1; i < characters.length; i++) expect(characters[i].offset).toBeCloseTo(characters[i - 1].offset + characters[i - 1].width, 8)
 })
 
 test('actually replaces the original stream, not an appended overlay, preserving neighbours/font/baseline', async () => {
