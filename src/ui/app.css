@@ -1065,3 +1065,27 @@
 .source-editor select,.source-editor textarea { max-width:100%; }
 .source-context { overflow:auto; }
 .source-context>button { min-height:44px; padding:8px 12px; border:1px solid #aaa; background:white; color:#28232e; border-radius:6px; margin-bottom:12px; }
+
+/* PDF-backed direct selection: source geometry authorizes hits, extraction only dims. */
+.source-page-stage { position:relative; flex-shrink:0; background:white; }
+.source-pdf-preview .source-page-stage canvas { max-width:none; width:100%!important; height:100%!important; }
+.source-selection-layer,.source-support-mask { position:absolute; inset:0; width:100%; height:100%; }
+.source-selection-layer { overflow:hidden; user-select:none; }
+.source-support-mask { pointer-events:none; }
+.source-run-hit { position:absolute; z-index:2; border:1px solid #7936bb80; container-type:size; color:transparent; cursor:text; user-select:text; white-space:pre; line-height:1; }
+.source-run-hit.source-fragment { border:1px dashed #926000b0; }
+.source-run-hit:hover,.source-run-hit:focus-visible { outline:2px solid #7936bb; outline-offset:2px; background:#ad75db12; }
+.source-run-hit span { color:transparent; user-select:text; line-height:1.25; }
+.source-run-hit span::selection { background:#9456d780; color:transparent; }
+.source-run-hit.source-picked { outline:2px solid #7936bb; outline-offset:1px; }
+.source-char-picked { background:#9856dc40; }
+.source-unknown-hit { position:absolute; z-index:1; opacity:0; border:0; padding:0; background:transparent; cursor:not-allowed; }
+.source-unknown-hit:focus-visible { opacity:1; outline:2px dotted #555; background:#7772; }
+.source-legend { display:flex; flex-wrap:wrap; gap:8px 16px; padding:12px; margin:12px 0; border:1px solid #d8d1de; border-radius:6px; font-size:13px; background:#fff9; }
+.source-legend small { flex-basis:100%; font-size:12px; }
+.legend-paragraph { border-bottom:2px solid #7936bb; }
+.legend-fragment { border-bottom:2px dashed #926000; }
+.source-pending { padding:12px; border:1px solid #926000; border-radius:6px; }
+.source-pending button { margin:4px; }
+.source-instruction { background:#9756d712; padding:12px; border-radius:6px; }
+@media(max-width:760px) { .source-editor { overflow:visible; } .source-correction { display:block; } }
