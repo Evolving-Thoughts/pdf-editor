@@ -1,4 +1,5 @@
 import { SourceTextPanel } from './SourceTextPanel'
+import type { SourceHistory } from './SourceTextPanel'
 import { ExportDialog, type PreparedExport } from './ExportDialog'
 import { compressPdf, checkExportAbort, type CompressionPreset } from '../core/pdf/compressPdf'
 import { encodeCompressedImage } from '../core/images/compressImage'
@@ -68,6 +69,8 @@ function draftSummary(record: DraftRecord): DraftSummary {
 
 export default function App() {
   const [sourceTextOpen, setSourceTextOpen] = useState(false)
+  // Unchecked inline drafts of the correction panel come before document history.
+  const [sourceHistory, setSourceHistory] = useState<SourceHistory | null>(null)
   const [exportDialogOpen, setExportDialogOpen] = useState(false)
   const [exportBusy, setExportBusy] = useState(false)
   const [searchOpen, setSearchOpen] = useState(false)
@@ -916,8 +919,8 @@ export default function App() {
                 <button
                   type="button"
                   aria-label="Rückgängig"
-                  disabled={!store.canUndo || pageBusy || cropActive}
-                  onClick={() => store.undo()}
+                  disabled={!(sourceHistory?.canUndo || (store.canUndo && !sourceHistory?.dirty)) || pageBusy || cropActive}
+                  onClick={() => { if (sourceHistory?.canUndo) sourceHistory.undo(); else if (!sourceHistory?.dirty) store.undo() }}
                   title="Rückgängig (Strg+Z)"
                 >
                   <svg
@@ -936,8 +939,8 @@ export default function App() {
                 <button
                   type="button"
                   aria-label="Wiederholen"
-                  disabled={!store.canRedo || pageBusy || cropActive}
-                  onClick={() => store.redo()}
+                  disabled={!(sourceHistory?.canRedo || (store.canRedo && !sourceHistory?.dirty)) || pageBusy || cropActive}
+                  onClick={() => { if (sourceHistory?.canRedo) sourceHistory.redo(); else if (!sourceHistory?.dirty) store.redo() }}
                   title="Wiederholen (Strg+Y)"
                 >
                   <svg
@@ -1146,7 +1149,7 @@ export default function App() {
       <div className="workspace" ref={workspaceRef} inert={exportDialogOpen || redactionBusy || openingFile || exportBusy || !!loadingDraftId}>
         {pdf && searchOpen && !pageManagerOpen && !pageBusy && <SearchWindow pdf={pdf} overlays={overlays} onClose={closeSearch} onHits={onSearchHits} onJump={onSearchJump}/>}
         {pdf && pageManagerOpen && originalBytes && <PagesManager nativeWidgets={nativeWidgets} key={activeDraftId} pdf={pdf} store={store} original={originalBytes} busy={pageBusy} onCropActive={setCropActive} />}
-        {pdf && sourceTextOpen && originalBytes && !pageBusy && <SourceTextPanel key={activeDraftId} store={store} original={originalBytes} onClose={() => setSourceTextOpen(false)} />}
+        {pdf && sourceTextOpen && originalBytes && !pageBusy && <SourceTextPanel key={activeDraftId} store={store} original={originalBytes} onClose={() => setSourceTextOpen(false)} onHistory={setSourceHistory} />}
         {!pageManagerOpen && !sourceTextOpen && <>
         {pageBusy && <p role="status" className="hint">Seitenansicht wird aktualisiert …</p>}
         {pdf && !pageBusy && (
