@@ -24,7 +24,7 @@ export async function setInlineText(page, text) {
 export const fit = (page) => page.locator('#source-fit').innerText()
 export async function checkInPdf(page) {
   await page.getByRole('button', { name: 'In PDF prüfen', exact: true }).click()
-  await page.getByText('Ergebnis in der echten PDF bereit. Absatz und Übergang zum Folgeinhalt ansehen.', { exact: true }).waitFor()
+  await page.getByText(/^Ergebnis( mit \d+ geänderten Absätzen)? in der echten PDF bereit\./).waitFor()
   await page.locator('.source-pdf-preview canvas[data-render-state="ready"]').waitFor()
 }
 export const applyButton = (page) => page.getByRole('button', { name: 'Übernehmen', exact: true })

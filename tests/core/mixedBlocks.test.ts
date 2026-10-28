@@ -2,6 +2,7 @@ import { expect, test } from 'vitest'
 import { PDFDocument, PDFName, StandardFonts } from 'pdf-lib'
 import type { PDFFont } from 'pdf-lib'
 import { inspectPageSource, previewPageSource } from '../../src/core/sourceText/mixedPdf'
+import { previewPageSources } from '../../src/core/sourceText/mixedBatch'
 import type { SimpleSourceRun } from '../../src/core/sourceText/simplePdf'
 
 const n = PDFName.of
@@ -148,4 +149,35 @@ test('a hard line break, painted content between fragments or mixed sizes split 
   expect(groups((await inspectPageSource(await wordPdf([hard], { tags: true }), 0)).runs)).toHaveLength(2)
   const painted = await inspectPageSource(await wordPdf([body], { tags: true, between: '0 0 1 RG 300 300 m 310 310 l S' }), 0)
   expect(groups(painted.runs).length).toBeGreaterThan(1)
+})
+
+test('several paragraphs are checked together in one candidate; each against the previous result', async () => {
+  const bytes = await wordPdf([body, next], { tags: true })
+  const a = await inspectPageSource(bytes, 0), g = groups(a.runs)
+  const sel = (rs: SimpleSourceRun[]) => ({ digest: a.digest, runId: rs[0].id, expectedText: rs[0].text, scope: 'paragraph' as const })
+  const out = await previewPageSources(bytes, [
+    { selection: sel(g[0]), replacement: paragraphText.replace('handelt.', 'hande.') },
+    { selection: sel(g[1]), replacement: 'Der folgende Absatz bleibt stehen. ' },
+  ])
+  const after = groups((await inspectPageSource(out, 0)).runs)
+  expect(after.map((rs) => rs[0].paragraph!.text)).toEqual([paragraphText.replace('handelt.', 'hande.'), 'Der folgende Absatz bleibt stehen. '])
+  // Both blocks keep their first baseline.
+  expect(after.map((rs) => rs[0].baseline)).toEqual(g.map((rs) => rs[0].baseline))
+  // A stale paragraph refuses the whole batch and names the paragraph.
+  await expect(previewPageSources(bytes, [
+    { selection: sel(g[0]), replacement: paragraphText.replace('handelt.', 'hande.') },
+    { selection: { ...sel(g[1]), expectedText: 'veraltet' }, replacement: 'x' },
+  ])).rejects.toThrow(/veraltet/)
+  // A failing later paragraph names it; nothing is returned.
+  await expect(previewPageSources(bytes, [
+    { selection: sel(g[0]), replacement: paragraphText.replace('handelt.', 'hande.') },
+    { selection: sel(g[1]), replacement: 'Der folgende Absatz bleibt unverändert stehen. ' + 'und wächst über die Seitenbreite hinaus '.repeat(40) },
+  ])).rejects.toThrow(/Absatz „Der folgende Absatz/)
+})
+
+test('member runs of one block share one paragraph object (sent once to the UI)', async () => {
+  const a = await inspectPageSource(await wordPdf([body, next], { tags: true }), 0), g = groups(a.runs)
+  expect(g[0].every((r) => r.paragraph === g[0][0].paragraph)).toBe(true)
+  const copy = structuredClone(a.runs)
+  expect(copy[0].paragraph).toBe(copy[1].paragraph)
 })

@@ -16,10 +16,12 @@ interface Props {
   blocks?: ReadonlySet<string>
   /** Block currently edited inline (drawn by the editor instead). */
   editing?: string
+  /** Blocks with an unchecked draft (drawn by a passive editor instead). */
+  drafted?: ReadonlySet<string>
   onBlock?: (id: string, from?: { x: number; y: number }, to?: { x: number; y: number }) => void
 }
 
-export function SourceTextSelection({ runs, size, fragments, selection, onSelect, onReject, blocks, editing, onBlock }: Props) {
+export function SourceTextSelection({ runs, size, fragments, selection, onSelect, onReject, blocks, editing, drafted, onBlock }: Props) {
   const lastUp = useRef<{ x: number; y: number } | undefined>(undefined)
   const mask = useId().replace(/:/g, ''), dragged = useRef(false), layer = useRef<HTMLDivElement>(null), downAt = useRef<{ x: number; y: number } | undefined>(undefined)
   const transform = size.sourceTransform
@@ -121,7 +123,7 @@ export function SourceTextSelection({ runs, size, fragments, selection, onSelect
     {order.map(first => {
       const id = first.run.selection?.groupId
       if (!id) return hit(first, true)
-      if (id === editing) return null
+      if (id === editing || drafted?.has(id)) return null
       const members = groups.get(id)!
       const x = Math.min(...members.map(b => b.x)), y = Math.min(...members.map(b => b.y))
       const width = Math.max(...members.map(b => b.x + b.width)) - x, height = Math.max(...members.map(b => b.y + b.height)) - y
