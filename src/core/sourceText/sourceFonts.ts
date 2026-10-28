@@ -4,7 +4,21 @@ import { sourceFontCodec, supportedSourceText } from './encoding'
 import type { SourceFontCodec } from './encoding'
 import { streamBytes } from './streams'
 
-export interface SourceFont { codec: SourceFontCodec; decode: Map<number, string>; codeBytes: 1 | 2; name: string; bbox: number[]; advances?: Map<number, number>; boxes?: Map<number, number[]> }
+export interface SourceFont {
+  codec: SourceFontCodec; decode: Map<number, string>; codeBytes: 1 | 2; name: string; bbox: number[]; advances?: Map<number, number>; boxes?: Map<number, number[]>
+  /** Width (1/1000 em) for codes without an explicit entry. */
+  defaultWidth?: number
+  /** Measurement-only font: text stays a protected obstacle, never editable. */
+  locked?: string
+  /** False when the viewer supplies the glyph program (standard/unembedded fonts). */
+  embedded?: boolean
+  /** CSS generic family hint for the inline editor when no outline exists. */
+  family?: string
+  /** SVG outline (1000 units per em, y up) of a code for the inline editor. */
+  outline?: (code: number) => string | undefined
+  /** Characters the codec can insert: [character, code, width (1/1000 em)]. */
+  insertable?: [string, number, number][]
+}
 const n = PDFName.of
 function fail(): never { throw new Error('Diese Originalschrift oder ihre Zeichenkodierung ist nicht eindeutig unterstützt. Es wurde nichts verändert.') }
 const alphabet = Array.from({ length: 95 }, (_, i) => String.fromCharCode(i + 32)).join('') + 'ÄÖÜäöüßẞ–—‘’‚‛“”„…'

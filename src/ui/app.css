@@ -1096,3 +1096,19 @@
 .source-pending button { margin:4px; }
 .source-instruction { background:#9756d712; padding:12px; border-radius:6px; }
 @media(max-width:760px) { .source-editor { overflow:visible; } .source-correction { display:block; } }
+/* Inline paragraph editor (T16): drawn over the rendered page. */
+.source-inline { position:absolute; inset:0; z-index:3; pointer-events:none; }
+.source-inline-svg { position:absolute; inset:0; width:100%; height:100%; overflow:visible; pointer-events:none; }
+.source-inline-frame { fill:transparent; stroke:#7936bb; stroke-width:1.5px; stroke-dasharray:4 3; vector-effect:non-scaling-stroke; pointer-events:all; cursor:text; }
+.source-inline-selection { fill:#7936bb3d; }
+.source-inline-overflow { fill:#c628281f; }
+.source-inline-missing { fill:#c6282899; }
+.source-inline-caret { stroke:#28232e; stroke-width:1.5px; vector-effect:non-scaling-stroke; animation:source-blink 1.05s steps(1) infinite; }
+@keyframes source-blink { 50% { opacity:0; } }
+@media (prefers-reduced-motion:reduce) { .source-inline-caret { animation:none; } }
+.source-inline-input { position:absolute; width:2px; height:1em; padding:0; border:0; margin:0; opacity:0; resize:none; overflow:hidden; font-size:16px; pointer-events:none; white-space:pre; }
+.source-fit { padding:10px 12px; border-radius:6px; border:1px solid #d8d1de; font-weight:600; }
+.source-fit-good { border-color:#2e7d32; color:#1b5e20; background:#2e7d3212; }
+.source-fit-bad { border-color:#c62828; color:#9b1c1c; background:#c628280f; }
+.source-fit-neutral { color:inherit; }
+.source-hint { font-size:13px!important; opacity:.8; }
