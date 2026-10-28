@@ -193,8 +193,11 @@ function finish(input: {
   for (const [character, all] of byChar) {
     // Several glyphs for one character: insert only when they are metrically
     // interchangeable; unchanged text always keeps its original codes. Unused
-    // encoding slots are commonly declared with width 0 and are ignored.
-    const used = all.filter(v => v.width > 0), list = used.length ? used : all
+    // encoding slots are commonly declared with width 0 and are ignored; a
+    // character with only zero-width slots is not in the subset at all (Word
+    // writes space-only subsets whose other slots are 0).
+    const list = all.filter(v => v.width > 0)
+    if (!list.length) continue
     if (list.some(v => Math.abs(v.width - list[0].width) > 1e-6)) continue
     glyphs.push({ character, code: list[0].code.toString(16).padStart(input.codeBytes * 2, '0'), advance: list[0].width })
   }

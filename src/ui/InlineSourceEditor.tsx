@@ -19,6 +19,12 @@ interface Props {
   onRange: (range: TextRange) => void
   onSubmit: () => void
   onCancel: () => void
+  /** Ctrl/Cmd+Z, Ctrl/Cmd+Shift+Z and Ctrl/Cmd+Y: the panel's draft history. */
+  onUndo?: () => void
+  onRedo?: () => void
+  /** A changed paragraph that is not being edited: drawn, not focused. */
+  passive?: boolean
+  onActivate?: (at?: { x: number; y: number }) => void
 }
 type Box = { left: number; right: number; bottom: number; top: number }
 
@@ -52,7 +58,7 @@ const slant = (name: string) => (/italic|oblique/i.test(name) ? 'italic' : 'norm
  * page background and the live layout is drawn with the font's own outlines
  * (or a CSS fallback with the same advances). A hidden textarea carries
  * input, IME and clipboard; caret and selection are drawn here. */
-export function InlineSourceEditor({ model, view, text, range, size, canvas, disabled, onChange, onRange, onSubmit, onCancel }: Props) {
+export function InlineSourceEditor({ model, view, text, range, size, canvas, disabled, onChange, onRange, onSubmit, onCancel, onUndo, onRedo, passive, onActivate }: Props) {
   const area = useRef<HTMLTextAreaElement>(null), svg = useRef<SVGSVGElement>(null)
   const goal = useRef<number | null>(null), drag = useRef<number | null>(null)
   const t = size.sourceTransform
@@ -66,7 +72,7 @@ export function InlineSourceEditor({ model, view, text, range, size, canvas, dis
     if (!a || a.value !== text) return
     if (a.selectionStart !== range.start || a.selectionEnd !== range.end) a.setSelectionRange(range.start, range.end, range.backward ? 'backward' : 'forward')
   }, [text, range])
-  useEffect(() => { if (!disabled) area.current?.focus({ preventScroll: true }) }, [disabled, model.id])
+  useEffect(() => { if (!disabled && !passive) area.current?.focus({ preventScroll: true }) }, [disabled, passive, model.id])
   const lines = view?.lines ?? []
   const lastBaseline = lines.at(-1)?.baseline ?? model.lines.at(-1)!.baseline
   const frame: Box = {
@@ -96,6 +102,12 @@ export function InlineSourceEditor({ model, view, text, range, size, canvas, dis
     onRange(o < a ? { start: o, end: a, backward: true } : { start: a, end: o })
   }
   function key(event: KeyboardEvent<HTMLTextAreaElement>) {
+    if ((event.ctrlKey || event.metaKey) && !event.altKey && (event.key.toLowerCase() === 'z' || event.key.toLowerCase() === 'y')) {
+      // The browser's own textarea undo does not know the other paragraphs.
+      event.preventDefault()
+      if (event.key.toLowerCase() === 'y' || event.shiftKey) onRedo?.(); else onUndo?.()
+      return
+    }
     if (event.key === 'Escape') { event.preventDefault(); onCancel(); return }
     if (event.key === 'Enter') { event.preventDefault(); if (event.ctrlKey || event.metaKey) onSubmit(); return }
     if (!view || !stops || !['ArrowUp', 'ArrowDown', 'Home', 'End'].includes(event.key) || event.altKey) return
@@ -118,11 +130,12 @@ export function InlineSourceEditor({ model, view, text, range, size, canvas, dis
   const caret = stops?.[focus], caretLine = caret && lines[caret.line]
   const textareaAt = caretLine ? { left: X(caret.x), top: Y(caretLine.baseline + model.size) } : { left: X(frame.left), top: Y(frame.top) }
   const pct = (v: number, axis: 'x' | 'y') => `${(v / (axis === 'x' ? size.width : size.height)) * 100}%`
-  return <div className="source-inline" data-block-id={model.id}>
+  const box = (b: Box) => ({ left: pct(X(b.left), 'x'), top: pct(Y(b.top), 'y'), width: pct(b.right - b.left, 'x'), height: pct(b.top - b.bottom, 'y') })
+  return <div className={`source-inline${passive ? ' source-inline-passive' : ''}`} data-block-id={model.id}>
     <svg ref={svg} className="source-inline-svg" viewBox={`0 0 ${size.width} ${size.height}`} preserveAspectRatio="none" aria-hidden="true">
       {model.slots.map((s, i) => <rect key={i} x={X(s.left) - 0.6} y={Y(s.top) - 0.6} width={s.right - s.left + 1.2} height={s.top - s.bottom + 1.2} fill={fill} />)}
       {view && [...view.overflow].map(i => <rect key={`o${i}`} className="source-inline-overflow" x={X(lines[i].left)} y={Y(lines[i].baseline + 0.9 * model.size)} width={Math.max(1, lines[i].extent - lines[i].left)} height={1.15 * model.size} />)}
-      {view && stops && selectionRects(view, stops, range.start, range.end, model.size).map((r, i) => <rect key={`s${i}`} className="source-inline-selection" x={X(r.left)} y={Y(r.top)} width={r.right - r.left} height={r.top - r.bottom} />)}
+      {view && stops && !passive && selectionRects(view, stops, range.start, range.end, model.size).map((r, i) => <rect key={`s${i}`} className="source-inline-selection" x={X(r.left)} y={Y(r.top)} width={r.right - r.left} height={r.top - r.bottom} />)}
       {view && paintedGlyphs(view).map(p => {
         const g = p.glyph, font = g.font as LiveFont, x = X(p.x), y = Y(p.baseline), bad = view.missing.has(p.k), over = view.overflow.has(p.line)
         if (bad) return <rect key={p.k} className="source-inline-missing" x={x} y={y - 0.7 * g.size} width={Math.max(g.width, 0.3 * g.size)} height={0.8 * g.size} />
@@ -130,10 +143,14 @@ export function InlineSourceEditor({ model, view, text, range, size, canvas, dis
         if (path) return <path key={p.k} d={path} fill={color} transform={`translate(${x} ${y}) scale(${g.size / 1000} ${-g.size / 1000})`} />
         return <text key={p.k} x={x} y={y} fontSize={g.size} fill={color} fontFamily={font.family ?? 'sans-serif'} fontWeight={weight(font.name)} fontStyle={slant(font.name)} textLength={g.width > 0 ? g.width : undefined} lengthAdjust="spacingAndGlyphs">{p.char}</text>
       })}
-      {caret && caretLine && range.start === range.end && !disabled && <line key={`${focus}:${text.length}`} className="source-inline-caret" x1={X(caret.x)} x2={X(caret.x)} y1={Y(caretLine.baseline - 0.22 * model.size)} y2={Y(caretLine.baseline + 0.88 * model.size)} />}
-      <rect className="source-inline-frame" x={X(frame.left)} y={Y(frame.top)} width={frame.right - frame.left} height={frame.top - frame.bottom} onPointerDown={down} onPointerMove={move} onPointerUp={() => { drag.current = null }} onPointerCancel={() => { drag.current = null }} />
+      {caret && caretLine && range.start === range.end && !disabled && !passive && <line key={`${focus}:${text.length}`} className="source-inline-caret" x1={X(caret.x)} x2={X(caret.x)} y1={Y(caretLine.baseline - 0.22 * model.size)} y2={Y(caretLine.baseline + 0.88 * model.size)} />}
+      {passive
+        ? <rect className="source-inline-frame source-inline-draft" x={X(frame.left)} y={Y(frame.top)} width={frame.right - frame.left} height={frame.top - frame.bottom} />
+        : <rect className="source-inline-frame" x={X(frame.left)} y={Y(frame.top)} width={frame.right - frame.left} height={frame.top - frame.bottom} onPointerDown={down} onPointerMove={move} onPointerUp={() => { drag.current = null }} onPointerCancel={() => { drag.current = null }} />}
     </svg>
-    <textarea ref={area} className="source-inline-input" aria-label={`Absatz bearbeiten: ${model.text.slice(0, 80)}`} aria-describedby="source-fit" spellCheck={false} autoCapitalize="off" autoComplete="off" maxLength={4096} disabled={disabled} value={text} style={{ left: pct(textareaAt.left, 'x'), top: pct(textareaAt.top, 'y') }}
+    {passive && <button type="button" className="source-inline-open" style={box(frame)} disabled={disabled} aria-label={`Geänderten Absatz bearbeiten: ${text.slice(0, 80)}`} title="Geänderter Absatz · noch nicht in der PDF geprüft"
+      onClick={event => onActivate?.(event.detail ? pagePoint(event) : undefined)} />}
+    {!passive && <textarea ref={area} className="source-inline-input" aria-label={`Absatz bearbeiten: ${model.text.slice(0, 80)}`} aria-describedby="source-fit" spellCheck={false} autoCapitalize="off" autoComplete="off" maxLength={4096} disabled={disabled} value={text} style={{ left: pct(textareaAt.left, 'x'), top: pct(textareaAt.top, 'y') }}
       onChange={event => {
         const a = event.currentTarget, value = a.value.replace(/[\r\n\t]/g, ' ')
         goal.current = null
@@ -144,6 +161,6 @@ export function InlineSourceEditor({ model, view, text, range, size, canvas, dis
         if (a.value !== text || drag.current !== null) return
         if (a.selectionStart !== range.start || a.selectionEnd !== range.end) { goal.current = null; onRange({ start: a.selectionStart, end: a.selectionEnd, backward: a.selectionDirection === 'backward' }) }
       }}
-      onKeyDown={key} />
+      onKeyDown={key} />}
   </div>
 }

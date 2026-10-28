@@ -25,7 +25,22 @@ dimmed (click for the reason).
   under a link/highlight would move, a character missing from the original font —
   drawn as a red placeholder — or an unsupported character). Lines that do not
   fit are drawn in red.
-- **In PDF prüfen** writes the change into a copy of the real PDF in the worker,
+- **Several paragraphs at once:** clicking another paragraph keeps the current
+  change as an unchecked draft (still drawn in place with a green outline, click
+  to continue editing it). The panel lists all changed paragraphs with their
+  fit status and a × to discard one; **Alle Änderungen verwerfen** drops all,
+  **Absatz verlassen** keeps the draft. The live fit of each paragraph takes the
+  new line boxes of the other drafts into account. No discard prompt appears
+  when switching paragraphs.
+- **Undo before checking:** typing is grouped per word (new step at a space, a
+  pause > 1 s or a paragraph switch; `draftHistory.ts`). The toolbar
+  **Rückgängig/Wiederholen** and Ctrl+Z / Ctrl+Y / Ctrl+Shift+Z step through the
+  unchecked drafts first (including discarding); the document history is used
+  again once nothing is pending.
+- **In PDF prüfen** checks all drafts together in one candidate: the worker
+  (`previewPageSources`) applies them top to bottom, re-analyzes the page after
+  each paragraph and finds the next block again by text and first-line
+  position; errors name the paragraph. It writes the change into a copy of the real PDF in the worker,
   re-analyzes and renders it. **Übernehmen** applies it (one undoable command),
   **Weiter bearbeiten** returns to the editor with the same text, **Original
   anzeigen** compares. There is no review checkbox or reflow confirmation for
@@ -41,6 +56,16 @@ identically in every case. Only the worker's verified candidate can be applied.
 Fragments without a proved paragraph (and PDFs handled only by the older
 single-stream adapter) keep the side-panel textarea; a multi-line paragraph of
 that older adapter still needs its explicit reflow confirmation.
+
+**Pages and speed:** the left panel shows page thumbnails (as in the page
+manager, lazily rendered; a horizontal strip on narrow screens) below the
+controls instead of a page dropdown. Pages render offscreen and the canvas is
+swapped in; rendered pages (LRU 5), PDF.js document handles per buffer (LRU 6)
+and successful analyses per buffer/page are cached, neighbour pages are
+pre-rendered and pre-analyzed, and up to two idle workers are kept warm. On the
+supplied Thymeleaf course PDF a page switch dropped from ~1–1.25 s to 5–50 ms
+(dev server; ~10 ms in the production build); the analysis no longer clones the
+paragraph model once per run (~2 MB less per page of the Spring book).
 
 Apply changes only the selected page's source revision; copies of that page,
 page geometry and unrelated state stay as before. Revisions persist through the
@@ -109,7 +134,8 @@ state is restored, so operators between members keep their effect.
 - `fontReader.ts`, `fontTables.ts`, `type1.ts`, `sourceFonts.ts`: font program
   parsing (TrueType/CFF/Type1), widths, glyph boxes, outlines and CMap proofs.
 - `mixedPdf.ts`: page interpreter, block offer, `previewBlock` emission and
-  post-verification; `space.ts`: shared free-space rules.
+  post-verification; `mixedBatch.ts`: several paragraphs of one page in one
+  candidate (`previewPageSources`); `space.ts`: shared free-space rules.
 - `mixedBlocks.ts`: block building, `layoutEdit`, `emitBlock`.
 - `editModel.ts`: serializable block/font model for the UI (`liveFont`,
   `liveBlock`, `modelSpace`); `inlineLayout.ts`: caret stops, hit tests,
@@ -119,8 +145,10 @@ state is restored, so operators between members keep their effect.
   `SourceTextPanel.tsx`: analysis/check/apply flow and the fit display.
 - `simplePdf.ts`, `layout.ts`, `directSelection.ts`: older single-stream adapter
   and fragment selection.
-- `sourceText.worker.ts` / `client.ts`: one disposable worker per job, abort and
-  a 30-second deadline. `revision.ts`: page source replacement as one command.
+- `sourceText.worker.ts` / `client.ts`: one worker per job (up to two warm idle
+  workers are reused; abort/timeout terminates), a 30-second deadline and a
+  per-buffer analysis cache. `draftHistory.ts`: unchecked draft history;
+  `sourcePdfCache.ts`: PDF.js handle cache. `revision.ts`: page source replacement as one command.
 
 Bounds: input 16 MiB/200 pages; content streams 512 KiB compressed/decoded and
 2 MiB decoded content per selected mixed page (legacy: total); 4096 legacy /
@@ -139,17 +167,22 @@ server; workers process local copied buffers.
 
 ## Validation
 
-- 333 unit/integration tests, among them `tests/core/sourceReflow.test.ts`
+- 338 unit/integration tests, among them `tests/core/sourceReflow.test.ts`
   (model ↔ PDF layout agreement, HTML-renderer pages, ActualText NBSP, soft
   hyphens, links, obstacles, caret geometry, fit status) and
-  `tests/core/mixedBlocks.test.ts` (Word-like fragments).
+  `tests/core/mixedBlocks.test.ts` (Word-like fragments, batched multi-paragraph checks), `tests/core/draftHistory.test.ts`
+  (draft undo/redo grouping) and a regression test for zero-width
+  space-only font subsets (Word): characters whose glyph slots all have width 0
+  are no longer insertable, so the same family's fallback subset is used
+  (previously appending after a space drew overlapping glyphs).
 - Browser smokes (all in `npm run qa:ci`): `source-text-smoke.mjs` (click/drag
   into the inline editor, caret keys, fit display, check, compare, apply, export,
   undo/redo, save/reopen, rejection, document switch, desktop/mobile, embedded
   subset outlines), `source-text-mixed-smoke.mjs` (tagged TJ source; optional
   local `SOURCE_TEXT_PDF`/`SOURCE_TEXT_FIND`/`SOURCE_TEXT_REPLACE`),
-  `source-text-selection-smoke.mjs` (native drag, CropBox origin, zoom, dirty
-  guard, keyboard/mobile, unproved text, stale candidate) and
+  `source-text-selection-smoke.mjs` (native drag, CropBox origin, zoom,
+  two paragraphs checked together, toolbar/keyboard undo/redo of drafts, page
+  thumbnails, keyboard/mobile, unproved text, stale candidate) and
   `source-text-blocks-smoke.mjs` (Word-like block, click-to-caret, gapless
   shortening).
 - Supplied documents and their fonts are tested locally only and are NOT in the

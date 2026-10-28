@@ -69,7 +69,7 @@ try {
   await page
     .getByRole('button', { name: 'Originaltext korrigieren', exact: true })
     .click()
-  if (index) await page.getByLabel('Seite', { exact: true }).selectOption({ index })
+  if (index) await page.getByRole('button', { name: `Seite ${index + 1} anzeigen`, exact: true }).click()
   await page.locator('.source-run-hit').first().waitFor()
   const target = page.locator('.source-run-hit').filter({ hasText: find }).first()
   assert.equal(await target.count(), 1, 'source typo can be selected directly')
