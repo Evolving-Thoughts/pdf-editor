@@ -105,7 +105,7 @@ interface Run {
 }
 const n = PDFName.of,
   identity = (): Matrix => [1, 0, 0, 1, 0, 0]
-function fail(reason: string): never {
+export function fail(reason: string): never {
   throw new Error(
     reason.endsWith('Es wurde nichts verändert.')
       ? reason
@@ -1125,6 +1125,22 @@ export async function inspectPageSource(bytes: Uint8Array, pageIndex: number) {
   // A block is offered only as a whole; one unsafe member keeps it fragment-only.
   const offered = result.blocks.filter((block) => block.members.every((i) => views[i]))
   for (const block of offered) for (const i of block.members) member.set(i, block)
+  // One shared object per block: structured clone sends shared objects once,
+  // not once per member run (HTML renderers emit one run per character).
+  const paragraphs = new Map<SourceBlock, NonNullable<SimpleSourceRun['paragraph']>>()
+  const paragraphOf = (block: SourceBlock) => {
+    let p = paragraphs.get(block)
+    if (!p)
+      paragraphs.set(block, (p = {
+        text: block.text,
+        lineCount: block.lines.length,
+        leading: block.leading,
+        width: block.right - block.lines[0].left,
+        separator: '',
+        automatic: true,
+      }))
+    return p
+  }
   const runs: SimpleSourceRun[] = []
   result.runs.forEach((r, i) => {
     const block = member.get(i)
@@ -1133,16 +1149,7 @@ export async function inspectPageSource(bytes: Uint8Array, pageIndex: number) {
     runs.push({
       ...r.view,
       selection: characters ? { characters, groupId: block?.id } : undefined,
-      paragraph: block
-        ? {
-            text: block.text,
-            lineCount: block.lines.length,
-            leading: block.leading,
-            width: block.right - block.lines[0].left,
-            separator: '',
-            automatic: true,
-          }
-        : undefined,
+      paragraph: block ? paragraphOf(block) : undefined,
     })
   })
   if (!runs.length)
@@ -1454,7 +1461,7 @@ function glyphBoxes(glyphs: readonly BlockGlyph[], lines: readonly PlacedLine[])
  * moves. The block stays top anchored; extra lines need proved free space.
  * Every member show is replaced by an invisible show of the same advance and
  * the text state is restored, so operators between members keep their effect. */
-async function previewBlock(result: Analysis, block: SourceBlock, replacement: string, pageIndex: number) {
+export async function previewBlock(result: Analysis, block: SourceBlock, replacement: string, pageIndex: number) {
   const { doc, page, runs, obstacles, refs } = result
   if (!supportedSourceText(replacement) || !replacement.trim())
     fail('Dieser Ersatztext wird nicht unterstützt.')
