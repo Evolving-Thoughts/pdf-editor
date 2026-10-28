@@ -135,13 +135,11 @@ test('edited words keep the style of the text they replace (italic stays italic)
   expect(/Oblique/.test(chars[at - 2].font)).toBe(false)
 })
 
-test('untagged multi-line blocks need an explicit reflow confirmation', async () => {
+test('untagged multi-line blocks reflow like tagged ones (the inline editor shows the result first)', async () => {
   const pdf = await wordPdf([body, next])
   const a = await inspectPageSource(pdf, 0)
-  expect(groups(a.runs)[0][0].paragraph).toMatchObject({ lineCount: 4, automatic: false })
-  expect(groups(a.runs)[1][0].paragraph!.automatic).toBe(true) // single line
-  await expect(edit(pdf, 'handelt.', 'hande.')).rejects.toThrow(/bestätigt/)
-  const out = await edit(pdf, 'handelt.', 'hande.', { confirmReflow: true })
+  expect(groups(a.runs)[0][0].paragraph).toMatchObject({ lineCount: 4, automatic: true })
+  const out = await edit(pdf, 'handelt.', 'hande.')
   expect(groups((await inspectPageSource(out, 0)).runs)[0][0].paragraph!.text).toContain('Hier hande.')
 })
 
