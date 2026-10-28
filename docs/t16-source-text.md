@@ -3,175 +3,124 @@
 Base: `origin/main` at `efccee4215164444de248e2d1a119b79484fb5e3`.
 Branch: `feat/t16-source-text-corrections`.
 
-## User workflow
+## User workflow (inline editor)
 
-Open **Textkorrektur** (accessible name: **Originaltext korrigieren**). The approved
-layout A places the editor sidebar beside a large actual PDF preview. Select a
-page, then highlight text directly on the original PDF or click/focus an outlined
-run (Tab/Enter/Space). The selected substring is copied into the focused sidebar
-textarea; unchanged text outside the selection is preserved. A full proved
-paragraph can also be selected explicitly. The original font/size are retained; no font-menu
-match or replacement font is needed. Enter corrected text, generate the candidate
-PDF, inspect the paragraph and following content, and explicitly confirm review
-before applying. Compare original/candidate without discarding the input; zoom
-and scroll the actual rendered PDF on desktop/mobile.
+Open **Textkorrektur** (accessible name: **Originaltext korrigieren**). The page
+is rendered with PDF.js; every proved paragraph has a solid outline, text that
+can only be corrected as a single fragment a dashed one, and unproved text is
+dimmed (click for the reason).
 
-Support is visible before selecting: solid outlines mean proved paragraphs,
-dashed outlines mean fragment-only correction. Other extracted text is dimmed and
-can be clicked for an explanation; while analysis runs its status is unknown.
-PDF.js extraction never authorizes an edit: the invisible native-selection layer
-uses original-font character advances from the trusted adapter, including TJ,
-Tc/Tw and the native CropBox viewport transform. Nonmonotone/invalid geometry is
-not selectable. The selection DOM is limited to 40,000 proved characters per page;
-a paragraph is not partially offered when this budget would cut its group.
-Independent fragments and unsupported ranges cannot be silently joined. Selection
-within one proved paragraph maps to full-paragraph offsets, but still needs reflow
-confirmation for a cross-line edit. Draft changes require explicit confirmation
-before switching selection/page or using the sidebar close action. Candidate/review state is invalidated
-on input or selection changes; candidate geometry is never used for a new edit.
+- **Click into a paragraph** and the caret lands at the click point; a mouse
+  drag inside one paragraph opens it with that range selected; Tab + Enter opens
+  it with the caret at the end. The original lines are masked with the page
+  background sampled from the canvas, and the live layout is drawn **in place**
+  with the font's own glyph outlines (SVG paths from the embedded program; a
+  CSS family with the exact PDF advances for unembedded standard fonts).
+- A hidden textarea carries typing, IME, clipboard and undo of the browser;
+  caret and selection are drawn on the page. Arrow keys, Shift selection,
+  Home/End and Up/Down follow the visual lines. Enter inserts no hard break,
+  Ctrl/Cmd+Enter checks, Esc leaves the paragraph.
+- The **fit display** updates on every keystroke: `Passt · 3 → 4 Zeilen`, or a
+  concrete reason (no free space below, page/clip edge, neighbour content, text
+  under a link/highlight would move, a character missing from the original font —
+  drawn as a red placeholder — or an unsupported character). Lines that do not
+  fit are drawn in red.
+- **In PDF prüfen** writes the change into a copy of the real PDF in the worker,
+  re-analyzes and renders it. **Übernehmen** applies it (one undoable command),
+  **Weiter bearbeiten** returns to the editor with the same text, **Original
+  anzeigen** compares. There is no review checkbox or reflow confirmation for
+  proved blocks; the real-PDF check is the gate.
 
-Supported multiline text blocks also offer paragraph reflow. This is OFF by
-default: the user must confirm that the block is flowing prose, not intentionally
-broken lines. PDF operators do not reliably encode semantic paragraph intent.
-Reconstruction/word-wrap validation must also pass; confirmation alone cannot
-turn an unsupported structure into an editable paragraph.
+The live layout runs the same code as the worker (`layoutEdit` in
+`mixedBlocks.ts`, free-space rules in `space.ts`) on a serialized block model
+(`editModel.ts`), so the display and the check agree: on 284 edits across the
+local corpus (Chrome, Ghostscript, LibreOffice, ReportLab, a Spring/HTML-renderer
+book PDF, a Thymeleaf course PDF) the fit display and the worker decided
+identically in every case. Only the worker's verified candidate can be applied.
 
-Apply is one undoable command. Only the selected page's source revision changes;
-other copies of that source page, page geometry and unrelated state remain as
-before. Revised source bytes are persisted through the existing IndexedDB source
-store, and normal page composition/export uses the revision. Candidate generation,
-comparison, cancellation and rejection do not modify the document or draft.
+Fragments without a proved paragraph (and PDFs handled only by the older
+single-stream adapter) keep the side-panel textarea; a multi-line paragraph of
+that older adapter still needs its explicit reflow confirmation.
 
-## Supported subset and explicit refusals
+Apply changes only the selected page's source revision; copies of that page,
+page geometry and unrelated state stay as before. Revisions persist through the
+IndexedDB source store and normal export. Checking, comparing, cancelling and
+rejections never modify the document or draft.
 
-The original uniform text-block adapter is retained for proved paragraph reflow.
-A second, page-scoped adapter handles ordinary mixed-content PDFs without
-requiring all pages/resources to use that same narrow grammar.
+## Supported producers and content
 
-- The 12 standard Helvetica/Times/Courier Type1 WinAnsi variants, verified
-  embedded TrueType/CIDFontType2 subsets (Type0 Identity-H) and embedded one-byte
-  TrueType/WinAnsi subsets. Actual glyph programs, widths and code mappings are
-  checked. No extracted font is installed, bundled or substituted.
-- Bounded, fully consumed bfchar and bfrange ToUnicode mappings (sequential and
-  array destinations). Ligature mappings may be decoded/preserved as obstacles,
-  but are not reconstructed into editable glyph sequences.
-- Horizontal source correction supports Tj/TJ, explicit/relative Tm/Td/TD/T*,
-  existing character/word spacing and simple text state. Original kerning is
-  retained for unchanged prefix/suffix pairs, never reassigned to new pairs or
-  squeezed to fit. The original post-show text matrix is restored so a shorter
-  or longer replacement does not unexpectedly move other positioned fragments.
-- Unchanged marked-content tags/MCIDs and the existing structure tree are kept.
-  ActualText/expansion caches are refused with an explicit reason because they
-  would need a synchronized semantic update. This is not accessibility repair.
-- Images, Form XObjects, vector paths and link rectangles are preserved and
-  conservatively treated as protected obstacles. Form contents are not edited;
-  their transformed BBox protects the complete form. Unknown painting, complex
-  clipping/transparency, inline images, font/shaping states and unproved metrics
-  fail closed **on the selected page**, with a concrete reason/operator/page.
-- A blank unembedded WinAnsi space-only font may be preserved using its declared
-  width; it is never offered as editable text. No other glyph is invented.
-- Unshared content refs are replaced in place, not left as orphaned old text.
-  Shared content uses copy-on-write so unrelated pages stay unchanged.
-- ASCII, German umlauts/ß/ẞ and supported punctuation are editable only when the
-  original encoding contains the required unambiguous glyph. No raw UTF-8 PDF
-  strings, fallback font, shrinking, horizontal squeezing or font-menu dependency.
-- Forms/signatures/encryption, CFF/Type3, unsupported CMaps, unproved transforms,
-  scans/OCR and unknown selected-page operators remain explicit refusal cases.
-- Editor pages with overlays, redactions, manual crop, rotation or non-unit
-  UserUnit still require separate preservation support; ordinary editing remains
-  available. Document-level signature/form/semantic safety checks still apply.
+- **Word** (fragment per word group, clipped BT/ET, absolute Tm), **LibreOffice**
+  (tagged, one MCID per line; the structure element joins the lines), **Chrome /
+  Skia**, **Ghostscript** (CFF), **ReportLab** (Type1, TrueType, justified text),
+  **HTML renderers** such as the Spring book PDF (scaled page matrix, one Tj per
+  character, pixel line grid, ActualText for ligatures and no-break spaces).
+- Fonts: standard 14 WinAnsi, embedded TrueType/CIDFontType2 (Identity-H),
+  one-byte TrueType, Type1 (PFB/PFA programs) and CFF/CIDFontType0C. Glyph
+  widths, codes and Unicode mappings are proved from the program and ToUnicode;
+  new characters are only taken from codes the subset actually contains.
+- Layout: uniform scaling via CTM/Tm, justified text (natural spacing, then
+  re-justified), soft hyphens and line-end word hyphens, first-line indent,
+  contour wrap beside images (per-line left edges), TJ kerning of unchanged
+  pairs, Tc/Tw, colour, ExtGState transparency, shadings, inline images,
+  annotations and unsigned forms on the page.
+- Deliberately locked (kept as obstacles, not editable): optional content
+  (layers), soft masks, non-rectangular clips, text render modes other than
+  fill, patterns, multi-code ActualText spans.
+- Out of scope: scans/OCR, Type3, rotated/vertical text, complex scripts, text
+  inside Form XObjects, signed or XFA PDFs, symbolic TrueType without Unicode
+  meaning, characters outside the embedded subset.
 
-**Important distinction:** a Word-produced line may consist of many independent
-positioned fragments, sometimes in different font subsets. Supported fragments
-can be corrected without rejecting the PDF as a whole. They are not automatically
-merged into a paragraph. The existing proved uniform paragraph model below is
-still required for reflow; a user checkbox alone does not prove reconstruction.
-New text must fit without reducing protected separation from other fragments.
+## Guarantees
 
-## Paragraph model and protected space
+- Following paragraphs, images, graphics and annotations never move or change:
+  after emission the page is re-analyzed and every non-member show (text, font,
+  fill, position, advance) and every obstacle must be identical.
+- Extra lines are only added into proved free space below the block with the
+  contextual gap `max(3, min(original gap, leading / 2))` pt, inside MediaBox,
+  CropBox, the original clip and any background box (with its margin).
+- Existing lines keep origin and baseline; text under a link, highlight or
+  underline keeps its exact position (otherwise the edit is refused).
+- No shrinking, squeezing or substitute fonts; edits are atomic.
 
-A reflow candidate is a single uniform BT/ET block in one content stream with
-one explicit Tm and positive constant leading; following lines use T*. All lines
-must share the same left edge and text state. Rewrapping the reconstructed text
-at the maximum existing advance width must reproduce every original line and
-baseline exactly. Lists, obvious sentence/hard-break boundaries, line-end
-hyphenation and special spacing are not reconstructed automatically.
+## Reconstructed source blocks
 
-Reflow preserves first baseline, original left/right bounds, font size and
-leading. Whole words move down/up naturally; no new hyphenation, stretched spaces
-or horizontal squeezing. Shorter paragraphs stay top anchored and leave space
-below; following content never moves. Line-only editing in a recognized paragraph
-also cannot widen that paragraph.
+`mixedBlocks.ts` rebuilds a paragraph from its glyphs in page space. Fragments
+join when they share font size, structure element / marked content, paint,
+clip, CTM, text-matrix linear part and graphics state, with no painted content
+or annotation between their lines; same-baseline fragments must be contiguous
+within 0.12 × size (the residual becomes that pair's kern). Lines join with the
+block leading (tolerance `max(0.05, 0.06 × size)`); a line end without a space
+becomes a virtual space, a hyphen between lowercase letters a soft hyphen.
+Greedy rewrapping must reproduce every original break, otherwise the block
+splits (a two-line block whose first line stands alone becomes a heading).
 
-Growth is allowed only downward inside BOTH MediaBox and CropBox and a supported
-text-only collision model. Painted extents conservatively use full-font bounding
-boxes and possible ink overhang, rather than equating advance width with ink.
-This can reject tight layouts; it cannot authorize editing unknown graphics.
-
-Minimum clearance is 3 physical source points (rotation/UserUnit restricted to
-0/1). For paragraph growth toward following text, preserve a contextual gap of
-`max(3, min(original gap, leading / 2))` points. Every candidate line is also
-checked against every nonmember text block, including neighbouring columns.
-A complete paragraph must fit; partial edits are never returned/applied.
-
-## Reconstructed source blocks (Word-style fragments)
-
-Word and similar producers write every line fragment (often each word group,
-every style change and even a final period) as its own clipped `BT/ET` with an
-absolute `Tm`. Editing such fragments individually leaves gaps or overlaps, so
-`src/core/sourceText/mixedBlocks.ts` rebuilds the paragraph from its glyphs:
-
-- Consecutive fragments join a block only in the plain form: unscaled horizontal
-  text (CTM/Tm unit scale, Tz 100, no rise, |Tc|,|Tw| ≤ size), decodable codes,
-  same marked-content sequence, clip, CTM and size, and no painted content in
-  between. Fragments on one baseline must be contiguous within 0.12 × size; the
-  measured residual becomes that pair's kern, so unchanged text stays exactly in
-  place.
-- A new line continues the block only if the previous one ended on a space or a
-  word hyphen and the baseline advance matches the block leading. Tagged blocks
-  may change their left edge per line (text flowing around an image).
-- Greedy rewrapping at the column width must reproduce every original break;
-  where the next word would have fitted, the break is intentional and the block
-  splits. Otherwise the group degrades to independent single-line blocks.
-- A block owns all text shows of its BT objects. It is re-emitted into the first
-  member's BT (one `Tm` per line, `Tf`/fill/`Tc`/`Tw` per style run, TJ kerning);
-  other members' shows are blanked. The result is re-analyzed: the edited block
-  must be found again and every non-member show must be unchanged.
-- Edits are diffed per glyph. New characters take the style of the text they
-  replace (italic stays italic), falling back only to a sibling subset of the
-  same family and colour. Untouched ligature glyphs keep their original code;
-  splitting one needs the separate letters in the font, otherwise it is refused.
-
-Structure-tagged multi-line blocks and every single-line block reflow without
-confirmation; the UI shows one outline per block and one click selects it.
-Untagged multi-line blocks still require the explicit reflow confirmation.
-Single-line blocks (headings, code lines) never wrap: following text on the
-line moves with the edit. Existing lines keep their origin and baseline and are
-compared as full-font bands, so only a longer line can approach other content;
-extra lines below are added only into free space with the contextual gap above.
-Following paragraphs never move.
+On edit, glyphs are diffed; new characters take the style of the text they
+replace. Wrapping restarts one line above the first change; unchanged following
+lines keep their original glyphs. The block is emitted at its first member
+(`Tm` per line, style runs, TJ kerning, ActualText spans re-emitted); every other
+member show is replaced by an invisible show of the same advance and the text
+state is restored, so operators between members keep their effect.
 
 ## Architecture and safety boundaries
 
 - `encoding.ts`: immutable validated one-/two-byte original-font codec.
-- `layout.ts`: pure, bounded whole-word paragraph planner; no PDF/React mutation.
-- `contentTokens.ts`: strict bounded content lexer with literal/octal/hex decoding.
-- `streams.ts`: native streaming Flate decompression with output limits; no
-  unbounded library inflate or stacked/unknown filters.
-- `sourceFonts.ts`: standard-font metrics and actual embedded-font/CMap proofs.
-- `mixedPdf.ts`: selected-page mixed-content interpreter, original TJ/font-state
-  correction, protected graphics/link bounds, copy-on-write and candidate checks.
-- `simplePdf.ts`: conservative operator analysis, paragraph validation, collision
-  checks, replacement of the original stream object, candidate save/reopen check.
-- `sourceText.worker.ts` / `client.ts`: one disposable dedicated worker per job,
-  abort termination and a 30-second deadline, including parser/font work. Copy
-  input before transfer, never detach the editor's original bytes.
-- `revision.ts`: selected-page source replacement as one undo/redo command.
-- `directSelection.ts`: pure source-run/paragraph range binding and partial replacement.
-- `SourceTextSelection.tsx`: source-bound native text selection, persistent highlights,
-  support outlines and a separate extraction-based dimming mask.
-- `SourceTextPanel.tsx`: version/selection-bound async UI, actual PDF.js preview,
-  explicit review, original/candidate comparison and atomic commit guards.
+- `contentTokens.ts`, `streams.ts`: bounded lexer (literal/hex/inline images)
+  and bounded Flate/LZW/ASCII filters.
+- `fontReader.ts`, `fontTables.ts`, `type1.ts`, `sourceFonts.ts`: font program
+  parsing (TrueType/CFF/Type1), widths, glyph boxes, outlines and CMap proofs.
+- `mixedPdf.ts`: page interpreter, block offer, `previewBlock` emission and
+  post-verification; `space.ts`: shared free-space rules.
+- `mixedBlocks.ts`: block building, `layoutEdit`, `emitBlock`.
+- `editModel.ts`: serializable block/font model for the UI (`liveFont`,
+  `liveBlock`, `modelSpace`); `inlineLayout.ts`: caret stops, hit tests,
+  selection rectangles, placeholders and the fit status.
+- `InlineSourceEditor.tsx`: in-page editor (mask, SVG glyphs, caret, hidden
+  textarea); `SourceTextSelection.tsx`: outlines and native selection;
+  `SourceTextPanel.tsx`: analysis/check/apply flow and the fit display.
+- `simplePdf.ts`, `layout.ts`, `directSelection.ts`: older single-stream adapter
+  and fragment selection.
+- `sourceText.worker.ts` / `client.ts`: one disposable worker per job, abort and
+  a 30-second deadline. `revision.ts`: page source replacement as one command.
 
 Bounds: input 16 MiB/200 pages; content streams 512 KiB compressed/decoded and
 2 MiB decoded content per selected mixed page (legacy: total); 4096 legacy /
@@ -190,48 +139,21 @@ server; workers process local copied buffers.
 
 ## Validation
 
-- 324 unit/integration tests (including `tests/core/mixedBlocks.test.ts` for
-  Word-like fragment blocks), including real standard-font and embedded Noto Sans
-  subset DE/EN correction, missing/ambiguous glyph refusals, actual paragraph
-  growth/shrink/overflow, intentional breaks/hyphens, unchanged neighbour baseline,
-  no retained old text stream, source copies, overlays, undo/redo, IndexedDB and
-  exported PDFs; worker abort/deadline and stale/async-mutation guards.
-- `scripts/source-text-smoke.mjs`: real worker/UI/candidate render/review,
-  comparison, paragraph shrink, export, undo/redo, manual save/reopen, embedded
-  subset, invalidated input, rejected overflow and document switch. Desktop and
-  390px mobile screenshots, zoom and no horizontal document overflow.
-- `scripts/source-text-mixed-smoke.mjs`: selected page, tagged/TJ source,
-  worker/candidate/review/apply/export. Optional local-only `SOURCE_TEXT_PDF`,
-  `SOURCE_TEXT_FIND`, `SOURCE_TEXT_REPLACE` exercise a supplied file without
-  committing it, its text, or its embedded fonts. Additional unit regressions
-  cover images/paths/links, another unsupported page, relative positioning,
-  shared streams, no orphan old text, bfrange bounds and concrete refusals.
-- Registered in `npm run qa:ci`; existing shape/crop tests are retained. The new
-  header action is compact and omitted in page management, so crop confirmation
-  still fits at 320px without scrolling its controls.
-- Also test the STATIC Pages build under `/pdf-editor/`, including source-worker
-  and fontkit assets, not merely the development module server.
+- 333 unit/integration tests, among them `tests/core/sourceReflow.test.ts`
+  (model ↔ PDF layout agreement, HTML-renderer pages, ActualText NBSP, soft
+  hyphens, links, obstacles, caret geometry, fit status) and
+  `tests/core/mixedBlocks.test.ts` (Word-like fragments).
+- Browser smokes (all in `npm run qa:ci`): `source-text-smoke.mjs` (click/drag
+  into the inline editor, caret keys, fit display, check, compare, apply, export,
+  undo/redo, save/reopen, rejection, document switch, desktop/mobile, embedded
+  subset outlines), `source-text-mixed-smoke.mjs` (tagged TJ source; optional
+  local `SOURCE_TEXT_PDF`/`SOURCE_TEXT_FIND`/`SOURCE_TEXT_REPLACE`),
+  `source-text-selection-smoke.mjs` (native drag, CropBox origin, zoom, dirty
+  guard, keyboard/mobile, unproved text, stale candidate) and
+  `source-text-blocks-smoke.mjs` (Word-like block, click-to-caret, gapless
+  shortening).
+- Supplied documents and their fonts are tested locally only and are NOT in the
+  repository.
 
-An eight-page supplied Word-style PDF was tested locally: editable fragments
-were found on all eight pages, and a real typo correction passed the browser,
-actual preview and independently extracted export. Independent MuPDF rendering
-of the source candidate left pages 1–7 pixel-identical and all image resources
-unchanged. This is evidence for that fixture, not a claim of universal support.
-The supplied document and extracted proprietary fonts are NOT in the repository.
-
-`prototypes/t16-correction-review.html` retains the original three synthetic UI
-variants as design history only. It is outside production entry points and is not
-an alternative PDF engine. Actual test outcomes are recorded in the PR.
-
-## Direct-selection regression coverage
-
-`source-text-selection-smoke.mjs` exercises real mouse dragging (not an injected
-DOM selection), substring-only DE/EN export independently read with PDF.js,
-native CropBox offsets, zoom, focus, persistent highlighting, dirty-selection
-confirmation, keyboard/mobile use, unproved text, page switches and stale preview
-rejection. The existing T16 suite also drags across proved paragraph lines and
-rejects cross-paragraph selections; reflow, undo/redo, save/drafts and embedded-font
-export remain covered. `source-text-blocks-smoke.mjs` covers a Word-like tagged
-fragment layout: one outline and keyboard stop per paragraph, a single click
-selects the block, no confirmation, and shortening `handelt.` to `hande.` pulls
-the period along in the exported PDF. All four T16 suites are part of `qa:ci`.
+This is NOT secure redaction: originals remain in local undo/draft history. No
+PDF or user text leaves the device; workers process local copies.
