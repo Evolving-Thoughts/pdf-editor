@@ -59,6 +59,15 @@ export function modelSpace(model: EditModel, rects: readonly Box[]): BlockSpace 
   return { limits, clip, whole, leading, bandBottom, bandTop, others: rects.filter((_, i) => !own.has(i)) }
 }
 
+/** Free-space rules while other paragraphs of the page carry unchecked
+ * drafts: their original rectangles (`removed`, indices into `rects`) give way
+ * to the boxes of their edited lines (`extra`). The worker checks a batch the
+ * same way, against the real result of the previous paragraphs. */
+export function draftSpace(model: EditModel, rects: readonly Box[], removed: ReadonlySet<number>, extra: readonly Box[]): BlockSpace {
+  const base = modelSpace(model, rects.map((r, i) => (removed.has(i) && !model.space.own.includes(i) ? undefined : r)) as Box[])
+  return { ...base, others: [...base.others.filter(Boolean), ...extra] }
+}
+
 export function editModels(items: { block: SourceBlock; runId: string; expectedText: string; room: number; limit: number; slots: BlockRect[]; pinned: number[]; space: ModelSpace }[]) {
   const fonts: EditFont[] = [], ids = new Map<SourceFont, number>()
   const fontId = (font: SourceFont) => {

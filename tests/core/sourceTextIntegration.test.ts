@@ -1,7 +1,7 @@
 import { readFileSync } from 'node:fs'
 import { resolve } from 'node:path'
 import { expect, test, vi } from 'vitest'
-import { PDFDocument, StandardFonts, PDFName, PDFDict, PDFRawStream } from 'pdf-lib'
+import { PDFDocument, StandardFonts, PDFName, PDFDict, PDFRawStream, PDFArray, PDFNumber } from 'pdf-lib'
 import fontkit from '@pdf-lib/fontkit'
 import { getDocument } from 'pdfjs-dist/legacy/build/pdf.mjs'
 import { inspectSimpleSourceText, previewSimpleSourceCorrection } from '../../src/core/sourceText/simplePdf'
@@ -162,4 +162,25 @@ test('line-only corrections do not widen an already recognized paragraph', async
   const bytes = await paragraphFixture(), analysis = await inspectSimpleSourceText(bytes), run = analysis.runs[0]
   expect(run.paragraph).toBeDefined()
   await expect(previewSimpleSourceCorrection(bytes, { digest: analysis.digest, runId: run.id, expectedText: run.text }, 'W'.repeat(30))).rejects.toThrow(/Absatzbreite/)
+})
+
+test('a character whose only slot has width 0 is not in the subset and is never inserted', async () => {
+  const doc = await PDFDocument.create(); doc.registerFontkit(fontkit)
+  const embedded = await doc.embedFont(readFileSync('node_modules/@fontsource/noto-sans/files/noto-sans-latin-400-normal.woff'), { subset: true })
+  const sheet = doc.addPage(); sheet.drawText('Hallo München', { font: embedded, size: 12, x: 50, y: 700 }); sheet.drawText('W', { font: embedded, size: 12, x: 50, y: 400 })
+  await doc.save() // writes the subset, its widths and ToUnicode
+  const fonts = doc.getPages()[0].node.Resources()!.lookup(PDFName.of('Font'), PDFDict), font = fonts.lookup(fonts.keys()[0], PDFDict)
+  const { streamBytes } = await import('../../src/core/sourceText/streams')
+  const map = new TextDecoder().decode(await streamBytes(font.lookup(PDFName.of('ToUnicode')) as PDFRawStream))
+  const cid = parseInt(/<([0-9A-Fa-f]{4})> <0057>/.exec(map)![1], 16) // 'W'
+  const cidFont = (font.lookup(PDFName.of('DescendantFonts'), PDFArray)).lookup(0, PDFDict), widths = cidFont.lookup(PDFName.of('W'), PDFArray)
+  for (let i = 0; i < widths.size(); i += 2) {
+    const first = (widths.lookup(i) as PDFNumber).asNumber(), list = widths.lookup(i + 1, PDFArray)
+    if (cid >= first && cid < first + list.size()) list.set(cid - first, PDFNumber.of(0))
+  }
+  const { inspectPageSource } = await import('../../src/core/sourceText/mixedPdf')
+  const analysis = await inspectPageSource(await doc.save(), 0)
+  const insertable = analysis.fonts.flatMap(f => f.insertable.map(([c]) => c))
+  expect(insertable).toContain('H')
+  expect(insertable).not.toContain('W')
 })
