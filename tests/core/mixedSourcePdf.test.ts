@@ -98,7 +98,8 @@ test('page-scoped analysis does not reject a supported page for unrelated operat
   expect(chars[0].width).toBeCloseTo(8.004 + 0.1, 8) // A at 12pt plus original Tc
   expect(chars[12].offset).toBeCloseTo(chars[11].offset + chars[11].width - 0.06, 8) // TJ 5
   expect(chars.at(-1)!.offset + chars.at(-1)!.width).toBeCloseTo(a.runs[0].width, 8)
-  expect(a.runs[0].selection!.groupId).toBeUndefined() // never invent paragraph support
+  // A lone line is offered as a single-line block (it never wraps).
+  expect(a.runs[0].paragraph).toMatchObject({ lineCount: 1, text: 'A small typo here' })
 
   expect(a.runs[0].text).toBe('A small typo here')
   await expect(inspectPageSource(b, 1)).rejects.toThrow(
@@ -205,24 +206,21 @@ test('unshared replacement does not leave the original text stream as an orphan'
     }
 })
 test('unsupported selected-page painting reports the operator and page, without modifying input', async () => {
-  const b = await fixture({ extra: '/Shade sh' }),
+  const b = await fixture({ extra: 'BadPaint' }),
     snapshot = b.slice()
-  await expect(inspectPageSource(b, 0)).rejects.toThrow(/Seite 1.*sh/)
+  await expect(inspectPageSource(b, 0)).rejects.toThrow(/Seite 1.*BadPaint/)
   expect(b).toEqual(snapshot)
+  // Shadings are protected areas, not a reason to refuse the page.
+  expect((await inspectPageSource(await fixture({ extra: '/Shade sh' }), 0)).runs.length).toBeGreaterThan(0)
 })
-test('ActualText and nonrectangular clipping fail with a concrete preservation reason', async () => {
-  await expect(
-    inspectPageSource(
-      await fixture({ extra: '/Span << /ActualText (cache) >> BDC EMC' }),
-      0,
-    ),
-  ).rejects.toThrow(/ActualText/)
-  await expect(
-    inspectPageSource(
-      await fixture({ extra: '10 20 m 50 60 l 20 80 l h W n' }),
-      0,
-    ),
-  ).rejects.toThrow(/Clipfläche/)
+test('multi-glyph ActualText, non-rectangular clips and optional content stay locked obstacles', async () => {
+  const texts = async (extra: string) => (await inspectPageSource(await fixture({ extra }), 0)).runs.map((r) => r.text)
+  const show = (t: string) => `BT /F1 12 Tf 1 0 0 1 60 500 Tm (${t}) Tj ET`
+  expect(await texts(`/Span << /ActualText (cache) >> BDC ${show('xyz')} EMC`)).not.toContain('xyz')
+  expect(await texts(`q 10 20 m 50 60 l 20 80 l h W n ${show('clipped')} Q`)).not.toContain('clipped')
+  expect(await texts(`3 Tr ${show('hidden')}`)).not.toContain('hidden')
+  // An ActualText span equal to its glyphs adds no meaning and stays editable.
+  expect(await texts(`/Span << /ActualText (same) >> BDC ${show('same')} EMC`)).toContain('same')
 })
 test('stale selections, paragraph requests on fragmented source and missing glyphs reject atomically', async () => {
   const b = await fixture(),
@@ -233,12 +231,11 @@ test('stale selections, paragraph requests on fragmented source and missing glyp
     previewPageSource(b, { ...s, digest: 'stale' }, 'new'),
   ).rejects.toThrow(/veraltet/)
   await expect(
-    previewPageSource(
-      b,
-      { ...s, scope: 'paragraph', confirmReflow: true },
-      'new',
-    ),
-  ).rejects.toThrow(/keinem nachgewiesenen Absatz/)
+    previewPageSource(b, { ...s, runId: 'mixed:0:99' }, 'new'),
+  ).rejects.toThrow(/veraltet/)
+  // The lone line is its own block; a paragraph-scoped edit works.
+  const out = await previewPageSource(b, { ...s, scope: 'paragraph' }, 'A new line')
+  expect((await inspectPageSource(out, 0)).runs[0].text).toBe('A new line')
   await expect(previewPageSource(b, s, 'ẞ')).rejects.toThrow(/Originalschrift/)
 })
 test('bounded composite lexer respects literal strings and absolute offsets', () => {
@@ -303,7 +300,15 @@ test('structure-tree replacement text is not left as a stale accessibility cache
       K: [{ Type: 'StructElem', S: 'P', ActualText: 'cached original' }],
     }),
   )
-  await expect(inspectPageSource(await d.save(), 0)).rejects.toThrow(
-    /Strukturbaum.*ActualText/,
+  // No marked content is owned by that element: the page stays editable.
+  expect((await inspectPageSource(await d.save(), 0)).runs.length).toBeGreaterThan(0)
+  // When the element owns the MCID, its text is locked (here: all text).
+  d.catalog.set(
+    n('StructTreeRoot'),
+    d.context.obj({
+      Type: 'StructTreeRoot',
+      K: [{ Type: 'StructElem', S: 'P', ActualText: 'cached original', K: 0 }],
+    }),
   )
+  await expect(inspectPageSource(await d.save(), 0)).rejects.toThrow(/Keine sicher/)
 })

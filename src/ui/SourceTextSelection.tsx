@@ -12,10 +12,16 @@ interface Props {
   selection: DirectSelection | null
   onSelect: (value: DirectSelection) => void
   onReject: (text: string) => void
+  /** Blocks with an inline editor model; a click opens it at that point. */
+  blocks?: ReadonlySet<string>
+  /** Block currently edited inline (drawn by the editor instead). */
+  editing?: string
+  onBlock?: (id: string, from?: { x: number; y: number }, to?: { x: number; y: number }) => void
 }
 
-export function SourceTextSelection({ runs, size, fragments, selection, onSelect, onReject }: Props) {
-  const mask = useId().replace(/:/g, ''), dragged = useRef(false)
+export function SourceTextSelection({ runs, size, fragments, selection, onSelect, onReject, blocks, editing, onBlock }: Props) {
+  const lastUp = useRef<{ x: number; y: number } | undefined>(undefined)
+  const mask = useId().replace(/:/g, ''), dragged = useRef(false), layer = useRef<HTMLDivElement>(null), downAt = useRef<{ x: number; y: number } | undefined>(undefined)
   const transform = size.sourceTransform
   const horizontal = Math.abs(transform[0] - 1) < 1e-8 && Math.abs(transform[1]) < 1e-8 && Math.abs(transform[2]) < 1e-8 && Math.abs(transform[3] + 1) < 1e-8
   const position = (run: SimpleSourceRun) => ({ x: run.x + transform[4], y: -run.baseline + transform[5] })
@@ -55,7 +61,15 @@ export function SourceTextSelection({ runs, size, fragments, selection, onSelect
   }
   // Keep reading order: a block renders where its first member appears.
   const order = boxes.filter(b => { const id = b.run.selection?.groupId; return !id || groups.get(id)![0] === b })
-  function choose(run: SimpleSourceRun) {
+  // Client point → PDF page space (horizontal pages only, see `horizontal`).
+  const pagePoint = (event: { clientX: number; clientY: number }) => {
+    const r = layer.current!.getBoundingClientRect()
+    return { x: ((event.clientX - r.left) / r.width) * size.width - transform[4], y: transform[5] - ((event.clientY - r.top) / r.height) * size.height }
+  }
+  const inline = (run: SimpleSourceRun) => { const id = run.selection?.groupId; return id && run.paragraph?.automatic && blocks?.has(id) && onBlock ? id : undefined }
+  function choose(run: SimpleSourceRun, at?: { x: number; y: number }) {
+    const id = inline(run)
+    if (id) { onBlock!(id, at); return }
     const members = run.paragraph?.automatic && run.selection?.groupId ? groups.get(run.selection.groupId) ?? [] : []
     const value = members.length
       ? directSelection(selectable, members[0].run.id, 0, members.at(-1)!.run.id)
@@ -69,6 +83,13 @@ export function SourceTextSelection({ runs, size, fragments, selection, onSelect
     const range = native.getRangeAt(0)
     const element = (node: Node) => (node instanceof Element ? node : node.parentElement)?.closest<HTMLElement>('[data-source-id]')
     const start = element(range.startContainer), end = element(range.endContainer)
+    const startRun = start && runs.find(r => r.id === start.dataset.sourceId), endRun = end && runs.find(r => r.id === end.dataset.sourceId)
+    const id = startRun && inline(startRun)
+    if (id && endRun && inline(endRun) === id) {
+      native.removeAllRanges()
+      onBlock!(id, downAt.current, lastUp.current)
+      return
+    }
     if (!start || !end) {
       native.removeAllRanges()
       onReject('Bitte nur innerhalb eines unterstützten Bereichs markieren. Nicht unterstützte und unabhängige Textfragmente dürfen nicht gemeinsam geändert werden.')
@@ -84,7 +105,7 @@ export function SourceTextSelection({ runs, size, fragments, selection, onSelect
     if (value) onSelect(value)
     else onReject('Diese Auswahl überschreitet unabhängig positionierte oder nicht unterstützte Textbereiche. Bitte eine einzelne unterstützte Stelle markieren.')
   }
-  return <div className="source-selection-layer" data-analysis-state="ready" onPointerUp={finish}>
+  return <div ref={layer} className="source-selection-layer" data-analysis-state="ready" onPointerDown={event => { downAt.current = pagePoint(event) }} onPointerUp={event => { lastUp.current = pagePoint(event); finish() }}>
     <svg className="source-support-mask" viewBox={`0 0 ${size.width} ${size.height}`} preserveAspectRatio="none" aria-hidden="true">
       <defs><mask id={mask}><rect width={size.width} height={size.height} fill="black" />
         {fragments.map((f, i) => <polygon key={i} points={f.quad.map(p => `${p.x},${p.y}`).join(' ')} fill="white" />)}
@@ -100,6 +121,7 @@ export function SourceTextSelection({ runs, size, fragments, selection, onSelect
     {order.map(first => {
       const id = first.run.selection?.groupId
       if (!id) return hit(first, true)
+      if (id === editing) return null
       const members = groups.get(id)!
       const x = Math.min(...members.map(b => b.x)), y = Math.min(...members.map(b => b.y))
       const width = Math.max(...members.map(b => b.x + b.width)) - x, height = Math.max(...members.map(b => b.y + b.height)) - y
@@ -119,9 +141,9 @@ export function SourceTextSelection({ runs, size, fragments, selection, onSelect
     const focusable = !automatic || primary
     return <div key={run.id} className={`source-run-hit ${grouped ? 'source-member' : ''} ${run.paragraph ? 'source-paragraph' : 'source-fragment'} ${!grouped && active ? 'source-picked' : ''}`} data-source-id={run.id} role={focusable ? 'button' : undefined} aria-hidden={focusable ? undefined : true} tabIndex={focusable ? 0 : -1} aria-label={focusable ? label : undefined} title={title} style={{ left: percent(b.x), top: percent(b.y, 'y'), width: percent(b.width), height: percent(b.height, 'y') }} onKeyDown={event => {
       if (event.key === 'Enter' || event.key === ' ') { event.preventDefault(); choose(run) }
-    }} onClick={() => {
+    }} onClick={event => {
       if (dragged.current) { dragged.current = false; return }
-      choose(run)
+      choose(run, event.detail ? pagePoint(event) : undefined)
     }}>
       {Array.from(run.text).map((char, i) => {
         const c = run.selection!.characters[i], at = (prefixes.get(run.id) ?? 0) + i
