@@ -9,10 +9,12 @@ import {
   PDFNumber,
   PDFRawStream,
   PDFRef,
+  PDFString,
+  PDFHexString,
 } from 'pdf-lib'
 import { contentTokens } from './contentTokens'
 import type { ContentToken } from './contentTokens'
-import { readSourceFont } from './sourceFonts'
+import { readPageFont, UnmeasurableFont } from './fontReader'
 import type { SourceFont } from './sourceFonts'
 import { streamText } from './streams'
 import {
@@ -21,15 +23,20 @@ import {
 } from './simplePdf'
 import type { SimpleSourceRun, SourceSelection } from './simplePdf'
 import { supportedSourceText } from './encoding'
+import { blockedBy, contains, overlap, separation, slotBox, union } from './space'
+import type { BlockSpace, Box } from './space'
 import {
   buildBlocks,
-  editBlock,
+  codeAdvance,
   emitBlock,
+  hidden,
   inkBox,
+  layoutEdit,
+  pdfNumber,
   placeLine,
-  wrapBlock,
 } from './mixedBlocks'
-import type { BlockInput, PlacedLine, SourceBlock } from './mixedBlocks'
+import type { BlockGlyph, BlockInput, BlockRect, PlacedLine, SourceBlock } from './mixedBlocks'
+import { editModels } from './editModel'
 
 type Matrix = [number, number, number, number, number, number]
 interface Rect {
@@ -37,6 +44,8 @@ interface Rect {
   right: number
   bottom: number
   top: number
+  /** Painted path or annotation that may mark text (background, underline, link). */
+  decor?: boolean
 }
 interface State {
   ctm: Matrix
@@ -55,6 +64,14 @@ interface State {
   clip?: Rect
   lineWidth: number
   miter: number
+  /** Graphics state that makes text drawn under it measurement-only. */
+  locked?: string
+  fillSpace?: string
+  pattern?: boolean
+  /** Horizontal text-space offset of Tm from Tlm (shows and TJ moves). */
+  dx: number
+  /** Applied ExtGState names: block members must share them. */
+  gs: string
 }
 interface Run {
   view: SimpleSourceRun
@@ -74,6 +91,17 @@ interface Run {
   mc: number
   tagged: boolean
   paint: number
+  /** Why this text is only a protected obstacle (never editable). */
+  locked?: string
+  /** Text of an enclosing ActualText span (ligatures, no-break spaces). */
+  actual?: string
+  span?: number
+  mcid?: number
+  /** Show operator: ' and " carry line/spacing semantics of their own. */
+  op: string
+  quote?: { aw: number; ac: number }
+  /** Uniform page scale of the text space, undefined when not uniform. */
+  scale?: number
 }
 const n = PDFName.of,
   identity = (): Matrix => [1, 0, 0, 1, 0, 0]
@@ -92,6 +120,16 @@ const mul = (a: Matrix, b: Matrix): Matrix => [
   a[0] * b[4] + a[2] * b[5] + a[4],
   a[1] * b[4] + a[3] * b[5] + a[5],
 ]
+/** Uniform, unrotated and unmirrored page scale of a text matrix product. */
+function uniformScale(m: Matrix) {
+  const s = m[0]
+  return s > 1e-6 &&
+    Math.abs(m[1]) <= 1e-6 * s &&
+    Math.abs(m[2]) <= 1e-6 * s &&
+    Math.abs(m[3] - s) <= 1e-6 * s
+    ? s
+    : undefined
+}
 const point = (m: Matrix, x: number, y: number) => [
   m[0] * x + m[2] * y + m[4],
   m[1] * x + m[3] * y + m[5],
@@ -110,22 +148,6 @@ const box = (m: Matrix, x: number, y: number, w: number, h: number): Rect => {
     top: Math.max(...pts.map((p) => p[1])),
   }
 }
-const union = (a: Rect, b: Rect): Rect => ({
-  left: Math.min(a.left, b.left),
-  right: Math.max(a.right, b.right),
-  bottom: Math.min(a.bottom, b.bottom),
-  top: Math.max(a.top, b.top),
-})
-const overlap = (a: Rect, b: Rect, gap = 0) =>
-  a.left < b.right + gap &&
-  a.right + gap > b.left &&
-  a.bottom < b.top + gap &&
-  a.top + gap > b.bottom
-const contains = (a: Rect, b: Rect) =>
-  a.left <= b.left + 0.001 &&
-  a.right + 0.001 >= b.right &&
-  a.bottom <= b.bottom + 0.001 &&
-  a.top + 0.001 >= b.top
 const copy = (s: State): State => ({
   ...s,
   ctm: [...s.ctm],
@@ -148,6 +170,16 @@ function name(token?: ContentToken) {
       String.fromCharCode(parseInt(hex, 16)),
     )
 }
+/** PDF text string: UTF-16BE with BOM, otherwise PDFDocEncoding (Latin-1 subset). */
+function textString(bytes: Uint8Array) {
+  if (bytes.length >= 2 && bytes[0] === 0xfe && bytes[1] === 0xff) {
+    if (bytes.length % 2) return undefined
+    let text = ''
+    for (let i = 2; i < bytes.length; i += 2) text += String.fromCharCode((bytes[i] << 8) | bytes[i + 1])
+    return text
+  }
+  return String.fromCharCode(...bytes)
+}
 function numeric(token?: ContentToken) {
   const v = Number(token?.raw)
   if (token?.kind !== 'number' || !Number.isFinite(v) || Math.abs(v) > 1e7)
@@ -169,6 +201,8 @@ function initial(): State {
     render: 0,
     lineWidth: 1,
     miter: 10,
+    dx: 0,
+    gs: '',
   }
 }
 function glyphs(
@@ -176,6 +210,7 @@ function glyphs(
   codes: number[],
   adjustments: number[],
   state: State,
+  override?: string,
 ) {
   let advance = 0,
     bounds: Rect | undefined,
@@ -184,18 +219,15 @@ function glyphs(
   for (let i = 0; i < codes.length; i++) {
     advance -= (((adjustments[i] ?? 0) * state.size) / 1000) * state.hz
     const code = codes[i],
-      char = font.decode.get(code)
-    if (char === undefined)
-      fail(
-        'Die Originalschrift enthält für einen Zeichencode keine nachgewiesene Unicode-Zuordnung.',
-      )
+      // Undecodable codes keep their measured geometry but make the run locked.
+      char = override !== undefined ? (i ? '' : override) : (font.decode.get(code) ?? '\ufffd')
     text += char
     const enc = font.codec.encode(char),
-      width = font.advances?.get(code) ?? (enc.ok ? enc.value.advance : NaN)
+      width = font.advances?.get(code) ?? (enc.ok ? enc.value.advance : font.defaultWidth ?? NaN)
     if (!Number.isFinite(width))
       fail('Die Breite eines Originalzeichens ist nicht nachgewiesen.')
     const b = font.boxes?.get(code) ?? font.bbox
-    if (char.trim()) {
+    if (char.trim() || override !== undefined) {
       const r = box(
         matrix,
         advance + ((b[0] * state.size) / 1000) * state.hz,
@@ -220,7 +252,7 @@ function glyphs(
     bounds: bounds ?? box(matrix, 0, state.rise, 0, 0),
   }
 }
-async function analyze(input: Uint8Array, pageIndex: number) {
+export async function analyze(input: Uint8Array, pageIndex: number) {
   if (!input.length || input.length > 16 * 1024 * 1024)
     fail('Die PDF überschreitet die Größenbegrenzung von 16 MiB.')
   const bytes = input.slice(),
@@ -230,39 +262,86 @@ async function analyze(input: Uint8Array, pageIndex: number) {
     fail(
       'Verschlüsselte oder signierte PDFs können nicht als Originaltext umgeschrieben werden.',
     )
-  if (doc.catalog.has(n('AcroForm')))
+  const form = doc.catalog.lookup(n('AcroForm'))
+  if (form instanceof PDFDict) {
+    // Ordinary form fields are widget annotations (protected obstacles below).
+    // Signatures and XFA are refused: any content change would invalidate them.
+    const flags = form.lookup(n('SigFlags'))
+    if (form.has(n('XFA')) || (flags instanceof PDFNumber && flags.asNumber() & 1))
+      fail('Signierte PDFs oder XFA-Formulare können nicht als Originaltext umgeschrieben werden.')
+    const fields = form.lookup(n('Fields')),
+      queue = fields instanceof PDFArray ? [...fields.asArray()] : []
+    for (let guard = 0; queue.length && guard < 20000; guard++) {
+      const field = doc.context.lookup(queue.pop())
+      if (!(field instanceof PDFDict)) continue
+      if (field.lookup(n('FT'))?.toString() === '/Sig' && field.has(n('V')))
+        fail('Signierte PDFs können nicht als Originaltext umgeschrieben werden.')
+      const kids = field.lookup(n('Kids'))
+      if (kids instanceof PDFArray) queue.push(...kids.asArray())
+    }
+  }
+  const pages = doc.getPages(),
+    page = pages[pageIndex]
+  if (!page || pages.length > 2000)
     fail(
-      'PDFs mit Formular- oder Signaturfeldern benötigen eine noch nicht unterstützte Erhaltungsprüfung.',
+      'Die gewählte Seite ist nicht vorhanden oder das Dokument überschreitet 2000 Seiten.',
     )
+  // Structure elements with their own replacement text (ActualText/E/Alt)
+  // lock exactly the marked-content sequences they own on this page.
   const tree = doc.catalog.lookup(n('StructTreeRoot')),
-    seen = new Set<unknown>()
-  let structureNodes = 0
-  const checkStructure = (value: unknown, depth = 0): void => {
-    if (!value || seen.has(value)) return
-    if (++structureNodes > 10000 || depth > 64)
-      fail('Die Struktur-Tags überschreiten die sicheren Analysegrenzen.')
-    seen.add(value)
+    seen = new Set<string>(),
+    lockedMcids = new Set<number>(),
+    // Owning structure element per MCID: lines of one paragraph often carry
+    // their own marked-content sequences (LibreOffice) but one element.
+    mcidOwner = new Map<number, number>()
+  let structureNodes = 0,
+    elements = 0,
+    lockAllTagged = false
+  const pageRef = page.ref.toString()
+  const walk = (value: unknown, locked: boolean, pg: string | undefined, depth = 0, owner = 0): void => {
+    if (value === undefined || value === null) return
+    if (++structureNodes > 50000 || depth > 64) {
+      lockAllTagged = true
+      return
+    }
+    if (value instanceof PDFNumber) {
+      if (pg === undefined || pg === pageRef) {
+        if (locked) lockedMcids.add(value.asNumber())
+        mcidOwner.set(value.asNumber(), owner)
+      }
+      return
+    }
     if (value instanceof PDFRef) {
-      checkStructure(doc.context.lookup(value), depth + 1)
+      if (seen.has(value.toString())) return
+      seen.add(value.toString())
+      walk(doc.context.lookup(value), locked, pg, depth + 1, owner)
       return
     }
     if (value instanceof PDFArray) {
-      for (const child of value.asArray()) checkStructure(child, depth + 1)
-    } else if (value instanceof PDFDict) {
-      if (value.has(n('ActualText')) || value.has(n('E')))
-        fail(
-          'Der PDF-Strukturbaum enthält eigenen Ersatztext (ActualText/E), der gemeinsam aktualisiert werden müsste.',
-        )
-      checkStructure(value.get(n('K')), depth + 1)
+      for (const child of value.asArray()) walk(child, locked, pg, depth + 1, owner)
+      return
     }
+    if (!(value instanceof PDFDict)) return
+    const own = value.get(n('Pg'))
+    const at = own instanceof PDFRef ? own.toString() : pg
+    const lock =
+      locked ||
+      value.has(n('ActualText')) ||
+      value.has(n('E')) ||
+      (value.has(n('Alt')) && value.lookup(n('S'))?.toString() !== '/Figure')
+    const type = value.lookup(n('Type'))?.toString()
+    if (type === '/MCR') {
+      const id = value.lookup(n('MCID'))
+      if (id instanceof PDFNumber && !value.has(n('Stm')) && (at === undefined || at === pageRef)) {
+        if (lock) lockedMcids.add(id.asNumber())
+        mcidOwner.set(id.asNumber(), owner)
+      }
+      return
+    }
+    if (type === '/OBJR') return
+    walk(value.get(n('K')), lock, at, depth + 1, ++elements)
   }
-  checkStructure(tree)
-  const pages = doc.getPages(),
-    page = pages[pageIndex]
-  if (!page || pages.length > 200)
-    fail(
-      'Die gewählte Seite ist nicht vorhanden oder das Dokument überschreitet 200 Seiten.',
-    )
+  if (tree instanceof PDFDict) walk(tree.get(n('K')), false, undefined)
   if (
     page.getRotation().angle !== 0 ||
     (page.node.lookupMaybe(n('UserUnit'), PDFNumber)?.asNumber() ?? 1) !== 1
@@ -274,28 +353,28 @@ async function analyze(input: Uint8Array, pageIndex: number) {
     objects = resources?.lookupMaybe(n('XObject'), PDFDict),
     obstacles: Rect[] = [],
     runs: Run[] = []
+  // Every annotation (links, comments, form widgets, stamps) is a protected
+  // area: corrected text may neither grow into it nor reduce its distance.
   const annots = page.node.Annots()
-  for (let i = 0; i < (annots?.size() ?? 0); i++) {
+  for (let i = 0; i < Math.min(annots?.size() ?? 0, 5000); i++) {
     const a = annots!.lookup(i)
-    if (
-      !(a instanceof PDFDict) ||
-      a.lookup(n('Subtype'))?.toString() !== '/Link'
-    )
-      fail('Die gewählte Seite enthält eine noch nicht unterstützte Anmerkung.')
+    if (!(a instanceof PDFDict) || a.lookup(n('Subtype'))?.toString() === '/Popup') continue
     const r = a.lookup(n('Rect'))
     if (!(r instanceof PDFArray) || r.size() !== 4)
-      fail('Ein Link hat keine sicheren Bereichsgrenzen.')
+      fail('Eine Anmerkung hat keine sicheren Bereichsgrenzen.')
     const v = r
       .asArray()
       .map((x) => (x instanceof PDFNumber ? x.asNumber() : NaN))
-    if (!v.every(Number.isFinite)) fail('Ein Linkbereich ist ungültig.')
+    if (!v.every(Number.isFinite)) fail('Ein Anmerkungsbereich ist ungültig.')
     obstacles.push({
       left: Math.min(v[0], v[2]),
       right: Math.max(v[0], v[2]),
       bottom: Math.min(v[1], v[3]),
       top: Math.max(v[1], v[3]),
+      decor: true,
     })
   }
+  const annotationCount = obstacles.length
   const contents = page.node.get(n('Contents')),
     resolved = doc.context.lookup(contents),
     refs =
@@ -305,7 +384,8 @@ async function analyze(input: Uint8Array, pageIndex: number) {
           ? [contents]
           : []
   if (refs.length > 128) fail('Die Seite enthält zu viele Inhaltsstreams.')
-  let glyphBudget = 0
+  let glyphBudget = 0,
+    glyphCount = 0
   let state = initial(),
     inText = false,
     markDepth = 0,
@@ -316,7 +396,16 @@ async function analyze(input: Uint8Array, pageIndex: number) {
     btId = 0,
     mcCounter = 0,
     paint = 0
-  const marks: { id: number; tagged: boolean }[] = []
+  interface Mark {
+    id: number
+    tagged: boolean
+    mcid?: number
+    actual?: string
+    lock?: string
+  }
+  const marks: Mark[] = [],
+    spans = new Map<number, number>(),
+    barriers: BlockRect[] = []
   const stack: State[] = [],
     fonts = new Map<string, SourceFont>(),
     ops: ContentToken[] = []
@@ -348,26 +437,32 @@ async function analyze(input: Uint8Array, pageIndex: number) {
         path = path ? union(path, r) : r
       }
       const paintCount = () => paint++
-      const finishPath = (paint: boolean) => {
+      const finishPath = (paint: boolean, stroke = false) => {
         if (path && paint) {
           paintCount()
-          const pad =
-            state.lineWidth *
-            state.miter *
-            (Math.hypot(state.ctm[0], state.ctm[1]) +
-              Math.hypot(state.ctm[2], state.ctm[3]))
+          barriers.push(path)
+          // Fills paint exactly their path; strokes reach at most half the
+          // line width times the miter limit (or a square cap) beyond it.
+          const pad = stroke
+            ? (Math.max(state.lineWidth, 1) / 2) *
+              Math.max(state.miter, Math.SQRT2) *
+              (Math.hypot(state.ctm[0], state.ctm[1]) +
+                Math.hypot(state.ctm[2], state.ctm[3]))
+            : 0
           obstacles.push({
             left: path.left - pad,
             right: path.right + pad,
             bottom: path.bottom - pad,
             top: path.top + pad,
+            decor: true,
           })
         }
         if (pendingClip) {
-          if (!path || !rectangularPath)
-            fail(
-              'Eine nicht rechteckige Clipfläche benötigt eine zusätzliche Geometrieprüfung.',
-            )
+          if (!path) fail('Eine Clipfläche ohne Pfad ist ungültig.')
+          // A non-rectangular clip is bounded by its box; text drawn under it
+          // could be cut by the real shape and therefore stays unchanged.
+          if (!rectangularPath)
+            state.locked = 'Text unter einer nicht rechteckigen Clipfläche bleibt unverändert.'
           state.clip = state.clip
             ? {
                 left: Math.max(state.clip.left, path.left),
@@ -411,6 +506,7 @@ async function analyze(input: Uint8Array, pageIndex: number) {
           btId++
           state.tm = identity()
           state.lm = identity()
+          state.dx = 0
           break
         case 'ET':
           nums(0)
@@ -428,8 +524,7 @@ async function analyze(input: Uint8Array, pageIndex: number) {
           if (state.size <= 0 || state.size > 512)
             fail('Die Schriftgröße wird nicht unterstützt.')
           try {
-            state.font =
-              fonts.get(key) ?? (await readSourceFont(page, key, true))
+            state.font = fonts.get(key) ?? (await readPageFont(page, key))
             if (!fonts.has(key)) {
               glyphBudget += state.font.decode.size
               if (glyphBudget > 131072)
@@ -440,7 +535,7 @@ async function analyze(input: Uint8Array, pageIndex: number) {
             fonts.set(key, state.font)
           } catch (error) {
             fail(
-              `Seite ${pageIndex + 1}, Schrift ${key}: ${error instanceof Error ? error.message : 'Schrift nicht unterstützt.'}`,
+              `Seite ${pageIndex + 1}, Schrift ${key}: ${error instanceof UnmeasurableFont || error instanceof Error ? error.message : 'Schrift nicht unterstützt.'}`,
             )
           }
           break
@@ -449,6 +544,7 @@ async function analyze(input: Uint8Array, pageIndex: number) {
           if (!inText) fail('Textposition außerhalb eines Textobjekts.')
           state.tm = nums(6) as Matrix
           state.lm = [...state.tm]
+          state.dx = 0
           break
         case 'Td':
         case 'TD': {
@@ -457,6 +553,7 @@ async function analyze(input: Uint8Array, pageIndex: number) {
           if (op === 'TD') state.leading = -y
           state.lm = mul(state.lm, [1, 0, 0, 1, x, y])
           state.tm = [...state.lm]
+          state.dx = 0
           break
         }
         case 'T*':
@@ -464,6 +561,7 @@ async function analyze(input: Uint8Array, pageIndex: number) {
           if (!inText) fail('Zeilenwechsel außerhalb eines Textobjekts.')
           state.lm = mul(state.lm, [1, 0, 0, 1, 0, -state.leading])
           state.tm = [...state.lm]
+          state.dx = 0
           break
         case 'TL':
           state.leading = nums(1)[0]
@@ -484,23 +582,36 @@ async function analyze(input: Uint8Array, pageIndex: number) {
           break
         case 'Tr':
           state.render = nums(1)[0]
-          if (state.render !== 0)
-            fail(
-              'Unsichtbarer, konturierter oder als Clip verwendeter Text wird nicht unterstützt.',
-            )
+          if (!Number.isInteger(state.render) || state.render < 0 || state.render > 7)
+            fail('Ungültiger Textdarstellungsmodus.')
           break
+        case "'":
+        case '"':
         case 'Tj':
         case 'TJ': {
-          if (!inText || !state.font || ops.length !== 1)
+          const quoted = op === '"' ? 3 : 1
+          if (!inText || !state.font || ops.length !== quoted)
             fail('Ein Textoperator hat keinen eindeutigen Schriftzustand.')
-          const target = ops[0],
+          let quote: Run['quote']
+          if (op === '"') {
+            quote = { aw: numeric(ops[0]), ac: numeric(ops[1]) }
+            state.tw = quote.aw
+            state.tc = quote.ac
+          }
+          if (op === "'" || op === '"') {
+            state.lm = mul(state.lm, [1, 0, 0, 1, 0, -state.leading])
+            state.tm = [...state.lm]
+            state.dx = 0
+          }
+          const target = ops[quoted - 1],
             items =
               op === 'TJ' && target.kind === 'array'
                 ? target.items
-                : op === 'Tj' && target.kind === 'string'
+                : op !== 'TJ' && target.kind === 'string'
                   ? [target]
                   : undefined
           if (!items) fail('Das TJ-Array enthält nicht unterstützte Elemente.')
+          const font = state.font
           const codes: number[] = [],
             adjustments: number[] = []
           for (const item of items) {
@@ -512,41 +623,69 @@ async function analyze(input: Uint8Array, pageIndex: number) {
             if (
               item.kind !== 'string' ||
               !item.bytes ||
-              item.bytes.length % state.font.codeBytes
+              item.bytes.length % font.codeBytes
             )
               fail('Ein TJ-Array enthält ungültige Zeichencodes.')
-            for (let k = 0; k < item.bytes.length; k += state.font.codeBytes)
+            for (let k = 0; k < item.bytes.length; k += font.codeBytes)
               codes.push(
-                state.font.codeBytes === 1
+                font.codeBytes === 1
                   ? item.bytes[k]
                   : item.bytes[k] * 256 + item.bytes[k + 1],
               )
           }
           if (codes.length > 4096)
             fail('Eine Textstelle überschreitet 4096 Zeichen.')
-          const measured = glyphs(state.font, codes, adjustments, state),
+          // ActualText spans own the meaning of the glyphs they enclose.
+          // A span whose text equals the decoded glyphs adds no meaning.
+          const span = [...marks].reverse().find((m) => m.actual !== undefined)
+          const decoded = codes.map((c) => font.decode.get(c) ?? '\ufffd').join(''),
+            override = span && span.actual !== decoded ? span.actual : undefined
+          const measured = glyphs(font, codes, adjustments, state, override),
             matrix = mul(state.ctm, state.tm)
-          if (runs.length >= 10000)
+          if (!codes.length) {
+            // A number-only TJ only moves the text position.
+            state.tm = mul(state.tm, [1, 0, 0, 1, measured.advance, 0])
+            state.dx += measured.advance
+            break
+          }
+          if (runs.length >= 20000)
             fail('Die Seite enthält zu viele einzelne Textstellen.')
-          const mark = marks.at(-1)
+          if (++glyphCount > 200000)
+            fail('Die Seite enthält zu viele Zeichen für eine sichere Analyse.')
+          const structural = [...marks].reverse().find((m) => m.actual === undefined)
+          const scale = uniformScale(matrix)
+          const locked =
+            state.locked ??
+            (state.pattern ? 'Text mit Muster-Füllung bleibt unverändert.' : undefined) ??
+            marks.find((m) => m.lock)?.lock ??
+            font.locked ??
+            (state.render !== 0
+              ? 'Unsichtbarer, konturierter oder als Clip verwendeter Text bleibt unverändert.'
+              : undefined) ??
+            (structural?.mcid !== undefined && lockedMcids.has(structural.mcid)
+              ? 'Der Strukturbaum enthält für diesen Text eigenen Ersatztext.'
+              : undefined) ??
+            (lockAllTagged && structural?.tagged
+              ? 'Der Strukturbaum ist zu groß für eine sichere Prüfung von Ersatztexten.'
+              : undefined)
           const view: SimpleSourceRun = {
             id: `mixed:${pageIndex}:${runs.length}`,
             pageIndex,
             text: measured.text,
-            fontName: state.font.name,
-            fontSize: state.size,
+            fontName: font.name,
+            fontSize: state.size * (scale ?? 1),
             x: matrix[4],
-            baseline: matrix[5] + state.rise,
-            width: measured.width,
+            baseline: matrix[5] + state.rise * matrix[3],
+            width: measured.width * (scale ?? 1),
           }
           runs.push({
             view,
             bounds: measured.bounds,
             clip: state.clip,
-            font: state.font,
+            font,
             state: copy(state),
             stream,
-            token: target,
+            token: op === 'TJ' || op === 'Tj' ? target : ops[0],
             end: token.end,
             advance: measured.advance,
             adjustments,
@@ -554,11 +693,20 @@ async function analyze(input: Uint8Array, pageIndex: number) {
             fontRaw: state.fontRaw ?? '',
             fill: state.fill,
             bt: btId,
-            mc: mark?.id ?? 0,
-            tagged: !!mark?.tagged,
+            mc: structural?.id ?? 0,
+            tagged: !!structural?.tagged,
+            mcid: structural?.mcid,
             paint,
+            locked,
+            actual: override,
+            span: override !== undefined ? span!.id : undefined,
+            op,
+            quote,
+            scale,
           })
+          if (override !== undefined) spans.set(span!.id, (spans.get(span!.id) ?? 0) + 1)
           state.tm = mul(state.tm, [1, 0, 0, 1, measured.advance, 0])
+          state.dx += measured.advance
           break
         }
         case 'Do': {
@@ -603,6 +751,7 @@ async function analyze(input: Uint8Array, pageIndex: number) {
             )
           } else fail('Dieser XObject-Typ wird noch nicht unterstützt.')
           obstacles.push(r)
+          barriers.push(r)
           paintCount()
           break
         }
@@ -613,19 +762,24 @@ async function analyze(input: Uint8Array, pageIndex: number) {
             ?.lookup(n(name(ops[0])))
           if (!(g instanceof PDFDict))
             fail('Ein Grafikzustand kann nicht aufgelöst werden.')
+          // Corrections are written at the original position in the stream, so
+          // transparency, blend and overprint settings apply unchanged. Only
+          // states that redefine the font or mask by shape lock the text.
+          // Effective compositing parameters (not the operator history).
+          const effective = new Map<string, string>(state.gs ? (JSON.parse(state.gs) as [string, string][]) : [])
+          for (const [key, val] of g.entries())
+            if (!['/Type', '/LW', '/LC', '/LJ', '/ML', '/D', '/RI', '/FL', '/SM', '/SA'].includes(key.toString()))
+              effective.set(key.toString(), val.toString())
+          // Default values are equivalent to never having set them.
+          const defaults: Record<string, string> = { '/BM': '/Normal', '/CA': '1', '/ca': '1', '/SMask': '/None', '/AIS': 'false', '/OP': 'false', '/op': 'false', '/OPM': '0', '/TK': 'true' }
+          for (const [k, v] of effective) if (defaults[k] === v) effective.delete(k)
+          state.gs = effective.size ? JSON.stringify([...effective].sort()) : ''
           for (const [key, val] of g.entries()) {
-            if (key.toString() === '/Type') continue
-            if (key.toString() === '/BM' && val.toString() === '/Normal')
-              continue
-            if (
-              ['/ca', '/CA'].includes(key.toString()) &&
-              val instanceof PDFNumber &&
-              val.asNumber() === 1
-            )
-              continue
-            fail(
-              `Grafikzustand ${key.decodeText()} benötigt eine zusätzliche Erhaltungsprüfung.`,
-            )
+            const k = key.toString()
+            if (k === '/Font') fail('Ein Grafikzustand setzt eine eigene Schrift.')
+            if (k === '/LW' && val instanceof PDFNumber) state.lineWidth = Math.max(0, val.asNumber())
+            if (k === '/SMask' && val.toString() !== '/None')
+              state.locked = 'Text unter einer Soft-Maske bleibt unverändert.'
           }
           break
         }
@@ -678,7 +832,7 @@ async function analyze(input: Uint8Array, pageIndex: number) {
         case 'b':
         case 'b*':
           nums(0)
-          finishPath(true)
+          finishPath(true, op !== 'f' && op !== 'F' && op !== 'f*')
           break
         case 'w':
           state.lineWidth = nums(1)[0]
@@ -706,6 +860,8 @@ async function analyze(input: Uint8Array, pageIndex: number) {
         case 'k':
           nums(op === 'rg' ? 3 : op === 'g' ? 1 : 4)
           state.fill = `${ops.map((t) => t.raw).join(' ')} ${op}`
+          state.fillSpace = undefined
+          state.pattern = false
           break
         case 'RG':
           nums(3)
@@ -723,34 +879,51 @@ async function analyze(input: Uint8Array, pageIndex: number) {
         case 'BMC':
           if (ops.length !== 1) fail('Ungültiges Struktur-Tag.')
           name(ops[0])
-          if (++markDepth > 32) fail('Zu tief verschachtelte Struktur-Tags.')
+          if (++markDepth > 64) fail('Zu tief verschachtelte Struktur-Tags.')
           marks.push({ id: ++mcCounter, tagged: false })
           break
         case 'BDC': {
           if (ops.length !== 2) fail('Ungültiges Struktur-Tag.')
           name(ops[0])
-          const props = ops[1]
-          if (props.kind !== 'dict')
-            fail(
-              'Referenzierte Struktur-Eigenschaften werden noch nicht unterstützt.',
-            )
-          if (
-            props.items?.some(
-              (t) =>
-                t.kind === 'name' &&
-                ['/ActualText', '/Alt', '/E'].includes(t.raw),
-            )
-          )
-            fail(
-              'Ein Struktur-Tag besitzt eigenen Ersatztext (ActualText/Alt). Dieser muss gemeinsam aktualisiert werden.',
-            )
-          if (++markDepth > 32) fail('Zu tief verschachtelte Struktur-Tags.')
-          marks.push({
-            id: ++mcCounter,
-            tagged: !!props.items?.some(
-              (t) => t.kind === 'name' && t.raw === '/MCID',
-            ),
-          })
+          const props = ops[1],
+            mark: Mark = { id: ++mcCounter, tagged: false }
+          if (props.kind === 'dict') {
+            const items = props.items ?? []
+            for (let k = 0; k + 1 < items.length; k += 2) {
+              const key = items[k].raw,
+                value = items[k + 1]
+              if (key === '/MCID' && value.kind === 'number') {
+                mark.tagged = true
+                mark.mcid = Number(value.raw)
+              } else if (key === '/ActualText') {
+                const text = value.kind === 'string' && value.bytes ? textString(value.bytes) : undefined
+                if (text === undefined) mark.lock = 'Ein Ersatztext ist nicht lesbar.'
+                else mark.actual = text
+              } else if (key === '/Alt' || key === '/E')
+                mark.lock = 'Diese Textstelle besitzt eigenen Ersatztext (Alt/E) und bleibt unverändert.'
+            }
+          } else if (props.kind === 'name') {
+            const prop = resources
+              ?.lookupMaybe(n('Properties'), PDFDict)
+              ?.lookup(n(name(props)))
+            if (!(prop instanceof PDFDict)) mark.lock = 'Unbekannte Inhaltseigenschaften.'
+            else {
+              const type = prop.lookup(n('Type'))?.toString()
+              if (type === '/OCG' || type === '/OCMD')
+                mark.lock = 'Text in einer optionalen Inhaltsebene bleibt unverändert.'
+              const id = prop.lookup(n('MCID'))
+              if (id instanceof PDFNumber) {
+                mark.tagged = true
+                mark.mcid = id.asNumber()
+              }
+              const actual = prop.lookup(n('ActualText'))
+              if (actual instanceof PDFString || actual instanceof PDFHexString) mark.actual = actual.decodeText()
+              if (prop.has(n('Alt')) || prop.has(n('E')))
+                mark.lock = 'Diese Textstelle besitzt eigenen Ersatztext (Alt/E) und bleibt unverändert.'
+            }
+          } else fail('Ungültiges Struktur-Tag.')
+          if (++markDepth > 64) fail('Zu tief verschachtelte Struktur-Tags.')
+          marks.push(mark)
           break
         }
         case 'EMC':
@@ -758,6 +931,44 @@ async function analyze(input: Uint8Array, pageIndex: number) {
           if (--markDepth < 0) fail('Unausgeglichene Struktur-Tags.')
           marks.pop()
           break
+        case 'MP':
+        case 'DP':
+        case 'BX':
+        case 'EX':
+        case 'i':
+        case 'd0':
+        case 'd1':
+          break
+        case 'cs':
+          if (ops.length !== 1) fail('Ungültiger Farbraum.')
+          state.fillSpace = ops[0].raw
+          state.fill = `${ops[0].raw} cs`
+          state.pattern = ops[0].raw === '/Pattern'
+          break
+        case 'sc':
+        case 'scn':
+          if (!ops.length || ops.length > 33) fail('Ungültige Füllfarbe.')
+          if (ops.some((t) => t.kind !== 'number' && t.kind !== 'name')) fail('Ungültige Füllfarbe.')
+          state.fill = `${state.fillSpace ? `${state.fillSpace} cs ` : ''}${ops.map((t) => t.raw).join(' ')} ${op}`
+          state.pattern = ops.some((t) => t.kind === 'name')
+          break
+        case 'CS':
+        case 'SC':
+        case 'SCN':
+          break
+        case 'sh': {
+          if (ops.length !== 1) fail('Ungültige Farbverlaufsfläche.')
+          const area = state.clip ?? pageRect(page.getMediaBox())
+          obstacles.push(area)
+          paintCount()
+          break
+        }
+        case 'BI': {
+          // The lexer delivers an inline image as one operator with its data.
+          obstacles.push(box(state.ctm, 0, 0, 1, 1))
+          paintCount()
+          break
+        }
         default:
           fail(
             `Seite ${pageIndex + 1}: PDF-Operator „${op}“ wird für sichere Textkorrekturen noch nicht unterstützt.`,
@@ -774,75 +985,81 @@ async function analyze(input: Uint8Array, pageIndex: number) {
     fail(
       'Die Seite enthält einen nicht abgeschlossenen Text-, Grafik- oder Clipzustand.',
     )
-  const inputs: BlockInput[] = runs.map((run, index) => ({
-    index,
-    text: run.view.text,
-    codes: run.codes,
-    adjustments: run.adjustments,
-    font: run.font,
-    fontRaw: run.fontRaw,
-    fill: run.fill,
-    size: run.state.size,
-    tc: run.state.tc,
-    tw: run.state.tw,
-    x: run.view.x,
-    baseline: run.view.baseline,
-    advance: run.advance,
-    eligible: blockEligible(run),
-    bt: run.bt,
-    key: [
-      run.mc,
-      run.paint,
-      JSON.stringify(run.clip ?? null),
-      run.state.ctm.join(','),
-      run.state.size,
-    ].join('|'),
-    tagged: run.tagged,
-  }))
-  const blocks = buildBlocks(inputs, pageIndex)
+  // An ActualText span maps to exactly one glyph (ligature, no-break space);
+  // anything else cannot be split into editable characters and stays locked.
+  for (const run of runs)
+    if (run.span !== undefined && (spans.get(run.span)! > 1 || run.codes.length !== 1))
+      run.locked ??= 'Ein Ersatztext (ActualText) über mehrere Zeichen bleibt unverändert.'
+  const inputs: BlockInput[] = runs.map((run, index) => {
+    const scale = run.scale ?? 1
+    return {
+      index,
+      text: run.view.text,
+      codes: run.codes,
+      chars: run.actual !== undefined ? [run.actual] : run.codes.map((c) => run.font.decode.get(c) ?? '\ufffd'),
+      actual: run.actual !== undefined,
+      adjustments: run.adjustments,
+      font: run.font,
+      fontRaw: run.fontRaw,
+      fill: run.fill,
+      tf: run.state.size,
+      tc: run.state.tc,
+      tw: run.state.tw,
+      scale,
+      size: run.state.size * scale,
+      x: run.view.x,
+      baseline: run.view.baseline,
+      advance: run.advance * scale,
+      eligible: blockEligible(run),
+      key: [
+        run.mcid !== undefined && mcidOwner.has(run.mcid) ? `e${mcidOwner.get(run.mcid)}` : run.mc,
+        run.paint,
+        JSON.stringify(run.clip ?? null),
+        run.state.ctm.join(','),
+        run.state.tm.slice(0, 4).join(','),
+        run.state.gs,
+      ].join('|'),
+      tagged: run.tagged,
+    }
+  })
+  const blocks = buildBlocks(inputs, pageIndex, [...obstacles.slice(0, annotationCount), ...barriers])
   return { doc, page, runs, obstacles, revision, refs, blocks, inputs }
 }
-/** A fragment may join a reconstructed block only in the plain Word-like form:
- * unscaled horizontal text without Tc/Tw/rise and
- * 1:1 proved glyph-to-character mappings that the original font can encode. */
+/** Characters of a run per code (an ActualText glyph carries its whole text). */
+const runChars = (run: Run) =>
+  run.actual !== undefined ? [run.actual] : run.codes.map((c) => run.font.decode.get(c) ?? '')
+/** A fragment may join a reconstructed block only as unrotated, unmirrored,
+ * uniformly scaled horizontal text without Tz/rise, with proved widths and
+ * characters from the supported alphabet. */
 function blockEligible(run: Run) {
-  const c = run.state.ctm,
-    t = run.state.tm
+  const chars = runChars(run)
   return (
+    !run.locked &&
     !!run.fontRaw &&
     run.codes.length > 0 &&
-    [c, t].every(
-      (m) =>
-        Math.abs(m[0] - 1) < 1e-8 &&
-        Math.abs(m[1]) < 1e-8 &&
-        Math.abs(m[2]) < 1e-8 &&
-        Math.abs(m[3] - 1) < 1e-8,
-    ) &&
+    run.scale !== undefined &&
     run.state.hz === 1 &&
     run.state.rise === 0 &&
     Math.abs(run.state.tc) <= run.state.size &&
     Math.abs(run.state.tw) <= run.state.size &&
-    supportedSourceText(run.view.text) &&
-    // Ligatures are kept as original glyphs; their width must be proved.
-    run.codes.every((code) => {
-      const char = run.font.decode.get(code) ?? ''
+    supportedSourceText(chars.join('')) &&
+    run.codes.every((code, i) => {
+      const char = chars[i]
       return (
         !!char &&
         Array.from(char).length <= 4 &&
-        (Array.from(char).length === 1
-          ? run.font.codec.encode(char).ok
-          : Number.isFinite(run.font.advances?.get(code)))
+        (Number.isFinite(run.font.advances?.get(code)) ||
+          (Array.from(char).length === 1 && run.font.codec.encode(char).ok))
       )
     })
   )
 }
+/** Single-fragment correction (no block): 1:1 characters the font encodes. */
 function editable(run: Run) {
-  const m = mul(run.state.ctm, run.state.tm)
   return (
-    Math.abs(m[0] - 1) < 1e-8 &&
-    Math.abs(m[1]) < 1e-8 &&
-    Math.abs(m[2]) < 1e-8 &&
-    Math.abs(m[3] - 1) < 1e-8 &&
+    !run.locked &&
+    run.actual === undefined &&
+    run.scale !== undefined &&
     run.state.hz === 1 &&
     run.state.rise === 0 &&
     supportedSourceText(run.view.text) &&
@@ -854,30 +1071,35 @@ function editable(run: Run) {
   )
 }
 export async function inspectPageSource(bytes: Uint8Array, pageIndex: number) {
-  // Keep the stronger, already verified paragraph adapter for its known subset.
+  let result: Analysis
   try {
-    const result = await inspectSimpleSourceText(bytes)
-    return {
-      ...result,
-      runs: result.runs.filter((r) => r.pageIndex === pageIndex),
+    result = await analyze(bytes, pageIndex)
+  } catch (error) {
+    // The older single-stream adapter still covers its own verified subset.
+    try {
+      const simple = await inspectSimpleSourceText(bytes)
+      const runs = simple.runs.filter((r) => r.pageIndex === pageIndex)
+      if (runs.length) return { ...simple, runs, blocks: [], fonts: [] }
+    } catch {
+      /* report the page-scoped reason below */
     }
-  } catch {
-    /* The selected page may still be editable; do not reject for another page. */
+    throw error
   }
-  const result = await analyze(bytes, pageIndex)
   const geometry = (r: Run) => {
+    const scale = r.scale ?? 1,
+      chars = runChars(r)
+    // Locked spans (e.g. multi-code ActualText) have no per-code characters.
+    if (chars.length !== r.codes.length) return undefined
     let offset = 0
     const characters = r.codes.flatMap((code, i) => {
       // Preserve original TJ positioning and Tc/Tw, not replacement metrics.
-      offset -= ((r.adjustments[i] ?? 0) * r.state.size) / 1000
-      const char = r.font.decode.get(code)!,
-        encoded = r.font.codec.encode(char)
-      const advance =
-        r.font.advances?.get(code) ?? (encoded.ok ? encoded.value.advance : 0)
+      offset -= ((r.adjustments[i] ?? 0) * r.state.size * scale) / 1000
+      const char = chars[i]
       const width =
-        (advance * r.state.size) / 1000 +
-        r.state.tc +
-        (r.font.codeBytes === 1 && code === 32 ? r.state.tw : 0)
+        ((codeAdvance(r.font, code, char) * r.state.size) / 1000 +
+          r.state.tc +
+          (r.font.codeBytes === 1 && code === 32 ? r.state.tw : 0)) *
+        scale
       // A ligature glyph is split evenly for selection geometry only.
       const parts = Array.from(char).length
       const value = Array.from({ length: parts }, (_, k) => ({
@@ -887,21 +1109,22 @@ export async function inspectPageSource(bytes: Uint8Array, pageIndex: number) {
       offset += width
       return value
     })
-    return characters.length === r.view.text.length && characters.every(
-      (c, i) =>
-        Number.isFinite(c.offset) &&
-        Number.isFinite(c.width) &&
-        c.width > 0 &&
-        (i === 0 || c.offset >= characters[i - 1].offset),
-    )
+    return characters.length === r.view.text.length &&
+      characters.every(
+        (c, i) =>
+          Number.isFinite(c.offset) &&
+          Number.isFinite(c.width) &&
+          c.width > 0 &&
+          (i === 0 || c.offset >= characters[i - 1].offset),
+      )
       ? characters
       : undefined
   }
   const views = result.runs.map(geometry),
     member = new Map<number, SourceBlock>()
   // A block is offered only as a whole; one unsafe member keeps it fragment-only.
-  for (const block of result.blocks)
-    if (block.members.every((i) => views[i])) for (const i of block.members) member.set(i, block)
+  const offered = result.blocks.filter((block) => block.members.every((i) => views[i]))
+  for (const block of offered) for (const i of block.members) member.set(i, block)
   const runs: SimpleSourceRun[] = []
   result.runs.forEach((r, i) => {
     const block = member.get(i)
@@ -917,16 +1140,68 @@ export async function inspectPageSource(bytes: Uint8Array, pageIndex: number) {
             leading: block.leading,
             width: block.right - block.lines[0].left,
             separator: '',
-            automatic: block.tagged || block.lines.length === 1,
+            automatic: true,
           }
         : undefined,
     })
   })
   if (!runs.length)
     fail(
-      `Seite ${pageIndex + 1}: Keine sicher kodierbare, horizontal bearbeitbare Textstelle gefunden. Scans benötigen OCR; Ligaturen oder andere Schriftzustände können einzelne Stellen ausschließen.`,
+      `Seite ${pageIndex + 1}: Keine sicher kodierbare, horizontal bearbeitbare Textstelle gefunden. Scans benötigen OCR; Type3-Schriften, gedrehter Text oder geschützte Bereiche können einzelne Stellen ausschließen.`,
     )
-  return { digest: result.revision, runs }
+  // Page content once for all blocks; each block lists its own rectangles.
+  const rectOf = new Map<number, number>(),
+    rects: Box[] = []
+  const plain = (r: Rect): Box => ({ left: r.left, right: r.right, bottom: r.bottom, top: r.top })
+  result.runs.forEach((r, i) => {
+    if (!r.view.text.trim()) return
+    rectOf.set(i, rects.length)
+    rects.push(plain(r.bounds))
+  })
+  for (const o of result.obstacles) rects.push(plain(o))
+  const models = editModels(
+    offered.map((block) => ({
+      block,
+      runId: result.runs[block.members[0]].view.id,
+      expectedText: result.runs[block.members[0]].view.text,
+      ...blockSpace(result, block, rectOf),
+    })),
+  )
+  return { digest: result.revision, runs, ...models, rects }
+}
+/** Free space for the inline editor: the display estimate (`room`, `limit`)
+ * and the exact rule inputs (`space`) that the worker check also uses. */
+function blockSpace(result: Analysis, block: SourceBlock, rectOf: Map<number, number>) {
+  const ctx = layoutContext(result, block, block.glyphs)
+  const last = block.lines.at(-1)!,
+    left = Math.min(...block.lines.map((l) => l.left))
+  let room = 0
+  if (block.leading > 0)
+    for (let j = 1; j <= 8; j++) {
+      const baseline = last.baseline - j * block.leading
+      const rect = { left, right: block.right, bottom: baseline + ctx.bandBottom, top: baseline + ctx.bandTop }
+      if (ctx.blocked(rect, undefined)) break
+      room = j
+    }
+  // Growth to the right of a single line until the protected distance.
+  const slot = ctx.oldSlots[0]
+  let limit = Math.min(...ctx.limits.map((l) => l.right), ctx.clip?.right ?? Infinity)
+  if (block.lines.length > 1) limit = Math.min(limit, block.right)
+  else
+    for (const other of ctx.others) {
+      if (overlap(slot, other) || other.top <= slot.bottom || other.bottom >= slot.top || other.left < slot.right) continue
+      limit = Math.min(limit, other.left - Math.min(3, separation(slot, other)))
+    }
+  // Glyphs under links, highlights or underlines stay fixed (see previewBlock).
+  const pinned: number[] = []
+  if (ctx.decorations.length) {
+    const original = block.lines.map((l) => ({ ...l, ...placeLine(block.glyphs, l.from, l.to, l.left) }))
+    for (const b of glyphBoxes(block.glyphs, original))
+      if (b.orig >= 0 && ctx.decorations.some((d) => overlap(b.box, d))) pinned.push(b.orig)
+  }
+  const { limits, clip, whole, leading, bandBottom, bandTop } = ctx.space
+  const own = block.members.map((i) => rectOf.get(i)).filter((i): i is number => i !== undefined)
+  return { room, limit, slots: ctx.oldSlots, pinned, space: { limits, clip, whole, leading, bandBottom, bandTop, own } }
 }
 export async function previewPageSource(
   input: Uint8Array,
@@ -952,10 +1227,6 @@ export async function previewPageSource(
     if (!block)
       fail(
         'Diese Textstelle ist keinem nachgewiesenen Absatz zugeordnet. Sie kann nur als einzelnes Textfragment korrigiert werden.',
-      )
-    if (!block.tagged && block.lines.length > 1 && !selection.confirmReflow)
-      fail(
-        'Dieser Absatz ist nicht als Struktur-Absatz ausgezeichnet. Ein Neuumbruch muss ausdrücklich bestätigt werden.',
       )
     return previewBlock(result, block, replacement, pageIndex)
   }
@@ -1052,6 +1323,7 @@ export async function previewPageSource(
   operand += `${Number(compensation.toFixed(9))}] TJ`
   const changed =
     run.stream.text.slice(0, run.token.start) +
+    showPrefix(run) +
     operand +
     run.stream.text.slice(run.end)
   writeStreams(doc, page, refs, [{ stream: run.stream, text: changed }])
@@ -1108,130 +1380,148 @@ const pageRect = (b: { x: number; y: number; width: number; height: number }) =>
   bottom: b.y,
   top: b.y + b.height,
 })
-const separation = (a: Rect, b: Rect) =>
-  Math.max(
-    b.left - a.right,
-    a.left - b.right,
-    b.bottom - a.top,
-    a.bottom - b.top,
-    0,
-  )
-/** Re-lay out a reconstructed paragraph block: whole words move between its
- * lines, following fragments move with the text, and nothing outside the block
- * moves. The block stays top anchored; extra lines need proved free space. */
-async function previewBlock(
-  result: Analysis,
-  block: SourceBlock,
-  replacement: string,
-  pageIndex: number,
-) {
-  const { doc, page, runs, obstacles, refs } = result
-  if (!supportedSourceText(replacement) || !replacement.trim())
-    fail('Dieser Ersatztext wird nicht unterstützt.')
-  if (replacement === block.text) fail('Der Absatz wurde nicht verändert.')
-  const edited = editBlock(block, replacement)
-  if (!edited.ok)
-    fail(
-      `Das Zeichen „${edited.char}“ fehlt in der Originalschrift dieses Absatzes oder ist nicht eindeutig kodierbar.`,
-    )
-  const glyphs = edited.glyphs,
-    size = block.size,
-    lefts = block.lines.map((l) => l.left)
-  const plan = wrapBlock(glyphs, lefts, block.right, size, block.lines.length === 1)
-  if (!plan)
-    fail(
-      'Ein Wort ist breiter als der Absatz. Es wird nicht verkleinert, gestaucht oder neu getrennt.',
-    )
-  const lastBaseline = block.lines.at(-1)!.baseline
-  const placed: PlacedLine[] = plan.map((line, i) => {
-    const left = lefts[Math.min(i, lefts.length - 1)],
-      baseline =
-        i < block.lines.length
-          ? block.lines[i].baseline
-          : Number(
-              (lastBaseline - (i - block.lines.length + 1) * block.leading).toFixed(6),
-            )
-    return { ...line, left, baseline, ...placeLine(glyphs, line.from, line.to, left, size) }
-  })
-  const members = new Set(block.members),
-    memberRuns = block.members.map((i) => runs[i])
+/** Operators that a replaced ' or " show still has to perform. */
+const showPrefix = (r: Run) =>
+  r.op === "'"
+    ? 'T* '
+    : r.op === '"'
+      ? `${pdfNumber(r.quote!.aw)} Tw ${pdfNumber(r.quote!.ac)} Tc T* `
+      : ''
+/** An invisible show with the same text-space advance as `dx`. */
+const advanceShow = (r: Run, dx: number) =>
+  `[${pdfNumber((-dx * 1000) / (r.state.size * r.state.hz))}] TJ\n`
+
+/** Geometry shared by the worker check and the inline fit display. */
+function layoutContext(result: Analysis, block: SourceBlock, edited: readonly BlockGlyph[]) {
+  const { page, runs, obstacles } = result
+  const members = new Set(block.members)
+  let bandBottom = 0,
+    bandTop = 0
+  for (const g of [...block.glyphs, ...edited]) {
+    bandBottom = Math.min(bandBottom, (g.font.bbox[1] * g.size) / 1000)
+    bandTop = Math.max(bandTop, (g.font.bbox[3] * g.size) / 1000)
+  }
+  // Existing line slots keep origin and baseline. They are compared as
+  // full-font bands from the unchanged origin, so glyph side bearings and
+  // ascender/descender differences are not treated as movement; only a longer
+  // line can approach other content. New lines below use real ink boxes.
+  const slot = (left: number, baseline: number, right: number): Rect => slotBox({ bandBottom, bandTop }, left, baseline, right)
   const oldBoxes = block.lines.map((line) => {
     let r: Rect | undefined
     for (const i of line.runs)
       if (runs[i].view.text.trim()) r = r ? union(r, runs[i].bounds) : runs[i].bounds
     return r
   })
-  // Existing line slots keep origin and baseline. They are compared as
-  // full-font bands from the unchanged origin, so glyph side bearings and
-  // ascender/descender differences are not treated as movement; only a longer
-  // line can approach other content. New lines below use real ink boxes.
-  const fonts = new Set([...block.glyphs, ...glyphs].map((g) => g.font)),
-    bandBottom = Math.min(...[...fonts].map((f) => (f.bbox[1] * size) / 1000)),
-    bandTop = Math.max(...[...fonts].map((f) => (f.bbox[3] * size) / 1000))
-  const slot = (left: number, baseline: number, right: number): Rect => ({
-    left,
-    right: Math.max(left, right),
-    bottom: baseline + Math.min(0, bandBottom),
-    top: baseline + Math.max(0, bandTop),
-  })
   const oldSlots = block.lines.map((l, i) =>
-    slot(
-      l.left,
-      l.baseline,
-      Math.max(
-        placeLine(block.glyphs, l.from, l.to, l.left, size).extent,
-        oldBoxes[i]?.right ?? -Infinity,
-      ),
-    ),
+    slot(l.left, l.baseline, Math.max(placeLine(block.glyphs, l.from, l.to, l.left).extent, oldBoxes[i]?.right ?? -Infinity)),
   )
-  const whole = oldBoxes.reduce<Rect | undefined>((a, b) => (a && b ? union(a, b) : a ?? b), undefined)
+  const whole = oldBoxes.reduce<Rect | undefined>((a, b) => (a && b ? union(a, b) : (a ?? b)), undefined)
   const others = [
     ...runs.filter((r, i) => !members.has(i) && r.view.text.trim()).map((r) => r.bounds),
     ...obstacles,
   ]
-  const clip = memberRuns[0].clip,
+  // Glyph overhangs that the original clip already cut (e.g. a side bearing
+  // left of a column clip) stay as they were; nothing new may be cut.
+  const ownClip = runs[block.members[0]].clip
+  const clip = ownClip && whole ? union(ownClip, whole) : ownClip,
     limits = [page.getMediaBox(), page.getCropBox()].map(pageRect)
-  placed.forEach((line, i) => {
-    const ink = inkBox(glyphs, line, size)
-    if (!ink) return
-    if (limits.some((l) => !contains(l, ink)))
-      fail('Der Absatz würde die Seiten- oder Zuschnittgrenze überschreiten.')
-    if (clip && !contains(clip, ink))
-      fail('Der Absatz würde außerhalb der ursprünglichen Clipfläche liegen.')
-    const old = oldSlots[i]
-    const now = old ? slot(line.left, line.baseline, Math.max(line.extent, ink.right)) : ink
-    for (const other of others) {
-      if (old && overlap(old, other)) {
-        // Existing overlaps (e.g. the bounding box of an image beside a
-        // contour-wrapped line) may not grow toward that content.
-        if (overlap(now, other) && Math.min(now.right, other.right) > Math.min(old.right, other.right) + 0.001)
-          fail('Der Absatz würde stärker als bisher mit anderen Inhalten überlappen.')
-        continue
-      }
-      const need = old
-        ? Math.min(3, separation(old, other))
-        : Math.max(3, Math.min(whole ? separation(whole, other) : 3, block.leading / 2))
-      if (overlap(now, other, Math.max(0, need - 0.001)))
-        fail(
-          i >= block.lines.length
-            ? 'Für die zusätzliche Absatzzeile ist unter dem Absatz nicht genug freier Platz. Nachfolgende Inhalte werden nicht verschoben.'
-            : 'Die Korrektur würde den geschützten Abstand zu benachbartem Text, Bild, Link oder einer Grafik unterschreiten.',
-        )
+  const space: BlockSpace = { limits, clip, whole, leading: block.leading, bandBottom, bandTop, others }
+  const background = (o: Rect) => !!whole && contains(o, whole)
+  const blocked = (rect: Rect, old: Rect | undefined, ink = rect) => blockedBy(space, rect, old, ink)
+  // Decorations: painted or annotated areas inside the paragraph (code
+  // backgrounds, underlines, links). The text under them must not move.
+  const decorations = obstacles.filter((o) => o.decor && !background(o) && oldSlots.some((s) => overlap(s, o)))
+  return { bandBottom, bandTop, slot, oldSlots, others, clip, limits, blocked, decorations, space }
+}
+/** Per-glyph boxes of a laid-out block (ink, or a low band for blanks). */
+function glyphBoxes(glyphs: readonly BlockGlyph[], lines: readonly PlacedLine[]) {
+  const out: { orig: number; x: number; baseline: number; box: Rect }[] = []
+  for (const line of lines)
+    for (let k = line.from; k < line.to; k++) {
+      if (hidden(glyphs, k, line.to)) continue
+      const g = glyphs[k],
+        x = line.positions[k - line.from]
+      const b = g.char.trim() ? (g.font.boxes?.get(g.code) ?? g.font.bbox) : undefined
+      const box = b
+        ? { left: x + (b[0] * g.size) / 1000, right: x + (b[2] * g.size) / 1000, bottom: line.baseline + (b[1] * g.size) / 1000, top: line.baseline + (b[3] * g.size) / 1000 }
+        : { left: x, right: x + g.width, bottom: line.baseline - 0.25 * g.size, top: line.baseline + 0.5 * g.size }
+      out.push({ orig: g.orig, x, baseline: line.baseline, box })
     }
+  return out
+}
+/** Re-lay out a reconstructed paragraph block: whole words move between its
+ * lines, following fragments move with the text, and nothing outside the block
+ * moves. The block stays top anchored; extra lines need proved free space.
+ * Every member show is replaced by an invisible show of the same advance and
+ * the text state is restored, so operators between members keep their effect. */
+async function previewBlock(result: Analysis, block: SourceBlock, replacement: string, pageIndex: number) {
+  const { doc, page, runs, obstacles, refs } = result
+  if (!supportedSourceText(replacement) || !replacement.trim())
+    fail('Dieser Ersatztext wird nicht unterstützt.')
+  if (replacement === block.text) fail('Der Absatz wurde nicht verändert.')
+  const layout = layoutEdit(block, replacement)
+  if (!layout.ok)
+    fail(
+      layout.reason === 'char'
+        ? `Das Zeichen „${layout.char}“ fehlt in der Originalschrift dieses Absatzes oder ist nicht eindeutig kodierbar.`
+        : 'Ein Wort ist breiter als der Absatz. Es wird nicht verkleinert, gestaucht oder neu getrennt.',
+    )
+  const { glyphs, lines: placed } = layout
+  const ctx = layoutContext(result, block, glyphs)
+  placed.forEach((line, i) => {
+    const ink = inkBox(glyphs, line)
+    if (!ink) return
+    const old = ctx.oldSlots[i]
+    const problem = ctx.blocked(old ? ctx.slot(line.left, line.baseline, Math.max(line.extent, ink.right)) : ink, old, ink)
+    if (problem) fail(problem)
   })
-  const first = memberRuns[0],
-    ctm = first.state.ctm
-  const emitted = emitBlock(glyphs, placed, size, [ctm[4], ctm[5]], {
-    fontRaw: first.fontRaw,
-    fill: first.fill,
-    tc: first.state.tc,
-    tw: first.state.tw,
+  if (ctx.decorations.length) {
+    const original = block.lines.map((l) => ({ ...l, ...placeLine(block.glyphs, l.from, l.to, l.left) }))
+    const before = glyphBoxes(block.glyphs, original),
+      after = glyphBoxes(glyphs, placed)
+    const at = new Map(after.filter((a) => a.orig >= 0).map((a) => [a.orig, a]))
+    for (const d of ctx.decorations) {
+      const under = new Set<number>()
+      for (const b of before) {
+        if (!overlap(b.box, d)) continue
+        under.add(b.orig)
+        const a = at.get(b.orig)
+        if (!a || Math.abs(a.x - b.x) > 0.01 || Math.abs(a.baseline - b.baseline) > 1e-6)
+          fail('Text unter einer Hinterlegung, Unterstreichung oder einem Link würde sich verschieben. Diese Stellen bleiben fest; bitte nur Text ändern, der sie nicht verschiebt.')
+      }
+      if (after.some((a) => overlap(a.box, d) && !(a.orig >= 0 && under.has(a.orig))))
+        fail('Text würde in eine Hinterlegung, Unterstreichung oder einen Link hineinlaufen.')
+    }
+  }
+  const first = runs[block.members[0]],
+    ctm = first.state.ctm,
+    det = ctm[0] * ctm[3] - ctm[1] * ctm[2]
+  const emitted = emitBlock(glyphs, placed, {
+    linear: first.state.tm.slice(0, 4),
+    toText: (x, y) => {
+      const X = x - ctm[4],
+        Y = y - ctm[5]
+      return [(ctm[3] * X - ctm[2] * Y) / det, (-ctm[1] * X + ctm[0] * Y) / det]
+    },
+    toPage: (e, f) => [ctm[0] * e + ctm[2] * f + ctm[4], ctm[1] * e + ctm[3] * f + ctm[5]],
   })
+  // Restore the text state of the first member, including its advance.
+  const restore =
+    `${first.fontRaw} ${pdfNumber(first.state.size)} Tf\n${first.fill}\n` +
+    `${pdfNumber(first.state.tc)} Tc\n${pdfNumber(first.state.tw)} Tw\n` +
+    `${first.state.lm.map(pdfNumber).join(' ')} Tm\n` +
+    advanceShow(first, first.state.dx + first.advance)
+  const members = new Set(block.members)
   const edits = new Map<Run['stream'], { start: number; end: number; text: string }[]>()
-  memberRuns.forEach((r, i) => {
-    const list = edits.get(r.stream) ?? []
+  block.members.forEach((index, i) => {
+    const r = runs[index],
+      list = edits.get(r.stream) ?? []
     // Operands may directly follow an operator (e.g. `0.2 Tc[...]TJ`): always delimit.
-    list.push({ start: r.token.start, end: r.end, text: i ? ' ' : `\n${emitted.content}` })
+    list.push({
+      start: r.token.start,
+      end: r.end,
+      text: i ? ` ${showPrefix(r)}${advanceShow(r, r.advance)}` : `\n${emitted.content}${restore}`,
+    })
     edits.set(r.stream, list)
   })
   const changes = [...edits].map(([stream, list]) => {
@@ -1243,11 +1533,11 @@ async function previewBlock(
   writeStreams(doc, page, refs, changes)
   const bytes = await doc.save({ updateFieldAppearances: false }),
     checked = await analyze(bytes, pageIndex)
-  const expected: { text: string; fontName: string; x: number; baseline: number; advance?: number }[] = []
+  const expected: { text: string; fontName: string; fontRaw: string; fill: string; x: number; baseline: number; advance?: number }[] = []
   runs.forEach((r, i) => {
     if (i === block.members[0]) expected.push(...emitted.expected)
     else if (!members.has(i))
-      expected.push({ text: r.view.text, fontName: r.view.fontName, x: r.view.x, baseline: r.view.baseline, advance: r.advance })
+      expected.push({ text: r.view.text, fontName: r.view.fontName, fontRaw: r.fontRaw, fill: r.fill, x: r.view.x, baseline: r.view.baseline, advance: r.advance })
   })
   if (checked.runs.length !== expected.length)
     fail('Die Ergebnisprüfung fand eine unerwartete Anzahl von Textstellen.')
@@ -1256,11 +1546,19 @@ async function previewBlock(
     if (
       after.view.text !== e.text ||
       after.view.fontName !== e.fontName ||
+      after.fontRaw !== e.fontRaw ||
+      after.fill !== e.fill ||
       Math.abs(after.view.x - e.x) > 1e-4 ||
-      Math.abs(after.view.baseline - e.baseline) > 1e-5 ||
+      Math.abs(after.view.baseline - e.baseline) > 1e-4 ||
       (e.advance !== undefined && Math.abs(after.advance - e.advance) > 1e-5)
     )
       fail('Die Ergebnisprüfung fand eine unerwartete Text- oder Positionsänderung.')
   })
+  // Images, graphics and annotations are untouched by construction; prove it.
+  if (
+    checked.obstacles.length !== obstacles.length ||
+    checked.obstacles.some((o, i) => (['left', 'right', 'bottom', 'top'] as const).some((k) => Math.abs(o[k] - obstacles[i][k]) > 1e-6))
+  )
+    fail('Die Ergebnisprüfung fand eine Veränderung an Bildern, Grafiken oder Anmerkungen.')
   return bytes
 }
