@@ -8,6 +8,7 @@ import { getDocument } from 'pdfjs-dist/legacy/build/pdf.mjs'
 import { readFileSync, mkdirSync } from 'node:fs'
 import { resolve } from 'node:path'
 import assert from 'node:assert/strict'
+import { applyButton, caret, checkInPdf, fit, inlineInput } from './source-inline-helper.mjs'
 const real = process.env.SOURCE_TEXT_PDF,
   find = process.env.SOURCE_TEXT_FIND ?? 'small typo',
   replacement = process.env.SOURCE_TEXT_REPLACE ?? 'fixed typo'
@@ -68,10 +69,9 @@ try {
   await page
     .getByRole('button', { name: 'Originaltext korrigieren', exact: true })
     .click()
-  if (index)
-    await page.getByLabel('Seite', { exact: true }).selectOption({ index })
+  if (index) await page.getByLabel('Seite', { exact: true }).selectOption({ index })
   await page.locator('.source-run-hit').first().waitFor()
-  const target = page.locator('.source-run-hit').filter({hasText:find}).first()
+  const target = page.locator('.source-run-hit').filter({ hasText: find }).first()
   assert.equal(await target.count(), 1, 'source typo can be selected directly')
   await target.scrollIntoViewIfNeeded()
   const original = await target.textContent(), from = original.indexOf(find)
@@ -80,32 +80,16 @@ try {
   await page.mouse.down()
   await page.mouse.move(b.x + b.width - .05, b.y + b.height * .55, { steps: 15 })
   await page.mouse.up()
-  assert.equal(await page.getByLabel('Ersatztext', {exact:true}).inputValue(), find, 'mixed-font/TJ source selection copies exact substring')
-  const old = await page.getByLabel('Ersatztext', { exact: true }).inputValue(),
-    updated = old.replace(find, replacement)
-  await page.getByLabel('Ersatztext', { exact: true }).fill(updated)
-  await page
-    .getByRole('button', { name: 'PDF-Vorschau erzeugen', exact: true })
-    .click()
-  await page
-    .getByText(
-      'PDF-Vorschau bereit. Absatz und Übergang zum Folgeabsatz prüfen.',
-      { exact: true },
-    )
-    .waitFor()
-  await page
-    .locator('.source-pdf-preview canvas[data-render-state="ready"]')
-    .waitFor()
-  await page
-    .getByRole('checkbox', { name: /Absatz, Abstände und Übergang/ })
-    .check()
-  await page.screenshot({
-    path: artifacts + '/mixed-preview.png',
-    fullPage: true,
-  })
-  await page
-    .getByRole('button', { name: 'Korrektur übernehmen', exact: true })
-    .click()
+  // The drag opens the inline editor with exactly the marked characters selected.
+  await page.locator('.source-inline').waitFor()
+  const text = await inlineInput(page).inputValue(), [s0, s1] = await caret(page)
+  assert.equal(text.slice(s0, s1), find, 'mixed-font/TJ source selection marks the exact substring')
+  await page.keyboard.insertText(replacement)
+  assert.equal(await inlineInput(page).inputValue(), text.slice(0, s0) + replacement + text.slice(s1))
+  assert.match(await fit(page), /^Passt/)
+  await checkInPdf(page)
+  await page.screenshot({ path: artifacts + '/mixed-preview.png', fullPage: true })
+  await applyButton(page).click()
   await page
     .locator('.page canvas[data-render-state="ready"]')
     .first()
@@ -134,7 +118,7 @@ try {
   }
   assert.deepEqual(errors, [])
   console.log(
-    'PASS mixed original text: selected page, tagged/TJ source, real worker/candidate, explicit review, apply and independently read export' +
+    'PASS mixed original text: selected page, tagged/TJ source, inline editor, real worker check, apply and independently read export' +
       (real ? ' (local supplied PDF)' : ''),
   )
 } catch (error) {

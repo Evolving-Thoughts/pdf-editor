@@ -14,7 +14,8 @@ const region: SourceParagraphRegion = { left: 50, right: 110, firstBaseline: 700
 
 test('DE/EN encode to original source codes, not UTF-8, with no fallback', () => {
   expect(codec.encode('Grüße')).toEqual({ ok: true, value: { hex: [...'Grüße'].map(c => glyphs.find(g => g.character === c)!.code).join('').toUpperCase(), advance: 2500 } })
-  expect(codec.encode('€')).toEqual({ ok: false, error: 'unsupported-text' })
+  expect(codec.encode('€')).toEqual({ ok: false, error: 'missing-glyph' })
+  expect(codec.encode('ア')).toEqual({ ok: false, error: 'unsupported-text' })
   expect(codec.encode('…')).toEqual({ ok: false, error: 'missing-glyph' })
 })
 
@@ -66,9 +67,10 @@ test('growth permitted only within supplied proven free region; overflow is atom
 })
 
 test('refuses hard breaks, ambiguous spacing, controls, combining marks and oversized input', () => {
-  for (const text of ['a\nb', 'a\rb', 'a  b', ' a', 'a ', 'a\u00a0b', 'u\u0308', 'a\u202eb', 'a\u00adb', '', 'a'.repeat(4097)]) {
+  for (const text of ['a\nb', 'a\rb', 'a  b', ' a', 'a ', 'u\u0308', 'a\u202eb', '', 'a'.repeat(4097)]) {
     expect(planSourceParagraph(text, codec, region)).toEqual({ ok: false, error: 'unsupported-text' })
   }
+  for (const text of ['a\u00a0b', 'a\u00adb']) expect(planSourceParagraph(text, codec, region).ok).toBe(false)
 })
 
 test('invalid geometry fails closed', () => {

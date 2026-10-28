@@ -26,6 +26,8 @@ export function contentTokens(content: string, composite = false, level = 0): Co
         if (content[cursor] === '%') { while (cursor < content.length && !/[\r\n]/.test(content[cursor])) cursor++; continue }
         if (content[cursor] === '(') { let d = 1; cursor++; while (cursor < content.length && d) { const c = content[cursor++]; if (c === '\\') cursor++; else if (c === '(') d++; else if (c === ')') d-- } if (d) bad(); continue }
         if (content.startsWith(dict ? '<<' : '[', cursor)) { if (++nesting > 16) bad(); cursor += dict ? 2 : 1; continue }
+        // Hex strings may end directly before a delimiter (`<FEFF00A0>>>`).
+        if (content[cursor] === '<') { if (content[cursor + 1] === '<') { cursor += 2; continue } const e = content.indexOf('>', cursor); if (e < 0) bad(); cursor = e + 1; continue }
         if (content.startsWith(endMark, cursor)) { if (--nesting === 0) break; cursor += endMark.length; continue }
         cursor++
       }
@@ -75,6 +77,20 @@ export function contentTokens(content: string, composite = false, level = 0): Co
         if (delimiter(first)) bad() // TJ arrays, dictionaries, inline images etc fail closed.
         while (i < content.length && !delimiter(content[i])) i++
         kind = /^[+-]?(?:\d+\.?\d*|\.\d+)$/.test(content.slice(start, i)) ? 'number' : 'operator'
+        if (kind === 'operator' && content.slice(start, i) === 'BI') {
+          // Inline image: dictionary, ID, raw data, EI. Delivered as one token.
+          const id = /\sID[\s]/g
+          id.lastIndex = i
+          const at = id.exec(content)
+          if (!at) bad()
+          const ei = /\sEI(?=[\s]|$)/g
+          ei.lastIndex = at!.index + at![0].length
+          const close = ei.exec(content)
+          if (!close || close.index - start > 4 * 1024 * 1024) bad()
+          i = close!.index + close![0].length
+          tokens.push({ kind: 'operator', raw: 'BI', start, end: i })
+          continue
+        }
       }
     }
     tokens.push({ kind, raw: content.slice(start, i), start, end: i, bytes })

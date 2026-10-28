@@ -9,6 +9,7 @@ import { getDocument } from 'pdfjs-dist/legacy/build/pdf.mjs'
 import { readFileSync, mkdirSync } from 'node:fs'
 import { resolve } from 'node:path'
 import assert from 'node:assert/strict'
+import { applyButton, checkInPdf, fit, inlineInput } from './source-inline-helper.mjs'
 const artifacts = process.env.SMOKE_ARTIFACT_DIR ?? '/tmp/pdf-editor-source-blocks'
 mkdirSync(artifacts, { recursive: true })
 const d = await PDFDocument.create(), p = d.addPage([595, 842]), n = PDFName.of
@@ -47,18 +48,21 @@ try {
   assert.equal(await page.locator('.source-block-outline').count(), 2, 'one outline per paragraph, not per fragment')
   assert.equal(await page.locator('.source-run-hit[tabindex="0"]').count(), 2, 'one keyboard stop per block')
   assert.equal(await page.locator('.source-unknown-hit').count(), 0, 'no grayed-out fragments between parts')
-  await page.locator('.source-run-hit').filter({ hasText: /^handelt$/ }).click()
-  const textarea = page.getByLabel('Ersatztext', { exact: true })
-  assert.equal(await textarea.inputValue(), paragraph, 'a click selects the whole paragraph block')
-  await page.getByText(/wird bei Bedarf automatisch neu umbrochen/).waitFor()
-  assert.equal(await page.getByRole('checkbox', { name: /Fließtextabsatz/ }).count(), 0, 'structure-tagged blocks need no reflow confirmation')
-  await textarea.fill(paragraph.replace('handelt.', 'hande.'))
-  await page.getByRole('button', { name: 'PDF-Vorschau erzeugen', exact: true }).click()
-  await page.getByText('PDF-Vorschau bereit. Absatz und Übergang zum Folgeabsatz prüfen.', { exact: true }).waitFor()
-  await page.locator('.source-pdf-preview canvas[data-render-state="ready"]').waitFor()
-  await page.getByRole('checkbox', { name: /Absatz, Abstände und Übergang/ }).check()
+  // A click on a word puts the caret there; the whole block is edited in place.
+  const word = await page.locator('.source-run-hit').filter({ hasText: /^handelt$/ }).boundingBox()
+  await page.mouse.click(word.x + word.width - 1, word.y + word.height / 2)
+  await page.locator('.source-inline').waitFor()
+  assert.equal(await inlineInput(page).inputValue(), paragraph, 'a click edits the whole paragraph block')
+  const at = await inlineInput(page).evaluate((a) => a.selectionStart)
+  assert.equal(at, paragraph.indexOf('handelt.') + 'handelt'.length, 'caret lands at the click point')
+  assert.equal(await page.getByRole('checkbox').count(), 0, 'no reflow confirmation')
+  await page.keyboard.press('Backspace'); await page.keyboard.press('Backspace')
+  assert.equal(await inlineInput(page).inputValue(), paragraph.replace('handelt.', 'hande.'))
+  assert.match(await fit(page), /^Passt · 3 Zeilen/)
+  await page.screenshot({ path: artifacts + '/blocks-inline.png', fullPage: true })
+  await checkInPdf(page)
   await page.screenshot({ path: artifacts + '/blocks-preview.png', fullPage: true })
-  await page.getByRole('button', { name: 'Korrektur übernehmen', exact: true }).click()
+  await applyButton(page).click()
   await page.locator('.page canvas[data-render-state="ready"]').first().waitFor()
   const pending = page.waitForEvent('download')
   await page.getByRole('button', { name: 'Exportieren', exact: true }).click(); await confirmDefaultExport(page)
@@ -73,7 +77,7 @@ try {
     assert.equal(next.transform[5], 690, 'following paragraph stays in position')
   } finally { await task.destroy() }
   assert.deepEqual(errors, [])
-  console.log('PASS source blocks: Word-like fragments as one block, single click, automatic reflow, gapless shortening, export')
+  console.log('PASS source blocks: Word-like fragments as one block, click-to-caret inline editing, automatic reflow, gapless shortening, export')
 } catch (error) {
   console.error('Browser errors:', errors)
   console.error((await page.locator('body').innerText()).slice(-1400))

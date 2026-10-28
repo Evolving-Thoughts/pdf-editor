@@ -1,4 +1,7 @@
 import type { SimpleSourceRun, SourceSelection } from './simplePdf'
+import type { EditFont, EditModel } from './editModel'
+import type { Box } from './space'
+export interface SourceAnalysis { digest: string; runs: SimpleSourceRun[]; blocks: EditModel[]; fonts: EditFont[]; rects: Box[] }
 interface Request { action: 'inspect' | 'preview'; bytes: ArrayBuffer; selection?: SourceSelection; replacement?: string; pageIndex?: number }
 /** One disposable worker per request. Termination covers parser/font code too,
  * not just cooperative cancellation after an expensive operation completes. */
@@ -16,5 +19,5 @@ export function sourceTextRequest<T>(request: Request, signal: AbortSignal, crea
     try { const bytes = request.bytes.slice(0); worker.postMessage({ ...request, bytes }, [bytes]) } catch (error) { finish(error instanceof Error ? error : new Error('Textanalyse konnte nicht gestartet werden.')) }
   })
 }
-export const inspectSource = (bytes: ArrayBuffer, signal: AbortSignal, pageIndex?: number) => sourceTextRequest<{ digest: string; runs: SimpleSourceRun[] }>({ action: 'inspect', bytes, pageIndex }, signal)
+export const inspectSource = (bytes: ArrayBuffer, signal: AbortSignal, pageIndex?: number) => sourceTextRequest<{ digest: string; runs: SimpleSourceRun[]; blocks?: EditModel[]; fonts?: EditFont[]; rects?: Box[] }>({ action: 'inspect', bytes, pageIndex }, signal)
 export const previewSource = (bytes: ArrayBuffer, selection: SourceSelection, replacement: string, signal: AbortSignal) => sourceTextRequest<ArrayBuffer>({ action: 'preview', bytes, selection, replacement }, signal)
