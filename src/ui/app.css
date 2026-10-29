@@ -1135,7 +1135,10 @@
 .source-pages ol { list-style:none; margin:0; padding:0 4px 0 0; display:grid; grid-template-columns:repeat(auto-fill,minmax(104px,1fr)); gap:8px; max-height:60vh; overflow-y:auto; overscroll-behavior:contain; }
 .source-editor .source-pages button { width:100%; display:flex; flex-direction:column; align-items:center; gap:6px; padding:6px; font-size:12px; min-height:0; }
 .source-editor .source-pages button[aria-current="page"] { border:2px solid #7936bb; background:#ad75db1f; padding:5px; }
-.source-pages button > span:last-child { max-width:100%; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+.source-pages .source-page-name { max-width:100%; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
 .source-thumb { display:flex; align-items:center; justify-content:center; width:84px; height:108px; background:#f4f2ec; pointer-events:none; }
 .source-thumb canvas { display:block; max-width:100%; max-height:100%; background:white; box-shadow:0 1px 3px #0003; }
 @media(max-width:760px) { .source-pages ol { grid-auto-flow:column; grid-template-columns:none; grid-auto-columns:104px; overflow-x:auto; overflow-y:hidden; max-height:none; } }
+
+.source-pages button { position:relative; }
+.source-page-mark { position:absolute; top:4px; right:4px; background:#2f7d4f; color:white; border-radius:8px; padding:1px 6px; font-size:11px; line-height:16px; }
