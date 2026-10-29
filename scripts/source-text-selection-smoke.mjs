@@ -90,14 +90,22 @@ try{
  assert.deepEqual(await caret(page),[29,29],'keyboard opens with the caret at the end')
  assert.ok(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth),'no mobile viewport overflow')
  await page.screenshot({path:artifacts+'/selection-mobile.png',fullPage:true})
+ // Several pages at once: the page 2 draft survives switching to page 1.
+ await page.keyboard.insertText(' Now')
  await page.setViewportSize({width:1440,height:1000});await page.getByRole('button',{name:'Seite 1 anzeigen',exact:true}).click();await ready()
+ assert.equal(await drafts(),1,'a page switch keeps the unchecked draft of the other page')
+ assert.match(await page.locator('.source-drafts li').first().innerText(),/^Seite 2 · /,'drafts of another page name their page')
+ assert.equal(await page.locator('.source-pages button',{has:page.locator('.source-page-mark')}).getAttribute('aria-label'),'Seite 2 anzeigen','the page strip marks the page with a draft')
+ assert.equal(await page.getByRole('button',{name:'Zur Dokumentbearbeitung',exact:true}).count(),1,'the toolbar button leads back to the normal view')
  await run.scrollIntoViewIfNeeded();await drag(run,6,10);await page.keyboard.insertText('Erde')
+ assert.match(await page.locator('.source-drafts h3').innerText(),/2 geänderte Absätze auf 2 Seiten/)
  await checkInPdf(page)
+ assert.match(await page.locator('.source-editor [role="status"]').last().innerText(),/2 geänderten Absätzen auf 2 Seiten/,'both pages are checked together')
  await applyButton(page).click()
  await page.locator('.page canvas[data-render-state="ready"]').first().waitFor()
  const pending=page.waitForEvent('download');await page.getByRole('button',{name:'Exportieren',exact:true}).click();await confirmDefaultExport(page)
  const dl=await pending,task=getDocument({data:Uint8Array.from(readFileSync(await dl.path())),standardFontDataUrl:resolve('node_modules/pdfjs-dist/standard_fonts')+'/'})
- try{const pdf=await task.promise,items=(await(await pdf.getPage(1)).getTextContent()).items.filter(i=>'str'in i);assert.equal(items.map(i=>i.str).filter(Boolean).join(' '),'Hallo Erde Grüße München. Following paragraph remains fixed.');assert.equal(items.at(-1).transform[5],640)}finally{await task.destroy()}
+ try{const pdf=await task.promise,items=(await(await pdf.getPage(1)).getTextContent()).items.filter(i=>'str'in i);assert.equal(items.map(i=>i.str).filter(Boolean).join(' '),'Hallo Erde Grüße München. Following paragraph remains fixed.');assert.equal(items.at(-1).transform[5],640);const second=(await(await pdf.getPage(2)).getTextContent()).items.filter(i=>'str'in i).map(i=>i.str).join('');assert.match(second,/Safe fragment for correction\. ?Now/,'the page 2 correction is applied in the same step')}finally{await task.destroy()}
  assert.deepEqual(errors,[])
- console.log('PASS direct selection: native drag into inline editor, cropped origin, partial replacement export, focus, persistent highlight, dirty guard, unsupported text, zoom, keyboard/mobile, stale candidate')
+ console.log('PASS direct selection: native drag into inline editor, cropped origin, partial replacement export, focus, persistent highlight, dirty guard, unsupported text, zoom, keyboard/mobile, stale candidate, several pages in one check')
 }catch(e){console.error((await page.locator('body').innerText()).slice(-2200));await page.screenshot({path:artifacts+'/failure.png',fullPage:true});throw e}finally{await browser.close()}

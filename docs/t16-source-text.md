@@ -32,6 +32,13 @@ dimmed (click for the reason).
   Esc leaves a paragraph and keeps its draft. The live fit of each paragraph
   takes the new line boxes of the other drafts into account. No discard prompt appears
   when switching paragraphs.
+- **Several pages at once:** drafts are kept per page (key = page id + block
+  id) and survive page switches; the list names the page of each draft and the
+  thumbnails mark pages with drafts (`geändert`) or checked results (`geprüft`).
+  **In PDF prüfen** checks every page with drafts (page order, top to bottom),
+  renders every result page before it can be applied, and **Übernehmen** applies
+  all pages as one undoable command (`sourceRevisions`). Errors name the page.
+  Undo/redo of a draft on another page switches to that page.
 - **Undo before checking:** typing is grouped per word (new step at a space, a
   pause > 1 s or a paragraph switch; `draftHistory.ts`). The toolbar
   **Rückgängig/Wiederholen** and Ctrl+Z / Ctrl+Y / Ctrl+Shift+Z step through the
@@ -56,6 +63,11 @@ identically in every case. Only the worker's verified candidate can be applied.
 Fragments without a proved paragraph (and PDFs handled only by the older
 single-stream adapter) keep the side-panel textarea; a multi-line paragraph of
 that older adapter still needs its explicit reflow confirmation.
+
+**Opening page:** the text correction and the page manager open at the page
+shown in the normal view; leaving them returns the normal view to the page last
+shown there. While the correction is open its toolbar button reads **Zur
+Dokumentbearbeitung**.
 
 **Pages and speed:** the left panel shows page thumbnails (as in the page
 manager, lazily rendered; a horizontal strip on narrow screens) below the
@@ -167,7 +179,7 @@ server; workers process local copied buffers.
 
 ## Validation
 
-- 338 unit/integration tests, among them `tests/core/sourceReflow.test.ts`
+- 340 unit/integration tests, among them `tests/core/sourceReflow.test.ts`
   (model ↔ PDF layout agreement, HTML-renderer pages, ActualText NBSP, soft
   hyphens, links, obstacles, caret geometry, fit status) and
   `tests/core/mixedBlocks.test.ts` (Word-like fragments, batched multi-paragraph checks), `tests/core/draftHistory.test.ts`
@@ -182,7 +194,7 @@ server; workers process local copied buffers.
   local `SOURCE_TEXT_PDF`/`SOURCE_TEXT_FIND`/`SOURCE_TEXT_REPLACE`),
   `source-text-selection-smoke.mjs` (native drag, CropBox origin, zoom,
   two paragraphs checked together, toolbar/keyboard undo/redo of drafts, page
-  thumbnails, keyboard/mobile, unproved text, stale candidate) and
+  thumbnails, drafts on two pages checked and exported together, keyboard/mobile, unproved text, stale candidate) and
   `source-text-blocks-smoke.mjs` (Word-like block, click-to-caret, gapless
   shortening).
 - Supplied documents and their fonts are tested locally only and are NOT in the
