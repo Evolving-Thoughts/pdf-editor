@@ -7,7 +7,7 @@ import { getDocument } from 'pdfjs-dist/legacy/build/pdf.mjs'
 import { inspectSimpleSourceText, previewSimpleSourceCorrection } from '../../src/core/sourceText/simplePdf'
 import { sourceFontCodec } from '../../src/core/sourceText/encoding'
 import { planSourceParagraph } from '../../src/core/sourceText/layout'
-import { sourceRevision } from '../../src/core/sourceText/revision'
+import { sourceRevision, sourceRevisions } from '../../src/core/sourceText/revision'
 import { EditorStore } from '../../src/core/editorStore'
 import { inspectPages, exportPageDocument } from '../../src/core/pdf/pageOperations'
 import { sourceTextRequest } from '../../src/core/sourceText/client'
@@ -193,4 +193,19 @@ test('ASCIIHexDecode streams larger than the argument limit decode in bounded st
   await expect(streamBytes(odd)).resolves.toEqual(Uint8Array.from([0x41, 0x40]))
   const bad = PDFRawStream.of(doc.context.obj({ Filter: 'AHx' }), new TextEncoder().encode('4G>'))
   await expect(streamBytes(bad)).rejects.toThrow(/Streamkodierung/)
+})
+
+test('corrections of several pages are one undoable command', async () => {
+  const doc = await PDFDocument.create(), font = await doc.embedFont(StandardFonts.Helvetica)
+  for (const label of ['One', 'Two', 'Three']) doc.addPage().drawText(label, { font, size: 12, x: 50, y: 700 })
+  const bytes = await doc.save(), pages = await inspectPages(bytes, 'three.pdf'), store = new EditorStore()
+  store.restore([], pages, [])
+  const before = store.state.pages!.map(p => p.sourceId)
+  store.dispatch(sourceRevisions(store.state, [{ pageId: pages[0].id, bytes: Uint8Array.from(bytes).buffer }, { pageId: pages[2].id, bytes: Uint8Array.from(bytes).buffer }]))
+  const after = store.state.pages!.map(p => p.sourceId)
+  expect(after[0]).not.toBe(before[0]); expect(after[1]).toBe(before[1]); expect(after[2]).not.toBe(before[2]); expect(after[0]).not.toBe(after[2])
+  expect(store.state.pageSources).toHaveLength(2)
+  store.undo(); expect(store.state.pages!.map(p => p.sourceId)).toEqual(before)
+  store.redo(); expect(store.state.pages!.map(p => p.sourceId)).toEqual(after)
+  expect(() => sourceRevisions(store.state, [{ pageId: pages[1].id, bytes: Uint8Array.from(bytes).buffer }, { pageId: pages[1].id, bytes: Uint8Array.from(bytes).buffer }])).toThrow()
 })

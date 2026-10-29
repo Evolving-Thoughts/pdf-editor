@@ -13,7 +13,7 @@ import type { Box } from '../core/sourceText/space'
 import { emptyHistory, recordEdit, recordStep, redoDraft, undoDraft, withDraft } from '../core/sourceText/draftHistory'
 import type { DraftHistory, DraftState } from '../core/sourceText/draftHistory'
 import { fitMessage } from './sourceFit'
-import { sourceRevision } from '../core/sourceText/revision'
+import { sourceRevisions } from '../core/sourceText/revision'
 import type { SourcePageGeometry } from '../core/pdf/loadPdf'
 import type { SearchFragment } from '../core/search'
 import { SourceTextSelection } from './SourceTextSelection'
@@ -91,15 +91,17 @@ function PdfPreview({ docs, stages, bytes, pageNumber, prefetch, onReady, label,
 }
 
 /** Page thumbnails, rendered lazily from the cached source documents. */
-function PageStrip({ docs, pages, sourceOf, current, disabled, live, onPick }: {
+function PageStrip({ docs, pages, sourceOf, current, disabled, live, onPick, marks }: {
   docs: PdfDocuments; pages: { id: string; name: string; sourceIndex: number }[]; sourceOf: (id: string) => ArrayBuffer | undefined
   current: string; disabled: boolean; live: boolean; onPick: (id: string) => void
+  /** Pages with drafts or checked results, with a short label. */
+  marks: ReadonlyMap<string, string>
 }) {
   const list = useRef<HTMLOListElement>(null)
   useEffect(() => { list.current?.querySelector<HTMLElement>('[aria-current="page"]')?.scrollIntoView({ block: 'nearest' }) }, [current])
   return <nav className="source-pages" aria-label="Seiten"><h3>Seiten</h3><ol ref={list}>
-    {pages.map((p, i) => <li key={p.id}><button type="button" aria-label={`Seite ${i + 1} anzeigen`} aria-current={p.id === current ? 'page' : undefined} disabled={disabled} onClick={() => onPick(p.id)}>
-      <Thumb docs={docs} bytes={live ? sourceOf(p.id) : undefined} pageNumber={p.sourceIndex + 1} root={list} /><span>{i + 1} · {p.name}</span>
+    {pages.map((p, i) => <li key={p.id}><button type="button" aria-label={`Seite ${i + 1} anzeigen`} aria-description={marks.get(p.id)} aria-current={p.id === current ? 'page' : undefined} disabled={disabled} onClick={() => onPick(p.id)}>
+      <Thumb docs={docs} bytes={live ? sourceOf(p.id) : undefined} pageNumber={p.sourceIndex + 1} root={list} /><span className="source-page-name">{i + 1} · {p.name}</span>{marks.has(p.id) && <span className="source-page-mark">{marks.get(p.id)}</span>}
     </button></li>)}
   </ol></nav>
 }
@@ -145,103 +147,155 @@ const NO_PAGES: NonNullable<EditorStore['state']['pages']> = []
 const NONE: DraftState = { drafts: {}, active: null }
 const EMPTY_ANALYSIS: SourceAnalysis = { digest: '', runs: [], blocks: [], fonts: [], rects: [] }
 
-export function SourceTextPanel({ store, original, onClose, onHistory }: { store: EditorStore; original: ArrayBuffer; onClose: () => void; onHistory?: (history: SourceHistory | null) => void }) {
+/** Drafts of all pages share one history: key = page id + block id. */
+const SEP = '\u0001'
+const keyOf = (pageId: string, blockId: string) => pageId + SEP + blockId
+const splitKey = (key: string) => { const i = key.indexOf(SEP); return { pageId: key.slice(0, i), blockId: key.slice(i + 1) } }
+/** What a draft needs once its page is no longer shown: the block model for
+ * the check and the last live fit for the list. */
+type DraftMeta = { pageId: string; model: EditModel; digest: string; fit: { tone: string; text: string }; ok: boolean }
+type Candidate = { pages: { pageId: string; bytes: ArrayBuffer; pageNumber: number }[]; version: number; paragraphs: number }
+const fitOk = (v: InlineView | null | undefined) => !!v && !['same', 'invalid', 'missing'].includes(v.status.kind)
+
+export function SourceTextPanel({ store, original, onClose, onHistory, initialPage = 0, onPage }: {
+  store: EditorStore; original: ArrayBuffer; onClose: () => void; onHistory?: (history: SourceHistory | null) => void
+  /** Page index shown first (the page viewed before opening). */
+  initialPage?: number; onPage?: (index: number) => void
+}) {
   const version = useSyncExternalStore(store.subscribe, store.getVersion)
   const [docs] = useState(() => pdfDocuments()), [stages] = useState(() => stageCache())
   // Thumbnails wait for the first page view, which has priority.
   const [shown, setShown] = useState(false)
   useEffect(() => () => docs.destroy(), [docs])
   useEffect(() => { warmSourceWorkers(2) }, [])
-  const [pageId, setPageId] = useState(store.state.pages?.[0]?.id ?? '')
-  const [analysis, setAnalysis] = useState<SourceAnalysis | null>(null)
+  const [pageId, setPageId] = useState(() => (store.state.pages?.[initialPage] ?? store.state.pages?.[0])?.id ?? '')
+  const pageRef = useRef(pageId)
+  useLayoutEffect(() => { pageRef.current = pageId })
+  const [analysis, setAnalysis] = useState<(SourceAnalysis & { pageId: string }) | null>(null)
   // Fragment flow (text without a proved paragraph): side-panel textarea.
   const [selection, setSelection] = useState<DirectSelection | null>(null), [pending, setPending] = useState<DirectSelection | null>(null)
   const [text, setText] = useState(''), [paragraph, setParagraph] = useState(false)
-  // Inline flow: proved paragraphs edited directly on the page, several at once.
+  // Inline flow: proved paragraphs edited directly on the page, several at once, on several pages.
   const [draft, setDraft] = useState<DraftState>(NONE)
+  const [metas, setMetas] = useState<Readonly<Record<string, DraftMeta>>>({})
   const history = useRef<DraftHistory>(emptyHistory()), draftRef = useRef(draft)
   const [counts, setCounts] = useState({ past: 0, future: 0 })
   useLayoutEffect(() => { draftRef.current = draft })
   const textarea = useRef<HTMLTextAreaElement>(null)
-  const [candidate, setCandidate] = useState<{ bytes: ArrayBuffer; version: number } | null>(null)
+  const [candidate, setCandidate] = useState<Candidate | null>(null)
   const [showOriginal, setShowOriginal] = useState(false)
-  const [ready, setReady] = useState(false), [busy, setBusy] = useState(false), [error, setError] = useState('')
-  const request = useRef<AbortController | null>(null), epoch = useRef(0)
+  const [ready, setReady] = useState(false), [busy, setBusy] = useState(false), [checking, setChecking] = useState(false), [error, setError] = useState('')
+  const request = useRef<AbortController | null>(null), epoch = useRef(0), seenVersion = useRef(version)
   // The page analysis has its own request and counter: invalidating a preview must not drop it.
   const analysisRequest = useRef<AbortController | null>(null), analysisEpoch = useRef(0)
   const pages = store.state.pages ?? NO_PAGES
   const page = pages.find(value => value.id === pageId)
+  const pageNumberOf = useCallback((id: string) => pages.findIndex(p => p.id === id) + 1, [pages])
+  useEffect(() => { const i = pages.findIndex(p => p.id === pageId); if (i >= 0) onPage?.(i) }, [pages, pageId, onPage])
   const sourceOf = useCallback((id: string) => {
     const p = store.state.pages?.find(value => value.id === id)
     return p?.sourceId === 'original' ? original : store.state.pageSources?.find(value => value.id === p?.sourceId)?.bytes
   }, [store, original])
   const source = page ? sourceOf(page.id) : undefined
-  const run = analysis?.runs.find(value => value.id === selection?.runId)
-  const fonts = useMemo(() => (analysis?.fonts ?? []).map(liveFont), [analysis])
-  const models = useMemo(() => new Map((analysis?.blocks ?? []).map(b => [b.id, b])), [analysis])
+  const current = analysis?.pageId === pageId ? analysis : null
+  const run = current?.runs.find(value => value.id === selection?.runId)
+  const fonts = useMemo(() => (current?.fonts ?? []).map(liveFont), [current])
+  const models = useMemo(() => new Map((current?.blocks ?? []).map(b => [b.id, b])), [current])
   const blockIds = useMemo(() => new Set(models.keys()), [models])
-  const draftIds = useMemo(() => Object.keys(draft.drafts).filter(id => models.has(id)), [draft.drafts, models])
+  const allKeys = useMemo(() => Object.keys(draft.drafts), [draft.drafts])
+  const draftIds = useMemo(() => allKeys.map(splitKey).filter(k => k.pageId === pageId && models.has(k.blockId)).map(k => k.blockId), [allKeys, models, pageId])
   const lives = useMemo(() => new Map([...models.values()].map(m => [m.id, liveBlock(m, fonts)])), [models, fonts])
   const live = useCallback((m: EditModel) => lives.get(m.id) ?? liveBlock(m, fonts), [lives, fonts])
-  const textOf = useCallback((id: string) => draft.drafts[id] ?? models.get(id)?.text ?? '', [draft.drafts, models])
+  const textOf = useCallback((id: string) => draft.drafts[keyOf(pageId, id)] ?? models.get(id)?.text ?? '', [draft.drafts, models, pageId])
+  const activeKey = draft.active ? splitKey(draft.active.id) : null
+  const active = draft.active && activeKey!.pageId === pageId && models.has(activeKey!.blockId) ? { id: activeKey!.blockId, range: draft.active.range } : null
   // Each changed paragraph against the page as it would be with the other drafts.
   const views = useMemo(() => {
     const out = new Map<string, InlineView | null>()
-    if (!analysis) return out
+    if (!current) return out
     const shown = new Set(draftIds)
-    if (draft.active && models.has(draft.active.id)) shown.add(draft.active.id)
-    const base = new Map(draftIds.map(id => { const m = models.get(id)!; return [id, inlineLayout(live(m), textOf(id), limitsOf(m, analysis))] }))
+    if (active) shown.add(active.id)
+    const base = new Map(draftIds.map(id => { const m = models.get(id)!; return [id, inlineLayout(live(m), textOf(id), limitsOf(m, current))] }))
     for (const id of shown) {
       const m = models.get(id)!, others = draftIds.filter(o => o !== id)
-      if (!others.length) { out.set(id, base.get(id) ?? inlineLayout(live(m), textOf(id), limitsOf(m, analysis))); continue }
+      if (!others.length) { out.set(id, base.get(id) ?? inlineLayout(live(m), textOf(id), limitsOf(m, current))); continue }
       const removed = new Set(others.flatMap(o => models.get(o)!.space.own))
       const extra = others.flatMap(o => { const v = base.get(o); return v ? lineBoxes(v) : [] })
-      out.set(id, inlineLayout(live(m), textOf(id), { room: m.room, pinned: m.pinned, slots: m.slots, space: draftSpace(m, analysis.rects, removed, extra) }))
+      out.set(id, inlineLayout(live(m), textOf(id), { room: m.room, pinned: m.pinned, slots: m.slots, space: draftSpace(m, current.rects, removed, extra) }))
     }
     return out
-  }, [analysis, models, draftIds, draft.active, live, textOf])
-  const active = draft.active && models.has(draft.active.id) ? draft.active : null
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [current, models, draftIds, active?.id, live, textOf])
+  /** Keep the live fit of the shown page's drafts before leaving the page: the
+   * list and the check use it while another page is shown. */
+  const snapshot = () => setMetas(prev => {
+    let next: Record<string, DraftMeta> | null = null
+    for (const id of draftIds) {
+      const k = keyOf(pageId, id), m = prev[k], v = views.get(id), fit = fitMessage(v?.status), ok = fitOk(v)
+      if (m && (m.fit.text !== fit.text || m.ok !== ok)) { next ??= { ...prev }; next[k] = { ...m, fit, ok } }
+    }
+    return next ?? prev
+  })
+  const snapshotRef = useRef(snapshot)
+  useLayoutEffect(() => { snapshotRef.current = snapshot })
   const model = active ? models.get(active.id) : undefined
   const view = active ? views.get(active.id) ?? null : null
   const fit = model ? fitMessage(view?.status) : undefined
-  const checkable = draftIds.length > 0 && draftIds.every(id => { const v = views.get(id); return !!v && !['same', 'invalid', 'missing'].includes(v.status.kind) })
+  const okOf = (k: string) => { const { pageId: p, blockId } = splitKey(k); return p === pageId && models.has(blockId) ? fitOk(views.get(blockId)) : !!metas[k]?.ok }
+  const checkable = allKeys.length > 0 && allKeys.every(k => !!metas[k] && okOf(k))
+  const draftPages = useMemo(() => new Set(allKeys.map(k => splitKey(k).pageId)), [allKeys])
   // Simple single-stream PDFs keep the confirmed reflow of the older adapter.
   const automatic = !!run?.paragraph?.automatic, reflow = paragraph || automatic
   const fragmentDirty = !!selection && text !== selection.text
-  const dirty = draftIds.length > 0 || fragmentDirty
-  const invalid = () => { request.current?.abort(); epoch.current++; setCandidate(null); setShowOriginal(false); setReady(false); setBusy(false) }
+  const dirty = allKeys.length > 0 || fragmentDirty
+  const invalid = () => { request.current?.abort(); epoch.current++; setCandidate(null); setShowOriginal(false); setReady(false); setBusy(false); setChecking(false) }
   const bump = () => setCounts({ past: history.current.past.length, future: history.current.future.length })
   useEffect(() => {
-    request.current?.abort(); analysisRequest.current?.abort(); const controller = new AbortController(); analysisRequest.current = controller
-    const current = ++analysisEpoch.current
-    queueMicrotask(() => { if (!controller.signal.aborted) { setAnalysis(null); setCandidate(null); setShowOriginal(false); setReady(false); setSelection(null); setPending(null); setDraft(NONE); history.current = emptyHistory(); bump(); setText(''); setParagraph(false); setError(''); setBusy(true) } })
+    // A changed document invalidates every draft; a page switch keeps them.
+    const changed = seenVersion.current !== version
+    seenVersion.current = version
+    if (changed) request.current?.abort()
+    analysisRequest.current?.abort(); const controller = new AbortController(); analysisRequest.current = controller
+    const currentEpoch = ++analysisEpoch.current
+    queueMicrotask(() => {
+      if (controller.signal.aborted) return
+      if (changed) { setCandidate(null); setShowOriginal(false); setReady(false); setDraft(NONE); setMetas({}); history.current = emptyHistory(); bump() }
+      setAnalysis(null); setSelection(null); setPending(null); setText(''); setParagraph(false); setError(''); setBusy(true)
+    })
     const supported = (p: typeof page) => {
       const index = store.state.pages?.findIndex(value => value.id === p?.id) ?? -1
       return !!p && !p.cropped && p.rotation === 0 && p.unit === 1 && !p.redacted && !store.state.redactions?.length && !store.state.overlays.some(overlay => overlay.pageIndex === index)
     }
     if (!source || !supported(page)) {
-      queueMicrotask(() => { if (!controller.signal.aborted) { setAnalysis(EMPTY_ANALYSIS); setError('Diese Seite ist derzeit nicht unterstützt: Drehung, Zuschnitt, Schwärzungen oder Overlays verhindern eine sichere Originaltext-Korrektur.'); setBusy(false) } }); return () => controller.abort()
+      queueMicrotask(() => { if (!controller.signal.aborted) { setAnalysis({ ...EMPTY_ANALYSIS, pageId }); setError('Diese Seite ist derzeit nicht unterstützt: Drehung, Zuschnitt, Schwärzungen oder Overlays verhindern eine sichere Originaltext-Korrektur.'); setBusy(false) } }); return () => controller.abort()
     }
     void cachedInspection(source, page!.sourceIndex, controller.signal).then(result => {
-      if (controller.signal.aborted || analysisEpoch.current !== current) return
+      if (controller.signal.aborted || analysisEpoch.current !== currentEpoch) return
       const runs = result.runs.filter(value => value.pageIndex === page!.sourceIndex)
-      setAnalysis({ ...result, runs, blocks: result.blocks ?? [], fonts: result.fonts ?? [], rects: result.rects ?? [] })
+      setAnalysis({ ...result, runs, blocks: result.blocks ?? [], fonts: result.fonts ?? [], rects: result.rects ?? [], pageId })
       if (!runs.some(value => value.selection)) setError('Keine sicher markierbaren Originaltextstellen nachgewiesen. Bei Scans ist zunächst OCR nötig; Text-PDFs können nicht unterstützte Schriften oder Strukturen enthalten.')
       // The neighbours are the likely next pages: analyze them in the background.
       const all = store.state.pages ?? [], at = all.findIndex(value => value.id === page!.id)
       for (const next of [all[at + 1], all[at - 1]]) { const bytes = next && supported(next) ? sourceOf(next.id) : undefined; if (bytes) prefetchInspection(bytes, next.sourceIndex) }
-    }).catch(problem => { if (!controller.signal.aborted) { setAnalysis(EMPTY_ANALYSIS); setError(problem instanceof Error ? problem.message : 'Textanalyse fehlgeschlagen.') } }).finally(() => { if (!controller.signal.aborted && analysisEpoch.current === current) setBusy(false) })
+    }).catch(problem => { if (!controller.signal.aborted) { setAnalysis({ ...EMPTY_ANALYSIS, pageId }); setError(problem instanceof Error ? problem.message : 'Textanalyse fehlgeschlagen.') } }).finally(() => { if (!controller.signal.aborted && analysisEpoch.current === currentEpoch) setBusy(false) })
     return () => { controller.abort() }
   }, [version, pageId, page, source, store, sourceOf])
   useEffect(() => () => { request.current?.abort(); analysisRequest.current?.abort() }, [])
   // Focus after React enables the textarea, including after a mouse selection.
   useEffect(() => { if (selection) { textarea.current?.focus({ preventScroll: true }); if (window.matchMedia('(max-width:760px)').matches) textarea.current?.scrollIntoView({ block: 'center' }) } }, [selection])
 
+  /** Undo/redo may change a draft on another page: show that page. */
+  const restore = useCallback((before: DraftState, after: DraftState) => {
+    const keys = new Set([...Object.keys(before.drafts), ...Object.keys(after.drafts)])
+    const changed = [...keys].find(k => before.drafts[k] !== after.drafts[k]) ?? after.active?.id
+    const target = changed ? splitKey(changed).pageId : undefined
+    if (target && target !== pageRef.current) { snapshotRef.current(); setPageId(target) }
+  }, [])
   // Draft history: the toolbar and Ctrl+Z step through unchecked edits first.
-  const undo = useCallback(() => { const r = undoDraft(history.current, draftRef.current); if (!r) return; history.current = r.history; invalid(); setDraft(r.state); setError(''); bump() }, [])
-  const redo = useCallback(() => { const r = redoDraft(history.current, draftRef.current); if (!r) return; history.current = r.history; invalid(); setDraft(r.state); setError(''); bump() }, [])
-  const canUndo = counts.past > 0 && !busy, canRedo = counts.future > 0 && !busy
-  useEffect(() => { onHistory?.({ canUndo, canRedo, dirty: draftIds.length > 0, undo, redo }) }, [onHistory, canUndo, canRedo, draftIds.length, undo, redo])
+  const undo = useCallback(() => { const r = undoDraft(history.current, draftRef.current); if (!r) return; history.current = r.history; invalid(); restore(draftRef.current, r.state); setDraft(r.state); setError(''); bump() }, [restore])
+  const redo = useCallback(() => { const r = redoDraft(history.current, draftRef.current); if (!r) return; history.current = r.history; invalid(); restore(draftRef.current, r.state); setDraft(r.state); setError(''); bump() }, [restore])
+  const canUndo = counts.past > 0 && !checking, canRedo = counts.future > 0 && !checking
+  useEffect(() => { onHistory?.({ canUndo, canRedo, dirty: allKeys.length > 0, undo, redo }) }, [onHistory, canUndo, canRedo, allKeys.length, undo, redo])
   useEffect(() => () => onHistory?.(null), [onHistory])
   useEffect(() => {
     const onKey = (event: KeyboardEvent) => {
@@ -260,19 +314,19 @@ export function SourceTextPanel({ store, original, onClose, onHistory }: { store
     return () => window.removeEventListener('keydown', onKey)
   }, [undo, redo, store])
 
-  const discard = () => !dirty || window.confirm(draftIds.length > 1 ? `${draftIds.length} ungeprüfte Absatzänderungen verwerfen?` : 'Ungesicherte Korrektur verwerfen?')
-  function accept(value: DirectSelection) { invalid(); setDraft(NONE); history.current = emptyHistory(); bump(); setSelection(value); setText(value.text); setParagraph(false); setPending(null); setError('') }
+  const discard = () => !dirty || window.confirm(allKeys.length > 1 ? `${allKeys.length} ungeprüfte Absatzänderungen verwerfen?` : 'Ungesicherte Korrektur verwerfen?')
+  function accept(value: DirectSelection) { invalid(); setDraft(NONE); setMetas({}); history.current = emptyHistory(); bump(); setSelection(value); setText(value.text); setParagraph(false); setPending(null); setError('') }
   function select(value: DirectSelection) {
-    if (draftIds.length) { if (!window.confirm('Ungeprüfte Absatzänderungen verwerfen und dieses Textfragment bearbeiten?')) return; accept(value); return }
+    if (allKeys.length) { if (!window.confirm('Ungeprüfte Absatzänderungen verwerfen und dieses Textfragment bearbeiten?')) return; accept(value); return }
     if (selection && text !== selection.text) { setPending(value); return }
     accept(value)
   }
   function openBlock(id: string, from?: { x: number; y: number }, to?: { x: number; y: number }) {
     const m = models.get(id)
-    if (!m || !analysis) return
+    if (!m || !current) return
     if (active?.id === id && !from) return
     if (fragmentDirty && !window.confirm('Ungesicherte Korrektur verwerfen?')) return
-    const value = textOf(id), v = views.get(id) ?? inlineLayout(live(m), value, limitsOf(m, analysis))
+    const value = textOf(id), v = views.get(id) ?? inlineLayout(live(m), value, limitsOf(m, current))
     let range: TextRange = { start: value.length, end: value.length }
     if (v && from) {
       const stops = caretStops(v), a = hitOffset(v, stops, from.x, from.y, m.size), b = to ? hitOffset(v, stops, to.x, to.y, m.size) : a
@@ -280,22 +334,32 @@ export function SourceTextPanel({ store, original, onClose, onHistory }: { store
     }
     invalid(); setSelection(null); setPending(null); setText(''); setError('')
     history.current = { ...history.current, group: undefined }
-    setDraft({ ...draftRef.current, active: { id, range } })
+    setDraft({ ...draftRef.current, active: { id: keyOf(pageId, id), range } })
+  }
+  /** A draft from the list: on another page, switch there with the caret at its end. */
+  function openDraft(key: string) {
+    const { pageId: p, blockId } = splitKey(key)
+    if (p === pageId) { openBlock(blockId); return }
+    if (fragmentDirty && !window.confirm('Ungesicherte Korrektur verwerfen?')) return
+    const end = draftRef.current.drafts[key]?.length ?? 0
+    invalid(); snapshot(); history.current = { ...history.current, group: undefined }
+    setDraft({ ...draftRef.current, active: { id: key, range: { start: end, end } } }); setPageId(p)
   }
   function edit(id: string, value: string, range: TextRange) {
     const m = models.get(id)
-    if (!m) return
-    const before = draftRef.current
-    history.current = recordEdit(history.current, before, id, before.drafts[id] ?? m.text, value, clock())
-    const next = withDraft(before, id, value, m.text, range)
+    if (!m || !current) return
+    const before = draftRef.current, key = keyOf(pageId, id)
+    history.current = recordEdit(history.current, before, key, before.drafts[key] ?? m.text, value, clock())
+    const next = withDraft(before, key, value, m.text, range)
     draftRef.current = next
+    if (!metas[key]) setMetas(prev => ({ ...prev, [key]: { pageId, model: m, digest: current.digest, fit: fitMessage(undefined), ok: false } }))
     invalid(); setError(''); setDraft(next); bump()
   }
-  function discardBlock(id: string) {
+  function discardBlock(key: string) {
     const before = draftRef.current
-    if (!(id in before.drafts)) return
+    if (!(key in before.drafts)) return
     history.current = recordStep(history.current, before)
-    const drafts = { ...before.drafts }; delete drafts[id]
+    const drafts = { ...before.drafts }; delete drafts[key]
     invalid(); setError(''); setDraft({ drafts, active: null }); bump()
   }
   function discardAll() {
@@ -305,46 +369,69 @@ export function SourceTextPanel({ store, original, onClose, onHistory }: { store
     invalid(); setError(''); setDraft(NONE); bump()
   }
   async function check() {
-    if (!source || !analysis || busy) return
-    invalid(); const controller = new AbortController(); request.current = controller; const current = ++epoch.current
-    setError(''); setBusy(true)
+    if (busy) return
+    invalid(); const controller = new AbortController(); request.current = controller; const currentEpoch = ++epoch.current
+    setError(''); setBusy(true); setChecking(true)
     try {
-      let bytes: ArrayBuffer
-      if (draftIds.length) {
-        // Top to bottom, as a reader goes through the page.
-        const order = [...draftIds].sort((a, b) => models.get(b)!.lines[0].baseline - models.get(a)!.lines[0].baseline)
-        bytes = await previewSources(source, order.map(id => { const m = models.get(id)!; return { selection: { digest: analysis.digest, runId: m.runId, expectedText: m.expectedText, scope: 'paragraph' as const }, replacement: draft.drafts[id] } }), controller.signal)
+      const out: Candidate['pages'] = []
+      let paragraphs = 1
+      if (allKeys.length) {
+        paragraphs = allKeys.length
+        // Page order, and top to bottom on each page, as a reader goes through the document.
+        for (const p of pages.filter(value => draftPages.has(value.id))) {
+          const bytes = sourceOf(p.id), keys = allKeys.filter(k => splitKey(k).pageId === p.id)
+            .sort((a, b) => metas[b].model.lines[0].baseline - metas[a].model.lines[0].baseline)
+          const label = draftPages.size > 1 ? `Seite ${pageNumberOf(p.id)}: ` : ''
+          if (!bytes) throw new Error(`${label}Die Seite ist nicht mehr verfügbar.`)
+          try {
+            out.push({ pageId: p.id, pageNumber: p.sourceIndex + 1, bytes: await previewSources(bytes, keys.map(k => { const { model: m, digest } = metas[k]; return { selection: { digest, runId: m.runId, expectedText: m.expectedText, scope: 'paragraph' as const }, replacement: draftRef.current.drafts[k] } }), controller.signal) })
+          } catch (problem) { if (controller.signal.aborted) throw problem; throw new Error(label + (problem instanceof Error ? problem.message : 'Korrektur fehlgeschlagen.'), { cause: problem }) }
+        }
       } else {
-        if (!run || !selection || pending) return
+        if (!source || !current || !page || !run || !selection || pending) return
         const replacement = selectedReplacement(run, selection, text, reflow)
-        bytes = await previewSource(source, { digest: analysis.digest, runId: run.id, expectedText: run.text, scope: reflow ? 'paragraph' : 'line', confirmReflow: paragraph }, replacement, controller.signal)
+        out.push({ pageId, pageNumber: page.sourceIndex + 1, bytes: await previewSource(source, { digest: current.digest, runId: run.id, expectedText: run.text, scope: reflow ? 'paragraph' : 'line', confirmReflow: paragraph }, replacement, controller.signal) })
       }
-      if (!controller.signal.aborted && epoch.current === current && version === store.getVersion()) setCandidate({ bytes, version })
+      // Every result page must render before it can be applied, not only the one on screen.
+      for (const o of out) { if (controller.signal.aborted) return; const pdf = await docs.get(o.bytes); await pdf.renderPage(o.pageNumber, document.createElement('canvas'), .25) }
+      if (!controller.signal.aborted && epoch.current === currentEpoch && version === store.getVersion()) {
+        setCandidate({ pages: out, version, paragraphs })
+        if (!out.some(o => o.pageId === pageRef.current)) setPageId(out[0].pageId)
+      }
     } catch (problem) { if (!controller.signal.aborted) setError(problem instanceof Error ? problem.message : 'Korrektur fehlgeschlagen.') }
-    finally { if (!controller.signal.aborted && epoch.current === current) setBusy(false) }
+    finally { if (!controller.signal.aborted && epoch.current === currentEpoch) { setBusy(false); setChecking(false) } }
   }
+  const result = candidate?.pages.find(o => o.pageId === pageId)
+  const showingCandidate = !!result && !showOriginal
+  const canApply = !!candidate && !showOriginal && (!result || ready) && !busy && !pending && candidate.version === version
   function apply() {
-    if (!candidate || !ready || pending || candidate.version !== store.getVersion()) { invalid(); return }
-    try { store.dispatch(sourceRevision(store.state, pageId, candidate.bytes)); onClose() }
+    if (!candidate || !canApply) { invalid(); return }
+    try { store.dispatch(sourceRevisions(store.state, candidate.pages.map(({ pageId: p, bytes }) => ({ pageId: p, bytes })))); onClose() }
     catch (problem) { setError(problem instanceof Error ? problem.message : 'Die Korrektur konnte nicht übernommen werden.'); invalid() }
   }
   function keepEditing() { invalid(); setError('') }
   /** Leave the paragraph; its draft stays on the page. */
   function leave() { invalid(); setError(''); history.current = { ...history.current, group: undefined }; setDraft({ ...draftRef.current, active: null }) }
-  function pickPage(id: string) { if (id === pageId || !discard()) return; invalid(); setPageId(id) }
-  const showingCandidate = !!candidate && !showOriginal
-  const previewBytes = showingCandidate ? candidate.bytes : source
-  useEffect(() => { const bytes = candidate?.bytes; return () => { if (bytes) { stages.drop(bytes); docs.drop(bytes) } } }, [candidate, docs, stages])
+  function pickPage(id: string) {
+    if (id === pageId) return
+    // Paragraph drafts stay; only an unsaved fragment edit belongs to its page.
+    if (fragmentDirty && !window.confirm('Ungesicherte Korrektur verwerfen?')) return
+    if (!candidate) { invalid(); setError('') }
+    if (draft.active) setDraft({ ...draftRef.current, active: null })
+    snapshot(); setShowOriginal(false); setPageId(id)
+  }
+  const previewBytes = showingCandidate ? result.bytes : source
+  useEffect(() => { const all = candidate?.pages.map(o => o.bytes) ?? []; return () => { for (const bytes of all) { stages.drop(bytes); docs.drop(bytes) } } }, [candidate, docs, stages])
   const onPreviewReady = useCallback((value: boolean) => { setReady(value && showingCandidate); if (value) setShown(true) }, [showingCandidate])
   const neighbours = useMemo(() => {
     const at = pages.findIndex(value => value.id === pageId)
     return [pages[at + 1], pages[at - 1]].filter(Boolean).map(p => ({ bytes: sourceOf(p.id)!, pageNumber: p.sourceIndex + 1 })).filter(p => p.bytes)
   }, [pages, pageId, sourceOf])
-  const overlays = !candidate && analysis
+  const overlays = !candidate && current
   const passive = draftIds.filter(id => id !== active?.id)
   // The changed part of a paragraph, with a little context.
-  const snippet = (id: string) => {
-    const before = models.get(id)?.text ?? '', after = draft.drafts[id] ?? before
+  const snippet = (key: string) => {
+    const before = metas[key]?.model.text ?? '', after = draft.drafts[key] ?? before
     let i = 0
     while (i < before.length && i < after.length && before[i] === after[i]) i++
     let start = Math.max(0, i - 20)
@@ -352,49 +439,55 @@ export function SourceTextPanel({ store, original, onClose, onHistory }: { store
     const end = Math.min(after.length, start + 56)
     return `${start ? '… ' : ''}${after.slice(start, end)}${end < after.length ? ' …' : ''}`
   }
+  const fitOf = (key: string) => { const { pageId: p, blockId } = splitKey(key); return p === pageId && models.has(blockId) ? fitMessage(views.get(blockId)?.status) : metas[key]?.fit ?? fitMessage(undefined) }
+  // List in document order: by page, then top to bottom.
+  const listed = [...allKeys].sort((a, b) => pageNumberOf(splitKey(a).pageId) - pageNumberOf(splitKey(b).pageId) || (metas[b]?.model.lines[0].baseline ?? 0) - (metas[a]?.model.lines[0].baseline ?? 0))
+  const scope = draftPages.size > 1 ? ` auf ${draftPages.size} Seiten` : ''
+  const resultPages = candidate && candidate.pages.length > 1 ? ` auf ${candidate.pages.length} Seiten` : ''
   return <section className="source-correction" aria-label="Originaltext korrigieren">
     <aside className="source-editor">
-      <h2>Originaltext korrigieren</h2><p>Einen umrahmten Absatz anklicken und direkt auf der Seite tippen. Mehrere Absätze lassen sich nacheinander ändern und gemeinsam prüfen. Andere Inhalte bleiben an ihrer Position.</p>
-      {!selection && !active && !draftIds.length && <p className="source-instruction">Noch nichts ausgewählt. Absatz anklicken (Klickstelle = Cursor) oder mit Tab und Enter wählen. Gestrichelte Textfragmente erscheinen zum Bearbeiten hier im Seitenbereich.</p>}
-      {active && model && <>
+      <h2>Originaltext korrigieren</h2><p>Einen umrahmten Absatz anklicken und direkt auf der Seite tippen. Mehrere Absätze – auch auf verschiedenen Seiten – lassen sich nacheinander ändern und gemeinsam prüfen. Andere Inhalte bleiben an ihrer Position.</p>
+      {!selection && !active && !allKeys.length && <p className="source-instruction">Noch nichts ausgewählt. Absatz anklicken (Klickstelle = Cursor) oder mit Tab und Enter wählen. Gestrichelte Textfragmente erscheinen zum Bearbeiten hier im Seitenbereich.</p>}
+      {active && model && !candidate && <>
         <p className="source-font">Absatz mit {model.lines.length} {model.lines.length === 1 ? 'Zeile' : 'Zeilen'} · {model.size.toFixed(1).replace('.0', '')} pt{model.justified ? ' · Blocksatz' : ''}{model.room ? ` · Platz für ${model.room} weitere ${model.room === 1 ? 'Zeile' : 'Zeilen'}` : ' · kein Platz für weitere Zeilen'}</p>
         <p id="source-fit" className={`source-fit source-fit-${fit!.tone}`} role="status">{fit!.text}</p>
         <p className="source-hint">Pfeiltasten, Pos1/Ende und Maus wie gewohnt. Strg+Z/Strg+Y nimmt Eingaben zurück, Strg+Enter prüft, Esc verlässt den Absatz.</p>
       </>}
-      {draftIds.length > 0 && <div className="source-drafts"><h3>{draftIds.length === 1 ? '1 geänderter Absatz' : `${draftIds.length} geänderte Absätze`} · noch nicht geprüft</h3><ul>
-        {draftIds.map(id => { const f = fitMessage(views.get(id)?.status); return <li key={id} className={id === active?.id ? 'source-draft-active' : undefined}>
-          <button type="button" className="source-draft-open" disabled={busy} onClick={() => openBlock(id)}><span>„{snippet(id)}“</span><small className={`source-fit-${f.tone}`}>{f.text}</small></button>
-          <button type="button" className="source-draft-discard" disabled={busy} aria-label={`Änderung verwerfen: ${snippet(id)}`} title="Änderung an diesem Absatz verwerfen" onClick={() => discardBlock(id)}>×</button>
+      {allKeys.length > 0 && <div className="source-drafts"><h3>{allKeys.length === 1 ? '1 geänderter Absatz' : `${allKeys.length} geänderte Absätze`}{scope} · {candidate ? 'geprüft' : 'noch nicht geprüft'}</h3><ul>
+        {listed.map(k => { const f = fitOf(k), p = splitKey(k).pageId, where = draftPages.size > 1 || p !== pageId ? `Seite ${pageNumberOf(p)} · ` : ''; return <li key={k} className={k === draft.active?.id ? 'source-draft-active' : undefined}>
+          <button type="button" className="source-draft-open" disabled={checking || !!candidate} onClick={() => openDraft(k)}><span>{where}„{snippet(k)}“</span><small className={`source-fit-${f.tone}`}>{f.text}</small></button>
+          <button type="button" className="source-draft-discard" disabled={checking || !!candidate} aria-label={`Änderung verwerfen: ${snippet(k)}`} title="Änderung an diesem Absatz verwerfen" onClick={() => discardBlock(k)}>×</button>
         </li> })}
       </ul></div>}
       {pending && <div className="source-pending" role="alert"><p>Die aktuelle Korrektur ist noch nicht übernommen. Verwerfen und die neue Auswahl bearbeiten?</p><button onClick={() => accept(pending)}>Auswahl wechseln</button><button onClick={() => { setPending(null); textarea.current?.focus() }}>Weiter bearbeiten</button></div>}
       {!active && run && <p className="source-font">{run.fontName} · {run.fontSize} pt · {automatic ? (run.paragraph!.lineCount > 1 ? `Absatz mit ${run.paragraph!.lineCount} Zeilen – wird bei Bedarf automatisch neu umbrochen` : 'Zeile wird als Ganzes bearbeitet – Folgetext rückt nach') : run.paragraph ? 'Absatzumbruch nach Bestätigung möglich' : 'Nur dieses Textfragment – kein Absatzumbruch'}</p>}
-      {!active && run?.paragraph && <>{run.paragraph.lineCount > 1 && <button onClick={() => { const members = analysis!.runs.filter(value => value.selection?.groupId === run.selection?.groupId); const value = directSelection(analysis!.runs, members[0].id, 0, members.at(-1)!.id); if (value) select(value) }}>Ganzen Absatz auswählen</button>}{!automatic && <label className="source-check"><input type="checkbox" checked={paragraph} onChange={event => { invalid(); setParagraph(event.target.checked) }} />Diese {run.paragraph.lineCount} Zeilen sind ein Fließtextabsatz mit automatischen, nicht absichtlichen Umbrüchen. Absatz neu umbrechen.</label>}</>}
+      {!active && run?.paragraph && current && <>{run.paragraph.lineCount > 1 && <button onClick={() => { const members = current.runs.filter(value => value.selection?.groupId === run.selection?.groupId); const value = directSelection(current.runs, members[0].id, 0, members.at(-1)!.id); if (value) select(value) }}>Ganzen Absatz auswählen</button>}{!automatic && <label className="source-check"><input type="checkbox" checked={paragraph} onChange={event => { invalid(); setParagraph(event.target.checked) }} />Diese {run.paragraph.lineCount} Zeilen sind ein Fließtextabsatz mit automatischen, nicht absichtlichen Umbrüchen. Absatz neu umbrechen.</label>}</>}
       {!active && selection?.requiresReflow && !reflow && <p>Die Auswahl umfasst mehrere Zeilen. Zum Ändern zuerst den automatischen Absatzumbruch bestätigen.</p>}
       {!active && selection && <><label htmlFor="source-replacement">Ersatztext</label><textarea ref={textarea} id="source-replacement" maxLength={4096} value={text} disabled={!run || busy || !!pending || !!candidate} onChange={event => { invalid(); setText(event.target.value) }} /></>}
-      {busy && <p role="status">{draftIds.length > 1 ? `${draftIds.length} Absätze werden isoliert in der PDF geprüft …` : 'Text wird isoliert in der PDF geprüft …'}</p>}{error && <p role="alert">{error}</p>}
-      {candidate && <p role="status">{ready ? (draftIds.length > 1 ? `Ergebnis mit ${draftIds.length} geänderten Absätzen in der echten PDF bereit. Absätze und Übergänge ansehen.` : 'Ergebnis in der echten PDF bereit. Absatz und Übergang zum Folgeinhalt ansehen.') : 'PDF-Ergebnis wird gerendert …'}</p>}
+      {checking && <p role="status">{allKeys.length > 1 ? `${allKeys.length} Absätze${scope} werden isoliert in der PDF geprüft …` : 'Text wird isoliert in der PDF geprüft …'}</p>}{error && <p role="alert">{error}</p>}
+      {candidate && <p role="status">{!result ? `Ergebnis${resultPages} bereit. Geprüfte Seiten sind in der Seitenliste markiert.` : ready ? (candidate.paragraphs > 1 ? `Ergebnis mit ${candidate.paragraphs} geänderten Absätzen${resultPages} in der echten PDF bereit. Absätze und Übergänge ansehen.` : 'Ergebnis in der echten PDF bereit. Absatz und Übergang zum Folgeinhalt ansehen.') : 'PDF-Ergebnis wird gerendert …'}</p>}
       <div className="source-actions">
-        {!candidate && (draftIds.length > 0 || selection) && <button className="export-button" disabled={busy || !!pending || (draftIds.length ? !checkable : !run || !text.trim() || text === selection?.text || (!!selection?.requiresReflow && !reflow))} onClick={() => void check()}>In PDF prüfen</button>}
-        {candidate && <><button onClick={keepEditing}>Weiter bearbeiten</button><button className="export-button" disabled={showOriginal || !ready || busy || !!pending || candidate.version !== version} onClick={apply}>Übernehmen</button></>}
-        {draftIds.length > 1 && !candidate && <button onClick={discardAll} disabled={busy}>Alle Änderungen verwerfen</button>}
+        {!candidate && (allKeys.length > 0 || selection) && <button className="export-button" disabled={busy || !!pending || (allKeys.length ? !checkable : !run || !text.trim() || text === selection?.text || (!!selection?.requiresReflow && !reflow))} onClick={() => void check()}>In PDF prüfen</button>}
+        {candidate && <><button onClick={keepEditing}>Weiter bearbeiten</button><button className="export-button" disabled={!canApply} onClick={apply}>Übernehmen</button></>}
+        {allKeys.length > 1 && !candidate && <button onClick={discardAll} disabled={checking}>Alle Änderungen verwerfen</button>}
         <button onClick={() => { if (discard()) onClose() }}>Schließen</button>
       </div>
       <p>Weniger Zeilen lassen freien Platz unter dem Absatz. Mehr Zeilen nur bei sicher freiem Raum. Kein Verkleinern oder Stauchen. Folgende Absätze, Bilder und Grafiken bleiben unverändert. Rückgängig und Entwurfsspeicherung bleiben verfügbar.</p>
-      <PageStrip docs={docs} pages={pages} sourceOf={sourceOf} current={pageId} disabled={busy && !!candidate} live={shown} onPick={pickPage} />
+      <PageStrip docs={docs} pages={pages} sourceOf={sourceOf} current={pageId} disabled={checking} live={shown} onPick={pickPage}
+        marks={candidate ? new Map(candidate.pages.map(o => [o.pageId, 'geprüft'])) : new Map([...draftPages].map(p => [p, 'geändert']))} />
     </aside>
-    <div className="source-context"><h2>{showingCandidate ? 'Ergebnis in der PDF – noch nicht übernommen' : candidate ? 'Original-PDF zum Vergleich' : 'Original-PDF · direkt im Absatz bearbeiten'}</h2>
+    <div className="source-context"><h2>{showingCandidate ? 'Ergebnis in der PDF – noch nicht übernommen' : result ? 'Original-PDF zum Vergleich' : candidate ? 'Original-PDF · auf dieser Seite keine Änderung' : 'Original-PDF · direkt im Absatz bearbeiten'}</h2>
       {overlays && <div className="source-legend" aria-label="Unterstützung der Textbereiche"><span className="legend-paragraph">Durchgezogen: Absatz direkt bearbeitbar</span><span className="legend-fragment">Gestrichelt: nur Textfragment</span><span>Ausgegraut: Unterstützung nicht nachgewiesen · für Grund anklicken</span><small>Die Passt-Anzeige rechnet mit den Originalschriften. Verbindlich ist die Prüfung in der echten PDF.</small></div>}
-      {!analysis && <p role="status">Analyse läuft – Unterstützung noch unbekannt.</p>}
-      {candidate && <button onClick={() => { setShowOriginal(value => !value); setReady(false) }}>{showOriginal ? 'Ergebnis anzeigen' : 'Original anzeigen'}</button>}
+      {!current && !candidate && <p role="status">Analyse läuft – Unterstützung noch unbekannt.</p>}
+      {result && <button onClick={() => { setShowOriginal(value => !value); setReady(false) }}>{showOriginal ? 'Ergebnis anzeigen' : 'Original anzeigen'}</button>}
       {previewBytes && page && <PdfPreview docs={docs} stages={stages} prefetch={candidate ? undefined : neighbours} bytes={previewBytes} pageNumber={page.sourceIndex + 1} onReady={onPreviewReady} label={showingCandidate ? 'Geprüfte PDF-Seite mit geändertem Absatz' : 'PDF-Seite mit bearbeitbaren Absätzen'}>
         {stage => overlays && <>
-          <SourceTextSelection runs={analysis.runs} size={stage.size} fragments={stage.fragments} selection={selection} onSelect={select} onReject={setError} blocks={blockIds} editing={active?.id} drafted={new Set(passive)} onBlock={openBlock} />
-          {passive.map(id => <InlineSourceEditor key={id} model={models.get(id)!} view={views.get(id) ?? null} text={draft.drafts[id]} range={{ start: 0, end: 0 }} size={stage.size} canvas={stage.canvas} disabled={busy} passive
+          <SourceTextSelection runs={overlays.runs} size={stage.size} fragments={stage.fragments} selection={selection} onSelect={select} onReject={setError} blocks={blockIds} editing={active?.id} drafted={new Set(passive)} onBlock={openBlock} />
+          {passive.map(id => <InlineSourceEditor key={id} model={models.get(id)!} view={views.get(id) ?? null} text={draft.drafts[keyOf(pageId, id)]} range={{ start: 0, end: 0 }} size={stage.size} canvas={stage.canvas} disabled={busy} passive
             onChange={() => undefined} onRange={() => undefined} onSubmit={() => undefined} onCancel={() => undefined} onActivate={at => openBlock(id, at)} />)}
           {active && model && <InlineSourceEditor key={model.id} model={model} view={view} text={textOf(model.id)} range={active.range} size={stage.size} canvas={stage.canvas} disabled={busy}
             onChange={(value, range) => edit(model.id, value, range)}
-            onRange={range => setDraft({ ...draftRef.current, active: { id: model.id, range } })}
+            onRange={range => setDraft({ ...draftRef.current, active: { id: keyOf(pageId, model.id), range } })}
             onUndo={undo} onRedo={redo}
             onSubmit={() => { if (checkable) void check() }} onCancel={leave} />}
         </>}
