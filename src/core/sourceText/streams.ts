@@ -111,7 +111,9 @@ function predictor(params: unknown) {
 export async function streamBytes(raw: PDFRawStream, maximum = MAX_STREAM): Promise<Uint8Array> {
   // Native streaming inflate stops at the output limit. Never use unbounded
   // pdf-lib decode(): a single compressed DEFLATE block may expand enormously.
-  if (raw.contents.length > maximum || raw.dict.keys().some(key => !allowed.has(key.toString()))) limit()
+  if (raw.contents.length > maximum) limit()
+  // Other dictionary keys (e.g. external /F files) change how the bytes are obtained.
+  if (raw.dict.keys().some(key => !allowed.has(key.toString()))) unsupported()
   const filter = raw.dict.lookup(PDFName.of('Filter')), parms = raw.dict.lookup(PDFName.of('DecodeParms'))
   const filters = filter instanceof PDFArray ? filter.asArray().map(f => raw.dict.context.lookup(f)) : filter ? [filter] : []
   const params = parms instanceof PDFArray ? parms.asArray().map(f => raw.dict.context.lookup(f)) : [parms]

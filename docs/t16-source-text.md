@@ -179,7 +179,7 @@ server; workers process local copied buffers.
 
 ## Validation
 
-- 340 unit/integration tests, among them `tests/core/sourceReflow.test.ts`
+- 343 unit/integration tests, among them `tests/core/sourceReflow.test.ts`
   (model ↔ PDF layout agreement, HTML-renderer pages, ActualText NBSP, soft
   hyphens, links, obstacles, caret geometry, fit status) and
   `tests/core/mixedBlocks.test.ts` (Word-like fragments, batched multi-paragraph checks), `tests/core/draftHistory.test.ts`

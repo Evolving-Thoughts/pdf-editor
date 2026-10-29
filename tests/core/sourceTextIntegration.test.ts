@@ -1,7 +1,7 @@
 import { readFileSync } from 'node:fs'
 import { resolve } from 'node:path'
 import { expect, test, vi } from 'vitest'
-import { PDFDocument, StandardFonts, PDFName, PDFDict, PDFRawStream, PDFArray, PDFNumber } from 'pdf-lib'
+import { PDFDocument, StandardFonts, PDFName, PDFDict, PDFRawStream, PDFArray, PDFNumber, PDFString } from 'pdf-lib'
 import fontkit from '@pdf-lib/fontkit'
 import { getDocument } from 'pdfjs-dist/legacy/build/pdf.mjs'
 import { inspectSimpleSourceText, previewSimpleSourceCorrection } from '../../src/core/sourceText/simplePdf'
@@ -12,6 +12,7 @@ import { EditorStore } from '../../src/core/editorStore'
 import { inspectPages, exportPageDocument } from '../../src/core/pdf/pageOperations'
 import { sourceTextRequest } from '../../src/core/sourceText/client'
 import { streamBytes } from '../../src/core/sourceText/streams'
+import { inspectPageSource, textString } from '../../src/core/sourceText/mixedPdf'
 import { openDraftDb, saveDraft, loadDraft } from '../../src/core/persistence/drafts'
 import { indexedDB, IDBKeyRange } from 'fake-indexeddb'
 
@@ -208,4 +209,27 @@ test('corrections of several pages are one undoable command', async () => {
   store.undo(); expect(store.state.pages!.map(p => p.sourceId)).toEqual(before)
   store.redo(); expect(store.state.pages!.map(p => p.sourceId)).toEqual(after)
   expect(() => sourceRevisions(store.state, [{ pageId: pages[1].id, bytes: Uint8Array.from(bytes).buffer }, { pageId: pages[1].id, bytes: Uint8Array.from(bytes).buffer }])).toThrow()
+})
+
+test('stream dictionaries with other keys are refused as unsupported, not as too large', async () => {
+  const doc = await PDFDocument.create()
+  const external = PDFRawStream.of(doc.context.obj({ F: 'data.bin' }), new Uint8Array([65]))
+  await expect(streamBytes(external)).rejects.toThrow(/Streamkodierung/)
+  const large = PDFRawStream.of(doc.context.obj({}), new Uint8Array(600_000))
+  await expect(streamBytes(large)).rejects.toThrow(/Grenzen/)
+})
+
+test('long PDF text strings decode without exceeding the argument limit', () => {
+  const bytes = new Uint8Array(200_000).fill(65)
+  expect(textString(bytes)).toBe('A'.repeat(200_000))
+  expect(textString(Uint8Array.from([0xfe, 0xff, 0x00, 0xe4]))).toBe('ä')
+})
+
+test('a form too large to rule out signatures is refused instead of crashing or skipping fields', async () => {
+  const doc = await PDFDocument.create(), font = await doc.embedFont(StandardFonts.Helvetica)
+  doc.addPage().drawText('Hello', { font, size: 12, x: 50, y: 700 })
+  const kids = doc.context.obj(Array.from({ length: 70_000 }, (_, i) => i))
+  const field = doc.context.register(doc.context.obj({ FT: 'Tx', T: PDFString.of('big'), Kids: kids }))
+  doc.catalog.set(PDFName.of('AcroForm'), doc.context.obj({ Fields: [field] }))
+  await expect(inspectPageSource(await doc.save(), 0)).rejects.toThrow(/zu umfangreich/)
 })
