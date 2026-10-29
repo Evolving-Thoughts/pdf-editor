@@ -377,7 +377,6 @@ export function SourceTextPanel({ store, original, onClose, onHistory }: { store
       <div className="source-actions">
         {!candidate && (draftIds.length > 0 || selection) && <button className="export-button" disabled={busy || !!pending || (draftIds.length ? !checkable : !run || !text.trim() || text === selection?.text || (!!selection?.requiresReflow && !reflow))} onClick={() => void check()}>In PDF prüfen</button>}
         {candidate && <><button onClick={keepEditing}>Weiter bearbeiten</button><button className="export-button" disabled={showOriginal || !ready || busy || !!pending || candidate.version !== version} onClick={apply}>Übernehmen</button></>}
-        {active && !candidate && <button onClick={leave}>Absatz verlassen</button>}
         {draftIds.length > 1 && !candidate && <button onClick={discardAll} disabled={busy}>Alle Änderungen verwerfen</button>}
         <button onClick={() => { if (discard()) onClose() }}>Schließen</button>
       </div>
