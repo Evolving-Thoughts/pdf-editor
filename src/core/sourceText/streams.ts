@@ -47,10 +47,23 @@ function ascii85(input: Uint8Array, maximum: number) {
   if (group.length) flush(group.length)
   return Uint8Array.from(out)
 }
-function asciiHex(input: Uint8Array) {
-  const text = String.fromCharCode(...input.subarray(0, Math.min(input.length, 4 * 1024 * 1024))).split('>')[0].replace(/\s+/g, '')
-  if (!/^[\da-f]*$/i.test(text)) unsupported()
-  return Uint8Array.from((text.length % 2 ? text + '0' : text).match(/../g) ?? [], h => parseInt(h, 16))
+/** Byte-wise ASCIIHexDecode: no string conversion of the whole input (spreading
+ * a large array into String.fromCharCode exceeds the engine's argument limit). */
+function asciiHex(input: Uint8Array, maximum: number) {
+  const out = new Uint8Array(Math.min(Math.ceil(input.length / 2), maximum))
+  let length = 0, high = -1
+  for (let i = 0; i < input.length; i++) {
+    const c = input[i]
+    if (c === 62) break // >
+    if (c === 0 || c === 9 || c === 10 || c === 12 || c === 13 || c === 32) continue
+    const v = c >= 48 && c <= 57 ? c - 48 : c >= 65 && c <= 70 ? c - 55 : c >= 97 && c <= 102 ? c - 87 : unsupported()
+    if (high < 0) { high = v; continue }
+    if (length >= maximum) limit()
+    out[length++] = (high << 4) | v
+    high = -1
+  }
+  if (high >= 0) { if (length >= maximum) limit(); out[length++] = high << 4 }
+  return out.slice(0, length)
 }
 function lzw(input: Uint8Array, maximum: number, early = 1) {
   const out: number[] = []
@@ -110,7 +123,7 @@ export async function streamBytes(raw: PDFRawStream, maximum = MAX_STREAM): Prom
     const name = f.decodeText()
     if (name === 'FlateDecode' || name === 'Fl') { predictor(params[i]); bytes = await inflate(bytes, maximum) }
     else if (name === 'ASCII85Decode' || name === 'A85') bytes = ascii85(bytes, maximum)
-    else if (name === 'ASCIIHexDecode' || name === 'AHx') bytes = asciiHex(bytes)
+    else if (name === 'ASCIIHexDecode' || name === 'AHx') bytes = asciiHex(bytes, maximum)
     else if (name === 'LZWDecode' || name === 'LZW') {
       predictor(params[i])
       const early = params[i] instanceof PDFDict ? (params[i] as PDFDict).lookup(PDFName.of('EarlyChange')) : undefined

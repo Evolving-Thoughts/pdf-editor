@@ -28,9 +28,9 @@ dimmed (click for the reason).
 - **Several paragraphs at once:** clicking another paragraph keeps the current
   change as an unchecked draft (still drawn in place with a green outline, click
   to continue editing it). The panel lists all changed paragraphs with their
-  fit status and a × to discard one; **Alle Änderungen verwerfen** drops all,
-  **Absatz verlassen** keeps the draft. The live fit of each paragraph takes the
-  new line boxes of the other drafts into account. No discard prompt appears
+  fit status and a × to discard one; **Alle Änderungen verwerfen** drops all.
+  Esc leaves a paragraph and keeps its draft. The live fit of each paragraph
+  takes the new line boxes of the other drafts into account. No discard prompt appears
   when switching paragraphs.
 - **Undo before checking:** typing is grouped per word (new step at a space, a
   pause > 1 s or a paragraph switch; `draftHistory.ts`). The toolbar

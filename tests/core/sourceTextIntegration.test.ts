@@ -11,6 +11,7 @@ import { sourceRevision } from '../../src/core/sourceText/revision'
 import { EditorStore } from '../../src/core/editorStore'
 import { inspectPages, exportPageDocument } from '../../src/core/pdf/pageOperations'
 import { sourceTextRequest } from '../../src/core/sourceText/client'
+import { streamBytes } from '../../src/core/sourceText/streams'
 import { openDraftDb, saveDraft, loadDraft } from '../../src/core/persistence/drafts'
 import { indexedDB, IDBKeyRange } from 'fake-indexeddb'
 
@@ -96,12 +97,10 @@ test('invalid embedded glyph reference or ambiguous Unicode mapping is refused',
       void cid
       // Widths/Unicode must not make a nonexistent embedded GID usable.
       const raw = font.lookup(PDFName.of('ToUnicode')) as PDFRawStream
-      const { streamBytes } = await import('../../src/core/sourceText/streams')
       const text = new TextDecoder().decode(await streamBytes(raw)).replace('<0001> <0047>', '<FFFF> <0047>')
       font.set(PDFName.of('ToUnicode'), doc.context.register(doc.context.flateStream(text)))
     } else {
       const raw = font.lookup(PDFName.of('ToUnicode')) as PDFRawStream
-      const { streamBytes } = await import('../../src/core/sourceText/streams')
       const text = new TextDecoder().decode(await streamBytes(raw)).replace('<0002> <0072>', '<0002> <0047>')
       font.set(PDFName.of('ToUnicode'), doc.context.register(doc.context.flateStream(text)))
     }
@@ -170,7 +169,6 @@ test('a character whose only slot has width 0 is not in the subset and is never 
   const sheet = doc.addPage(); sheet.drawText('Hallo München', { font: embedded, size: 12, x: 50, y: 700 }); sheet.drawText('W', { font: embedded, size: 12, x: 50, y: 400 })
   await doc.save() // writes the subset, its widths and ToUnicode
   const fonts = doc.getPages()[0].node.Resources()!.lookup(PDFName.of('Font'), PDFDict), font = fonts.lookup(fonts.keys()[0], PDFDict)
-  const { streamBytes } = await import('../../src/core/sourceText/streams')
   const map = new TextDecoder().decode(await streamBytes(font.lookup(PDFName.of('ToUnicode')) as PDFRawStream))
   const cid = parseInt(/<([0-9A-Fa-f]{4})> <0057>/.exec(map)![1], 16) // 'W'
   const cidFont = (font.lookup(PDFName.of('DescendantFonts'), PDFArray)).lookup(0, PDFDict), widths = cidFont.lookup(PDFName.of('W'), PDFArray)
@@ -183,4 +181,16 @@ test('a character whose only slot has width 0 is not in the subset and is never 
   const insertable = analysis.fonts.flatMap(f => f.insertable.map(([c]) => c))
   expect(insertable).toContain('H')
   expect(insertable).not.toContain('W')
+})
+
+test('ASCIIHexDecode streams larger than the argument limit decode in bounded steps', async () => {
+  const doc = await PDFDocument.create()
+  const data = new Uint8Array(200_000).map((_, i) => i * 7)
+  const hex = Array.from(data, (b) => b.toString(16).padStart(2, '0')).join('\n') + '>'
+  const raw = PDFRawStream.of(doc.context.obj({ Filter: 'ASCIIHexDecode' }), new TextEncoder().encode(hex))
+  await expect(streamBytes(raw, 1024 * 1024)).resolves.toEqual(data)
+  const odd = PDFRawStream.of(doc.context.obj({ Filter: 'AHx' }), new TextEncoder().encode('4 1 4>'))
+  await expect(streamBytes(odd)).resolves.toEqual(Uint8Array.from([0x41, 0x40]))
+  const bad = PDFRawStream.of(doc.context.obj({ Filter: 'AHx' }), new TextEncoder().encode('4G>'))
+  await expect(streamBytes(bad)).rejects.toThrow(/Streamkodierung/)
 })
