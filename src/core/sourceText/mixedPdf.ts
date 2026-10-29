@@ -171,14 +171,17 @@ function name(token?: ContentToken) {
     )
 }
 /** PDF text string: UTF-16BE with BOM, otherwise PDFDocEncoding (Latin-1 subset). */
-function textString(bytes: Uint8Array) {
+export function textString(bytes: Uint8Array) {
   if (bytes.length >= 2 && bytes[0] === 0xfe && bytes[1] === 0xff) {
     if (bytes.length % 2) return undefined
     let text = ''
     for (let i = 2; i < bytes.length; i += 2) text += String.fromCharCode((bytes[i] << 8) | bytes[i + 1])
     return text
   }
-  return String.fromCharCode(...bytes)
+  // Chunked: spreading a long string into fromCharCode exceeds the argument limit.
+  let text = ''
+  for (let i = 0; i < bytes.length; i += 8192) text += String.fromCharCode(...bytes.subarray(i, i + 8192))
+  return text
 }
 function numeric(token?: ContentToken) {
   const v = Number(token?.raw)
@@ -271,13 +274,15 @@ export async function analyze(input: Uint8Array, pageIndex: number) {
       fail('Signierte PDFs oder XFA-Formulare können nicht als Originaltext umgeschrieben werden.')
     const fields = form.lookup(n('Fields')),
       queue = fields instanceof PDFArray ? [...fields.asArray()] : []
-    for (let guard = 0; queue.length && guard < 20000; guard++) {
+    for (let guard = 0; queue.length; guard++) {
+      // Every field must be checked: an unchecked rest could hide a signature.
+      if (guard >= 20000 || queue.length > 20000) fail('Das Formular ist zu umfangreich, um Signaturen sicher auszuschließen.')
       const field = doc.context.lookup(queue.pop())
       if (!(field instanceof PDFDict)) continue
       if (field.lookup(n('FT'))?.toString() === '/Sig' && field.has(n('V')))
         fail('Signierte PDFs können nicht als Originaltext umgeschrieben werden.')
       const kids = field.lookup(n('Kids'))
-      if (kids instanceof PDFArray) queue.push(...kids.asArray())
+      if (kids instanceof PDFArray) for (const kid of kids.asArray()) queue.push(kid)
     }
   }
   const pages = doc.getPages(),
