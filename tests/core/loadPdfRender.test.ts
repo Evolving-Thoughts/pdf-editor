@@ -11,7 +11,7 @@ vi.mock('pdfjs-dist', () => ({
     promise: Promise.resolve({
       numPages: 1,
       getPage: async () => ({
-        getViewport: ({ scale }: { scale: number }) => ({ width: mocks.width * scale, height: mocks.height * scale }),
+        getViewport: ({ scale }: { scale: number }) => ({ width: mocks.width * scale, height: mocks.height * scale, transform: [scale, 0, 0, -scale, -20 * scale, (mocks.height + 30) * scale] }),
         render: mocks.render,
       }),
     }),
@@ -36,6 +36,7 @@ test('oversized PDF dimensions are rejected before either canvas dimension is as
   const assigned = vi.fn()
   const canvas = { dataset: {}, style: {}, set width(value: number) { assigned(value) }, set height(value: number) { assigned(value) } } as unknown as HTMLCanvasElement
   await expect(pdf.getPageSize(1)).rejects.toThrow('Seitenabmessungen')
+  await expect(pdf.getPageGeometry(1)).rejects.toThrow('Seitenabmessungen')
   await expect(pdf.renderPage(1, canvas, 1)).rejects.toThrow('Seitenabmessungen')
   expect(assigned).not.toHaveBeenCalled()
   expect(mocks.render).not.toHaveBeenCalled()
@@ -54,5 +55,16 @@ test('HiDPI rendering is capped and a rejected request does not poison the canva
   expect(canvas.style.height).toBe('3368px')
   expect(canvas.dataset.renderState).toBe('ready')
   expect(mocks.render).toHaveBeenCalledOnce()
+  await pdf.destroy()
+})
+
+test('source geometry is opt-in and does not change the public size-only contract', async () => {
+  const pdf = await loadPdf('native-crop.pdf', new Uint8Array())
+  expect(await pdf.getPageSize(1)).toEqual({ width: 595, height: 842 })
+  const geometry = await pdf.getPageGeometry(1)
+  expect(geometry).toEqual({ width: 595, height: 842, sourceTransform: [1, 0, 0, -1, -20, 872] })
+  geometry.sourceTransform[4] = 1000
+  expect((await pdf.getPageGeometry(1)).sourceTransform[4]).toBe(-20)
+  expect(await pdf.getPageSize(1)).toEqual({ width: 595, height: 842 })
   await pdf.destroy()
 })

@@ -1033,3 +1033,112 @@
   border: 2px solid var(--accent); background: var(--bg); pointer-events: none;
 }
 .redaction-grip:focus-visible { outline: 2px solid var(--accent); border-radius: 4px; }
+
+/* T16, approved sidebar/context layout. Review never hides following content. */
+.source-correction { display:grid; grid-template-columns:minmax(280px,350px) minmax(0,1fr); width:100%; align-items:start; background:var(--bg,#fff); }
+.source-editor { padding:20px; border-right:1px solid #ddd; background:var(--panel,#fff); }
+.source-editor h2,.source-context h2 { font-size:20px; margin:0 0 12px; }
+.source-editor p,.source-context>p { font-size:14px; line-height:1.5; }
+.source-editor label { display:block; margin:16px 0; font-size:14px; }
+.source-editor select,.source-editor textarea { display:block; width:100%; margin-top:6px; padding:10px; border:1px solid #aaa; border-radius:6px; font:inherit; background:inherit; color:inherit; }
+.source-editor textarea { min-height:150px; resize:vertical; }
+.source-editor .source-check { display:flex; gap:10px; align-items:start; }
+.source-check input { flex-shrink:0; width:20px; height:20px; }
+.source-editor button { min-height:44px; }
+.source-actions { display:flex; flex-wrap:wrap; gap:8px; }
+.source-context { min-width:0; padding:20px; background:#f4f2ec; color:#28232e; }
+.source-pdf-preview { max-width:100%; overflow:auto; padding:16px 0; }
+.source-pdf-preview canvas { display:block; max-width:100%; height:auto!important; background:white; box-shadow:0 2px 8px #0002; }
+@media(max-width:760px) { .source-correction { grid-template-columns:1fr; } .source-editor { border-right:0; border-bottom:1px solid #ddd; } .source-context { padding:16px; } }
+.source-zoom { display:flex; gap:12px; align-items:center; }
+.source-zoom button { min-width:44px; min-height:44px; }
+.source-editor button,.source-zoom button { border:1px solid var(--border,#aaa); padding:10px; border-radius:6px; background:var(--bg,#fff); color:var(--text-h,#262130); cursor:pointer; }
+.source-editor button:disabled,.source-zoom button:disabled { opacity:.5; cursor:not-allowed; }
+.source-editor button.export-button { background:#7936bb; color:white; }
+.source-editor [role=alert] { padding:12px; border:1px solid #b3293d; border-radius:6px; }
+.source-correction { height:100%; overflow:auto; }
+.source-editor { background:var(--bg,#fff); }
+.source-context h2 { color:#28232e; }
+.source-correction { text-align:left; align-items:stretch; }
+.source-correction * { box-sizing:border-box; }
+.source-editor { overflow:auto; }
+.source-editor select,.source-editor textarea { max-width:100%; }
+.source-context { overflow:auto; }
+.source-context>button { min-height:44px; padding:8px 12px; border:1px solid #aaa; background:white; color:#28232e; border-radius:6px; margin-bottom:12px; }
+
+/* PDF-backed direct selection: source geometry authorizes hits, extraction only dims. */
+.source-page-stage { position:relative; flex-shrink:0; background:white; }
+.source-pdf-preview .source-page-stage canvas { max-width:none; width:100%!important; height:100%!important; }
+.source-selection-layer,.source-support-mask { position:absolute; inset:0; width:100%; height:100%; }
+.source-selection-layer { overflow:hidden; user-select:none; }
+.source-support-mask { pointer-events:none; }
+.source-run-hit { position:absolute; z-index:2; border:1px solid #7936bb80; container-type:size; color:transparent; cursor:text; user-select:text; white-space:pre; line-height:1; }
+.source-run-hit.source-fragment { border:1px dashed #926000b0; }
+.source-run-hit:hover,.source-run-hit:focus-visible { outline:2px solid #7936bb; outline-offset:2px; background:#ad75db12; }
+.source-run-hit span { color:transparent; user-select:text; line-height:1.25; }
+.source-run-hit span::selection { background:#9456d780; color:transparent; }
+.source-run-hit.source-picked { outline:2px solid #7936bb; outline-offset:1px; }
+.source-char-picked { background:#9856dc40; }
+.source-block { position:absolute; inset:0; pointer-events:none; }
+.source-block > .source-run-hit { pointer-events:auto; }
+.source-block-outline { position:absolute; z-index:1; border:1px solid #7936bb80; border-radius:2px; pointer-events:none; }
+.source-run-hit.source-member { border-color:transparent; }
+.source-run-hit.source-member:hover,.source-run-hit.source-member:focus-visible { outline:none; background:transparent; }
+.source-block:hover .source-block-outline,.source-block:focus-within .source-block-outline { outline:2px solid #7936bb; outline-offset:2px; background:#ad75db12; }
+.source-block-outline.source-picked { outline:2px solid #7936bb; outline-offset:2px; }
+.source-unknown-hit { position:absolute; z-index:1; opacity:0; border:0; padding:0; background:transparent; cursor:not-allowed; }
+.source-unknown-hit:focus-visible { opacity:1; outline:2px dotted #555; background:#7772; }
+.source-legend { display:flex; flex-wrap:wrap; gap:8px 16px; padding:12px; margin:12px 0; border:1px solid #d8d1de; border-radius:6px; font-size:13px; background:#fff9; }
+.source-legend small { flex-basis:100%; font-size:12px; }
+.legend-paragraph { border-bottom:2px solid #7936bb; }
+.legend-fragment { border-bottom:2px dashed #926000; }
+.source-pending { padding:12px; border:1px solid #926000; border-radius:6px; }
+.source-pending button { margin:4px; }
+.source-instruction { background:#9756d712; padding:12px; border-radius:6px; }
+@media(max-width:760px) { .source-editor { overflow:visible; } .source-correction { display:block; } }
+/* Inline paragraph editor (T16): drawn over the rendered page. */
+.source-inline { position:absolute; inset:0; z-index:3; pointer-events:none; }
+.source-inline-svg { position:absolute; inset:0; width:100%; height:100%; overflow:visible; pointer-events:none; }
+.source-inline-frame { fill:transparent; stroke:#7936bb; stroke-width:1.5px; stroke-dasharray:4 3; vector-effect:non-scaling-stroke; pointer-events:all; cursor:text; }
+.source-inline-selection { fill:#7936bb3d; }
+.source-inline-overflow { fill:#c628281f; }
+.source-inline-missing { fill:#c6282899; }
+.source-inline-caret { stroke:#28232e; stroke-width:1.5px; vector-effect:non-scaling-stroke; animation:source-blink 1.05s steps(1) infinite; }
+@keyframes source-blink { 50% { opacity:0; } }
+@media (prefers-reduced-motion:reduce) { .source-inline-caret { animation:none; } }
+.source-inline-input { position:absolute; width:2px; height:1em; padding:0; border:0; margin:0; opacity:0; resize:none; overflow:hidden; font-size:16px; pointer-events:none; white-space:pre; }
+.source-fit { padding:10px 12px; border-radius:6px; border:1px solid #d8d1de; font-weight:600; }
+.source-fit-good { border-color:#2e7d32; color:#1b5e20; background:#2e7d3212; }
+.source-fit-bad { border-color:#c62828; color:#9b1c1c; background:#c628280f; }
+.source-fit-neutral { color:inherit; }
+.source-hint { font-size:13px!important; opacity:.8; }
+/* Correction panel: canvas swapped in after an off-screen render. */
+.source-canvas-host { width:100%; height:100%; }
+.source-page-stage.source-page-loading { opacity:.55; transition:opacity .15s ease .15s; }
+/* Changed paragraphs that are not being edited. */
+.source-inline-passive { z-index:2; }
+.source-inline-frame.source-inline-draft { stroke:#2e7d32; stroke-dasharray:none; pointer-events:none; }
+.source-inline-open { position:absolute; z-index:3; pointer-events:auto; margin:0; padding:0; border:0; border-radius:2px; background:transparent; cursor:text; min-height:0!important; }
+.source-inline-open:hover,.source-inline-open:focus-visible { outline:2px solid #2e7d32; outline-offset:1px; background:#2e7d3210; }
+.source-drafts { margin:12px 0; padding:10px; border:1px solid #2e7d3266; border-radius:6px; background:#2e7d320a; }
+.source-drafts h3 { font-size:14px; margin:0 0 8px; }
+.source-drafts ul { list-style:none; margin:0; padding:0; display:flex; flex-direction:column; gap:6px; }
+.source-drafts li { display:flex; gap:6px; align-items:stretch; }
+.source-drafts li.source-draft-active .source-draft-open { border-color:#7936bb; }
+.source-editor .source-draft-open { flex:1; min-width:0; text-align:left; display:flex; flex-direction:column; gap:2px; padding:6px 8px; min-height:0; }
+.source-draft-open span { font-size:13px; overflow-wrap:anywhere; }
+.source-draft-open small { font-size:12px; }
+.source-editor .source-draft-discard { min-width:36px; min-height:0; padding:4px 8px; font-size:18px; line-height:1; }
+/* Page thumbnails below the controls (as in the page manager). */
+.source-pages { margin-top:20px; border-top:1px solid #ddd; padding-top:12px; }
+.source-pages h3 { font-size:14px; margin:0 0 8px; }
+.source-pages ol { list-style:none; margin:0; padding:0 4px 0 0; display:grid; grid-template-columns:repeat(auto-fill,minmax(104px,1fr)); gap:8px; max-height:60vh; overflow-y:auto; overscroll-behavior:contain; }
+.source-editor .source-pages button { width:100%; display:flex; flex-direction:column; align-items:center; gap:6px; padding:6px; font-size:12px; min-height:0; }
+.source-editor .source-pages button[aria-current="page"] { border:2px solid #7936bb; background:#ad75db1f; padding:5px; }
+.source-pages .source-page-name { max-width:100%; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+.source-thumb { display:flex; align-items:center; justify-content:center; width:84px; height:108px; background:#f4f2ec; pointer-events:none; }
+.source-thumb canvas { display:block; max-width:100%; max-height:100%; background:white; box-shadow:0 1px 3px #0003; }
+@media(max-width:760px) { .source-pages ol { grid-auto-flow:column; grid-template-columns:none; grid-auto-columns:104px; overflow-x:auto; overflow-y:hidden; max-height:none; } }
+
+.source-pages button { position:relative; }
+.source-page-mark { position:absolute; top:4px; right:4px; background:#2f7d4f; color:white; border-radius:8px; padding:1px 6px; font-size:11px; line-height:16px; }

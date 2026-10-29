@@ -52,16 +52,25 @@ interface Props {
   original: ArrayBuffer
   busy: boolean
   onCropActive: (active: boolean) => void
+  /** Page index shown first (the page viewed before opening). */
+  initialPage?: number
+  onPage?: (index: number) => void
 }
-export function PagesManager({ nativeWidgets = [], pdf, store, original, busy, onCropActive }: Props) {
+export function PagesManager({ nativeWidgets = [], pdf, store, original, busy, onCropActive, initialPage = 0, onPage }: Props) {
   const pages = store.state.pages ?? []
-  const [selected, setSelected] = useState(pages[0]?.id ?? '')
-  const [checkedIds, setCheckedIds] = useState<string[]>(pages[0] ? [pages[0].id] : [])
-  const anchor = useRef<string | null>(pages[0]?.id ?? null)
+  const first = pages[initialPage] ?? pages[0]
+  const [selected, setSelected] = useState(first?.id ?? '')
+  const [checkedIds, setCheckedIds] = useState<string[]>(first ? [first.id] : [])
+  const anchor = useRef<string | null>(first?.id ?? null)
   const checked = new Set(checkedIds)
   const selection = pages.filter(page => checked.has(page.id)).map(page => page.id)
   const [deletePending, setDeletePending] = useState<{ ids: string[]; version: number } | null>(null)
   const page = pages.find((p) => p.id === selected) ?? pages[0]
+  const listRef = useRef<HTMLDivElement>(null)
+  const pageIndex = pages.findIndex((p) => p.id === page?.id)
+  useEffect(() => { if (pageIndex >= 0) onPage?.(pageIndex) }, [pageIndex, onPage])
+  // Open at the page viewed before: show its row in the list.
+  useEffect(() => { listRef.current?.querySelector<HTMLElement>('.page-manager-row.previewed')?.scrollIntoView({ block: 'nearest' }) }, [])
   const index = page ? pages.indexOf(page) : -1
   const [crop, setCrop] = useState<{ id: string; margins: CropMargins } | null>(null)
   const [a4Open, setA4Open] = useState(false)
@@ -447,7 +456,7 @@ export function PagesManager({ nativeWidgets = [], pdf, store, original, busy, o
         </p>
         <small className="page-selection-help">Klick: Vorschau und Auswahl · Checkbox: dazu/weg.<br />Shift+Klick: Bereich · Strg/⌘+Klick: einzeln dazu/weg.</small>
         </div>
-        <div className="page-manager-list" aria-label="Seitenliste" role="region" tabIndex={0}>
+        <div ref={listRef} className="page-manager-list" aria-label="Seitenliste" role="region" tabIndex={0}>
           {pages.map((p, i) => (
             <div
               key={p.id}
