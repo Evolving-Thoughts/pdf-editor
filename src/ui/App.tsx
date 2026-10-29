@@ -135,6 +135,23 @@ export default function App() {
   const documentIntentRef = useRef(0)
   const imageImportRef = useRef(0)
   const workspaceRef = useRef<HTMLDivElement>(null)
+  // Page shown in the normal view before switching to the page manager or the
+  // text correction (and the page shown there): both views open at that page,
+  // and the normal view returns to it.
+  const viewedPageRef = useRef(0), returnPageRef = useRef<number | null>(null)
+  const visiblePageIndex = useCallback(() => {
+    const scroller = workspaceRef.current?.querySelector<HTMLElement>('.pages')
+    if (!scroller) return viewedPageRef.current
+    const view = scroller.getBoundingClientRect()
+    let best = viewedPageRef.current, area = 0
+    for (const page of scroller.querySelectorAll<HTMLElement>('.page[data-page-index]')) {
+      const rect = page.getBoundingClientRect()
+      const visible = Math.max(0, Math.min(rect.bottom, view.bottom) - Math.max(rect.top, view.top)) * Math.max(0, Math.min(rect.right, view.right) - Math.max(rect.left, view.left))
+      if (visible > area) { area = visible; best = Number(page.dataset.pageIndex) }
+    }
+    return best
+  }, [])
+  const onViewedPage = useCallback((index: number) => { viewedPageRef.current = index }, [])
   const saveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
   const saveQueueRef = useRef<Promise<void>>(Promise.resolve())
   const persistenceGenerationRef = useRef(0)
@@ -674,6 +691,25 @@ export default function App() {
     [zoom],
   )
 
+  useEffect(() => {
+    const index = returnPageRef.current
+    if (index === null || pageManagerOpen || sourceTextOpen || pageBusy || !pdf) return
+    let frame = 0, tries = 0
+    // Page boxes get their size once the page geometry is known: retry briefly.
+    const scroll = () => {
+      const scroller = workspaceRef.current?.querySelector<HTMLElement>('.pages')
+      const page = scroller?.querySelector<HTMLElement>(`.page[data-page-index="${index}"]`)
+      if (scroller && page && page.offsetHeight > 0) {
+        scroller.scrollTop += page.getBoundingClientRect().top - scroller.getBoundingClientRect().top - 12
+        returnPageRef.current = null
+        if (tries++ < 3) frame = requestAnimationFrame(scroll)
+        else return
+      } else if (tries++ < 30) frame = requestAnimationFrame(scroll)
+    }
+    frame = requestAnimationFrame(scroll)
+    return () => cancelAnimationFrame(frame)
+  }, [pageManagerOpen, sourceTextOpen, pageBusy, pdf])
+
   const prepareExport = useCallback(
     async (preset: CompressionPreset | undefined, signal: AbortSignal, onProgress: (done: number, total: number) => void): Promise<PreparedExport> => {
       const draft = draftRef.current
@@ -864,6 +900,8 @@ export default function App() {
                   aria-pressed={pageManagerOpen}
                   disabled={pageBusy || redactions.length > 0}
                   onClick={() => {
+                    if (!pageManagerOpen && !sourceTextOpen) viewedPageRef.current = visiblePageIndex()
+                    if (pageManagerOpen) returnPageRef.current = viewedPageRef.current
                     setSourceTextOpen(false)
                     setSearchOpen(false)
                     setSelectedId(null)
@@ -910,7 +948,7 @@ export default function App() {
                   </div>
                 )}
               </div>
-              {!pageManagerOpen && <button aria-label="Originaltext korrigieren" title="Originaltext in derselben Schrift korrigieren" disabled={pageBusy || cropActive || !!redactions.length} aria-pressed={sourceTextOpen} onClick={() => { setPageManagerOpen(false); setSearchOpen(false); setSelectedId(null); setTool('select'); setSourceTextOpen(value => !value) }}>Textkorrektur</button>}
+              {!pageManagerOpen && <button aria-label={sourceTextOpen ? undefined : 'Originaltext korrigieren'} title={sourceTextOpen ? 'Textkorrektur schließen und zur normalen Ansicht zurückkehren' : 'Originaltext in derselben Schrift korrigieren'} disabled={pageBusy || cropActive || !!redactions.length} aria-pressed={sourceTextOpen} onClick={() => { if (sourceTextOpen) returnPageRef.current = viewedPageRef.current; else viewedPageRef.current = visiblePageIndex(); setPageManagerOpen(false); setSearchOpen(false); setSelectedId(null); setTool('select'); setSourceTextOpen(value => !value) }}>{sourceTextOpen ? 'Zur Dokumentbearbeitung' : 'Textkorrektur'}</button>}
               <div
                 className="toolbar-history"
                 role="group"
@@ -1148,8 +1186,8 @@ export default function App() {
       {openingFile && <p role="status" className="hint">PDF wird geöffnet …</p>}
       <div className="workspace" ref={workspaceRef} inert={exportDialogOpen || redactionBusy || openingFile || exportBusy || !!loadingDraftId}>
         {pdf && searchOpen && !pageManagerOpen && !pageBusy && <SearchWindow pdf={pdf} overlays={overlays} onClose={closeSearch} onHits={onSearchHits} onJump={onSearchJump}/>}
-        {pdf && pageManagerOpen && originalBytes && <PagesManager nativeWidgets={nativeWidgets} key={activeDraftId} pdf={pdf} store={store} original={originalBytes} busy={pageBusy} onCropActive={setCropActive} />}
-        {pdf && sourceTextOpen && originalBytes && !pageBusy && <SourceTextPanel key={activeDraftId} store={store} original={originalBytes} onClose={() => setSourceTextOpen(false)} onHistory={setSourceHistory} />}
+        {pdf && pageManagerOpen && originalBytes && <PagesManager nativeWidgets={nativeWidgets} key={activeDraftId} pdf={pdf} store={store} original={originalBytes} busy={pageBusy} onCropActive={setCropActive} initialPage={viewedPageRef.current} onPage={onViewedPage} />}
+        {pdf && sourceTextOpen && originalBytes && !pageBusy && <SourceTextPanel key={activeDraftId} store={store} original={originalBytes} initialPage={viewedPageRef.current} onPage={onViewedPage} onClose={() => { returnPageRef.current = viewedPageRef.current; setSourceTextOpen(false) }} onHistory={setSourceHistory} />}
         {!pageManagerOpen && !sourceTextOpen && <>
         {pageBusy && <p role="status" className="hint">Seitenansicht wird aktualisiert …</p>}
         {pdf && !pageBusy && (
