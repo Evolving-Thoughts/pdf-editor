@@ -363,7 +363,7 @@
   .toolbar-primary { padding: 6px 8px; gap: 6px; }
   .toolbar button { font-size: 12px; padding: 6px 8px; }
   .toolbar .file-info { flex: 1 0 100%; font-size: 12px; line-height: 1.4; }
-  .toolbar-file-actions { gap: 6px; }
+  .toolbar-file-actions { gap: 6px; flex-shrink: 1; flex-wrap: wrap; min-width: 0; }
   .toolbar-navigation { gap: 6px; }
   .toolbar-zoom { gap: 2px; }
   .toolbar-zoom button { min-width: 30px; }
@@ -393,6 +393,8 @@
   .toolbar .toolbar-tools button { font-size: 12px; padding: 6px; }
   .toolbar-tools .tool-icon { width: 14px; height: 14px; }
   .symbol-popover { left: auto; right: 0; }
+  .symbol-word { display: none; }
+  .document-menu-popover { left: auto; right: 0; }
   .drafts-menu {
     position: fixed;
     top: 58px;

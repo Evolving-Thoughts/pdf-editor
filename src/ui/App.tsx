@@ -958,6 +958,15 @@ export default function App() {
                     ? 'Speichert …'
                     : 'Speichern'}
                 </button>
+                {!pageManagerOpen && <DocumentMenu
+                  disabled={pageBusy || cropActive || redactions.length > 0}
+                  items={[
+                    { label: 'Dokumentinfo …', onSelect: () => setDocumentDialog('info') },
+                    { label: 'Seitenzahlen, Kopf- und Fußzeile …', onSelect: () => { setSourceTextOpen(false); setDocumentDialog('labels') } },
+                    { label: 'Text erkennen (OCR) …', onSelect: () => { if (!sourceTextOpen) viewedPageRef.current = visiblePageIndex(); setSourceTextOpen(false); setDocumentDialog('ocr') } },
+                    { label: 'Tabelle exportieren …', onSelect: () => { if (!sourceTextOpen) viewedPageRef.current = visiblePageIndex(); setSourceTextOpen(false); setSearchOpen(false); setSelectedId(null); setTool('select'); setDocumentDialog('table') } },
+                  ]}
+                />}
               </>
             )}
           </div>
@@ -1005,15 +1014,6 @@ export default function App() {
                 >
                   Suchen
                 </button>
-                <DocumentMenu
-                  disabled={pageBusy || cropActive || redactions.length > 0}
-                  items={[
-                    { label: 'Dokumentinfo …', onSelect: () => setDocumentDialog('info') },
-                    { label: 'Seitenzahlen, Kopf- und Fußzeile …', onSelect: () => { setPageManagerOpen(false); setSourceTextOpen(false); setDocumentDialog('labels') } },
-                    { label: 'Text erkennen (OCR) …', onSelect: () => { if (!pageManagerOpen && !sourceTextOpen) viewedPageRef.current = visiblePageIndex(); setPageManagerOpen(false); setSourceTextOpen(false); setDocumentDialog('ocr') } },
-                    { label: 'Tabelle exportieren …', onSelect: () => { if (!pageManagerOpen && !sourceTextOpen) viewedPageRef.current = visiblePageIndex(); setPageManagerOpen(false); setSourceTextOpen(false); setSearchOpen(false); setSelectedId(null); setTool('select'); setDocumentDialog('table') } },
-                  ]}
-                />
                 {!pageManagerOpen && (
                   <div className="toolbar-zoom">
                     <button
