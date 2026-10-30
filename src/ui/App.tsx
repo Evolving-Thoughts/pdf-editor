@@ -42,6 +42,7 @@ import { DocumentMenu } from './DocumentMenu'
 import { DocumentInfoDialog } from './DocumentInfoDialog'
 import { PageLabelsDialog } from './PageLabelsDialog'
 import { OcrDialog } from './OcrDialog'
+import { TablePanel } from './TablePanel'
 import { DrawingToolbar } from './DrawingToolbar'
 import { PageView } from './PageView'
 import { VirtualPage } from './VirtualPage'
@@ -86,7 +87,7 @@ export default function App() {
   const [exportDialogOpen, setExportDialogOpen] = useState(false)
   const [exportBusy, setExportBusy] = useState(false)
   const [signedDocument, setSignedDocument] = useState<ArrayBuffer | null>(null)
-  const [documentDialog, setDocumentDialog] = useState<'info' | 'labels' | 'ocr' | null>(null)
+  const [documentDialog, setDocumentDialog] = useState<'info' | 'labels' | 'ocr' | 'table' | null>(null)
   // The export must describe the same editing state as the check the user read.
   const checkedVersionRef = useRef<number | null>(null)
   const exportRunningRef = useRef(false)
@@ -200,6 +201,7 @@ export default function App() {
     return () => { cancelled = true }
   }, [originalBytes])
   const pageBusy = !!documentPages?.length && renderedPages !== documentPages
+  const tableOpen = documentDialog === 'table'
   useEffect(() => {
     if (!documentPages || !draftRef.current || pdfPagesRef.current === documentPages) return
     const draft = draftRef.current, sources = [...(store.state.pageSources ?? [])]
@@ -733,7 +735,7 @@ export default function App() {
 
   useEffect(() => {
     const index = returnPageRef.current
-    if (index === null || pageManagerOpen || sourceTextOpen || pageBusy || !pdf) return
+    if (index === null || pageManagerOpen || sourceTextOpen || tableOpen || pageBusy || !pdf) return
     let frame = 0, tries = 0
     // Page boxes get their size once the page geometry is known: retry briefly.
     const scroll = () => {
@@ -748,7 +750,7 @@ export default function App() {
     }
     frame = requestAnimationFrame(scroll)
     return () => cancelAnimationFrame(frame)
-  }, [pageManagerOpen, sourceTextOpen, pageBusy, pdf])
+  }, [pageManagerOpen, sourceTextOpen, tableOpen, pageBusy, pdf])
 
   const checkExport = useCallback(async () => {
     const draft = draftRef.current
@@ -973,8 +975,9 @@ export default function App() {
                   aria-pressed={pageManagerOpen}
                   disabled={pageBusy || redactions.length > 0}
                   onClick={() => {
-                    if (!pageManagerOpen && !sourceTextOpen) viewedPageRef.current = visiblePageIndex()
+                    if (!pageManagerOpen && !sourceTextOpen && !tableOpen) viewedPageRef.current = visiblePageIndex()
                     if (pageManagerOpen) returnPageRef.current = viewedPageRef.current
+                    setDocumentDialog(null)
                     setSourceTextOpen(false)
                     setSearchOpen(false)
                     setSelectedId(null)
@@ -992,6 +995,7 @@ export default function App() {
                   disabled={pageBusy || cropActive}
                   aria-pressed={searchOpen}
                   onClick={() => {
+                    setDocumentDialog(null)
                     setSourceTextOpen(false)
                     setPageManagerOpen(false)
                     setSelectedId(null)
@@ -1007,6 +1011,7 @@ export default function App() {
                     { label: 'Dokumentinfo …', onSelect: () => setDocumentDialog('info') },
                     { label: 'Seitenzahlen, Kopf- und Fußzeile …', onSelect: () => { setPageManagerOpen(false); setSourceTextOpen(false); setDocumentDialog('labels') } },
                     { label: 'Text erkennen (OCR) …', onSelect: () => { if (!pageManagerOpen && !sourceTextOpen) viewedPageRef.current = visiblePageIndex(); setPageManagerOpen(false); setSourceTextOpen(false); setDocumentDialog('ocr') } },
+                    { label: 'Tabelle exportieren …', onSelect: () => { if (!pageManagerOpen && !sourceTextOpen) viewedPageRef.current = visiblePageIndex(); setPageManagerOpen(false); setSourceTextOpen(false); setSearchOpen(false); setSelectedId(null); setTool('select'); setDocumentDialog('table') } },
                   ]}
                 />
                 {!pageManagerOpen && (
@@ -1029,7 +1034,7 @@ export default function App() {
                   </div>
                 )}
               </div>
-              {!pageManagerOpen && <button aria-label={sourceTextOpen ? undefined : 'Originaltext korrigieren'} title={sourceTextOpen ? 'Textkorrektur schließen und zur normalen Ansicht zurückkehren' : 'Originaltext in derselben Schrift korrigieren'} disabled={pageBusy || cropActive || !!redactions.length} aria-pressed={sourceTextOpen} onClick={() => { if (sourceTextOpen) returnPageRef.current = viewedPageRef.current; else viewedPageRef.current = visiblePageIndex(); setPageManagerOpen(false); setSearchOpen(false); setSelectedId(null); setTool('select'); setSourceTextOpen(value => !value) }}>{sourceTextOpen ? 'Zur Dokumentbearbeitung' : 'Textkorrektur'}</button>}
+              {!pageManagerOpen && <button aria-label={sourceTextOpen ? undefined : 'Originaltext korrigieren'} title={sourceTextOpen ? 'Textkorrektur schließen und zur normalen Ansicht zurückkehren' : 'Originaltext in derselben Schrift korrigieren'} disabled={pageBusy || cropActive || !!redactions.length} aria-pressed={sourceTextOpen} onClick={() => { if (sourceTextOpen) returnPageRef.current = viewedPageRef.current; else if (!tableOpen) viewedPageRef.current = visiblePageIndex(); setDocumentDialog(null); setPageManagerOpen(false); setSearchOpen(false); setSelectedId(null); setTool('select'); setSourceTextOpen(value => !value) }}>{sourceTextOpen ? 'Zur Dokumentbearbeitung' : 'Textkorrektur'}</button>}
               <div
                 className="toolbar-history"
                 role="group"
@@ -1092,7 +1097,7 @@ export default function App() {
             </>
           )}
         </div>
-        {pdf && !pageManagerOpen && !sourceTextOpen && (
+        {pdf && !pageManagerOpen && !sourceTextOpen && !tableOpen && (
           <div
             className="toolbar-tools"
             role="group"
@@ -1278,7 +1283,8 @@ export default function App() {
         {pdf && searchOpen && !pageManagerOpen && !pageBusy && <SearchWindow pdf={pdf} overlays={overlays} onClose={closeSearch} onHits={onSearchHits} onJump={onSearchJump}/>}
         {pdf && pageManagerOpen && originalBytes && <PagesManager nativeWidgets={nativeWidgets} key={activeDraftId} pdf={pdf} store={store} original={originalBytes} busy={pageBusy} onCropActive={setCropActive} initialPage={viewedPageRef.current} onPage={onViewedPage} />}
         {pdf && sourceTextOpen && originalBytes && !pageBusy && <SourceTextPanel key={activeDraftId} store={store} original={originalBytes} initialPage={viewedPageRef.current} onPage={onViewedPage} onClose={() => { returnPageRef.current = viewedPageRef.current; setSourceTextOpen(false) }} onHistory={setSourceHistory} />}
-        {!pageManagerOpen && !sourceTextOpen && <>
+        {pdf && tableOpen && documentPages && <TablePanel key={activeDraftId} pdf={pdf} pages={documentPages} fileName={pdf.fileName} initialPage={viewedPageRef.current} onClose={() => { returnPageRef.current = viewedPageRef.current; setDocumentDialog(null) }} />}
+        {!pageManagerOpen && !sourceTextOpen && !tableOpen && <>
         {pageBusy && <p role="status" className="hint">Seitenansicht wird aktualisiert …</p>}
         {pdf && !pageBusy && (
           <DrawingToolbar workspaceRef={workspaceRef} tool={tool} color={strokeColor} width={strokeWidth}
@@ -1332,7 +1338,7 @@ export default function App() {
       {documentDialog === 'labels' && pdf && <PageLabelsDialog pdf={pdf} store={store} onClose={() => setDocumentDialog(null)} />}
       {documentDialog === 'ocr' && pdf && <OcrDialog pdf={pdf} store={store} initialPage={viewedPageRef.current} onClose={() => setDocumentDialog(null)} />}
       {passwordRequest && <PasswordDialog key={passwordEpoch.current} request={passwordRequest}/>}
-      {pdf && !pageManagerOpen && !sourceTextOpen && !pageBusy && (
+      {pdf && !pageManagerOpen && !sourceTextOpen && !tableOpen && !pageBusy && (
         <footer
           className="drawing-footer"
           inert={

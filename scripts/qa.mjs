@@ -114,6 +114,7 @@ try {
     'page-labels-smoke',
     'stamps-smoke',
     'ocr-smoke',
+    'table-smoke',
     ...(syntheticOnly ? [] : ['mvp-real-smoke']),
   ]
   for (const name of scripts) {
