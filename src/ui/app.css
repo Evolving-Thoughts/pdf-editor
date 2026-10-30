@@ -393,7 +393,8 @@
   .toolbar .toolbar-tools button { font-size: 12px; padding: 6px; }
   .toolbar-tools .tool-icon { width: 14px; height: 14px; }
   .symbol-popover { left: auto; right: 0; }
-  .symbol-word { display: none; }
+  .symbol-word, .compact-hide { display: none; }
+  .toolbar button .tool-icon { margin-right: 0; }
   .document-menu-popover { left: auto; right: 0; }
   .drafts-menu {
     position: fixed;

@@ -3,6 +3,19 @@ import { existsSync } from 'node:fs'
 import { execFileSync } from 'node:child_process'
 import { chromium } from 'playwright'
 
+/** Pages mount near the view only (T20): scroll until an overlay on a later page exists. */
+export async function revealInPages(page, selector) {
+  await page.waitForSelector('.pages .page-slot')
+  const height = await page.locator('.pages').evaluate(el => el.scrollHeight)
+  const step = await page.locator('.pages').evaluate(el => el.clientHeight)
+  for (let top = 0; top <= height; top += step) {
+    await page.locator('.pages').evaluate((el, value) => { el.scrollTop = value }, top)
+    await page.waitForTimeout(120)
+    if (await page.locator(selector).count()) break
+  }
+  await page.locator(selector).first().waitFor()
+}
+
 export function chromiumPath() {
   if (process.env.CHROMIUM_PATH) {
     if (!existsSync(process.env.CHROMIUM_PATH))

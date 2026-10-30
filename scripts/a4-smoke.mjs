@@ -1,4 +1,4 @@
-import { chromiumPath } from './browser-helper.mjs'
+import { chromiumPath, revealInPages } from './browser-helper.mjs'
 import { confirmDefaultExport } from './export-smoke-helper.mjs'
 // Optional A4 via real UI, real PDF export, native fields, overlays and local drafts.
 import { chromium } from 'playwright'
@@ -85,7 +85,7 @@ try {
   await text.click(); await text.focus(); await p.keyboard.press('ArrowRight')
   await btn('Speichern').click(); await p.waitForFunction(() => document.querySelector('.draft-save-status')?.textContent.includes('Entwurf gespeichert'))
   await p.reload(); await p.getByRole('button', { name: /Entwürfe/ }).click(); await p.locator('.draft-open').first().click()
-  await p.waitForSelector('.pages .image-overlay'); assert.equal(await p.locator('.pages .image-overlay').evaluate(el => el.style.left), imagePosition)
+  await revealInPages(p, '.pages .image-overlay'); assert.equal(await p.locator('.pages .image-overlay').evaluate(el => el.style.left), imagePosition)
   await btn('Seiten verwalten').click(); await ready(); await expectSizes(await download('Exportieren', 'restored.pdf'), true)
   await choose(0); await btn('1 Seite im Uhrzeigersinn drehen').click(); await ready()
   const extracted = await download('Extrahieren', 'rotated.pdf'); near(extracted.getPage(0).getRotation().angle, 90)

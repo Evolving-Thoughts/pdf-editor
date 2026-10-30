@@ -954,9 +954,11 @@ export default function App() {
                   >
                     <path d="M4 3h13l3 3v15H4zM8 3v6h8V3M8 21v-8h8v8" />
                   </svg>
-                  {visibleSave?.status === 'saving'
-                    ? 'Speichert …'
-                    : 'Speichern'}
+                  <span className="compact-hide">
+                    {visibleSave?.status === 'saving'
+                      ? 'Speichert …'
+                      : 'Speichern'}
+                  </span>
                 </button>
                 {!pageManagerOpen && <DocumentMenu
                   disabled={pageBusy || cropActive || redactions.length > 0}
@@ -1133,9 +1135,10 @@ export default function App() {
                 <button
                   type="button"
                   onClick={() => imageInputRef.current?.click()}
+                  aria-label="Bild einfügen"
                   title="PNG- oder JPG-Bild einfügen · auch per Drag & Drop"
                 >
-                  + Bild einfügen
+                  + Bild<span className="compact-hide"> einfügen</span>
                 </button>
                 <SymbolPicker
                   value={symbol}
