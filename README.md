@@ -150,6 +150,9 @@ zeigt den Fortschritt und lässt sich jederzeit abbrechen:
 - Prüfung: Signaturen, aktive Inhalte, Anhänge, XFA, Formulare, Lesezeichen, Tags
   und nicht darstellbare Zeichen. Risiken müssen bestätigt werden, nicht Unterstütztes
   wird abgelehnt. Die Prüfung ist keine Sicherheits- oder Konformitätsbestätigung.
+  Lesezeichen folgen ihren Seiten, Tags bleiben bei vollständigen Seiten in
+  ursprünglicher Reihenfolge erhalten, auch nach Textkorrekturen. Nach einer
+  Schwärzung werden beide bewusst nicht übernommen.
 - Dateigröße, standardmäßig **Nicht optimieren**:
   - Struktur optimieren ist verlustfrei. Das Ergebnis wird neu eingelesen und mit
     der Eingabe verglichen. Wird es nicht kleiner, bleibt die Datei unverändert.
@@ -168,13 +171,15 @@ zeigt den Fortschritt und lässt sich jederzeit abbrechen:
   keine vollständige Anonymisierung.
 - **Seitenzahlen, Kopf- und Fußzeile:** Text mit `{n}` und `{gesamt}`, Seitenbereich
   und Position wählen und auf der echten Seite prüfen. Das Ergebnis sind normale,
-  bearbeitbare Textboxen.
+  bearbeitbare Textboxen. Die Nummern folgen automatisch, wenn Seiten umsortiert
+  oder gelöscht werden.
 - **Text erkennen (OCR):** Macht gewählte Scan-Seiten lokal durchsuchbar. Die Erkennung
   startet nur über den Button im Dialog. Das sichtbare Bild bleibt unverändert, das
   Ergebnis ist vor der Übernahme prüfbar. Einzelheiten stehen in
   [docs/third-party-ocr.md](docs/third-party-ocr.md).
 - **Tabelle exportieren:** Bereich auf der Seite wählen, Spalten und Werte prüfen und
-  als XLSX oder ODS speichern. Unklare Werte bleiben Text und sind markiert.
+  als XLSX oder ODS speichern. Unklare Werte bleiben Text und sind markiert. Scans
+  gehen ebenfalls, wenn vorher ihr Text erkannt wurde.
 
 Stempel liegen in der Werkzeugleiste neben den Symbolen. Sie sind Bilder, keine
 digitale Signatur. Das Datum wird beim Platzieren festgelegt.

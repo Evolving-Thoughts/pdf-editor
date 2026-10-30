@@ -84,6 +84,7 @@ try {
   const text = page.locator('.textbox textarea')
   await text.click() // Enter editing through a real focus/click before replacing text.
   await text.fill('Noch aktiv bearbeiteter Text') // Deliberately no Escape/blur.
+  await page.waitForTimeout(700) // The debounced write from adding the box must be over before counting.
   const started = await page.evaluate(() => {
     window.saveTrace = []
     return performance.now()
