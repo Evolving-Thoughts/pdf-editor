@@ -57,6 +57,7 @@ export function OcrDialog({ pdf, store, initialPage, onClose }: { pdf: PdfHandle
       return
     }
     const run: { engine?: OcrEngine; stopped: boolean } = { stopped: false }
+    let timedOut = false
     session.current = run
     setPhase('running')
     setProgress({ label: 'Seiten werden geprüft …', share: 0 })
@@ -85,7 +86,7 @@ export function OcrDialog({ pdf, store, initialPage, onClose }: { pdf: PdfHandle
         setProgress({ label: `Seite ${index + 1} wird erkannt (${position + 1} von ${scans.length}) …`, share: position / scans.length })
         const picture = await pdf.renderForOcr(index + 1)
         if (run.stopped) return
-        const recognition = await withTimeout(run.engine.recognize(picture.image, picture.scale), OCR_PAGE_TIMEOUT_MS, stop)
+        const recognition = await withTimeout(run.engine.recognize(picture.image, picture.scale), OCR_PAGE_TIMEOUT_MS, () => { timedOut = true; stop() })
         if (run.stopped) return
         results.current.push({ ...recognition, page: pages[index], pageIndex: index, imageUrl: URL.createObjectURL(picture.image), keep: true })
       }
@@ -93,7 +94,8 @@ export function OcrDialog({ pdf, store, initialPage, onClose }: { pdf: PdfHandle
       setReviewed([...results.current])
       setPhase('review')
     } catch (error) {
-      if (run.stopped && session.current !== null) return
+      // A cancelled run ends in a worker error nobody needs to read.
+      if (run.stopped && !timedOut) return
       stop()
       release()
       setPhase('setup')

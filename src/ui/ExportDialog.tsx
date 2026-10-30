@@ -20,7 +20,7 @@ export function ExportDialog({
   onDownload,
 }: {
   onCancel: () => void
-  onCheck: () => Promise<PreflightReport>
+  onCheck: (signal: AbortSignal) => Promise<PreflightReport>
   onJump: (issue: TextIssue) => void
   onPrepare: (
     size: ExportSize,
@@ -54,11 +54,11 @@ export function ExportDialog({
   const [confirmed, setConfirmed] = useState<ReadonlySet<Assessment['kind']>>(new Set())
   const [textConfirmed, setTextConfirmed] = useState(false)
   useEffect(() => {
-    let current = true
-    void onCheck().then(result => { if (current) setReport(result) }).catch(() => {
-      if (current) setReport({ rebuilt: true, textIssues: [], assessments: [{ kind: 'signature', state: 'unknown', decision: 'confirm', message: 'Die Prüfung konnte nicht abgeschlossen werden. Bitte das Ergebnis selbst kontrollieren.' }] })
+    const controller = new AbortController()
+    void onCheck(controller.signal).then(result => { if (!controller.signal.aborted) setReport(result) }).catch(() => {
+      if (!controller.signal.aborted) setReport({ rebuilt: true, textIssues: [], assessments: [{ kind: 'signature', state: 'unknown', decision: 'confirm', message: 'Die Prüfung konnte nicht abgeschlossen werden. Bitte das Ergebnis selbst kontrollieren.' }] })
     })
-    return () => { current = false }
+    return () => controller.abort()
   }, [onCheck])
   useEffect(() => {
     const element = dialog.current

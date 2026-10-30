@@ -752,7 +752,7 @@ export default function App() {
     return () => cancelAnimationFrame(frame)
   }, [pageManagerOpen, sourceTextOpen, tableOpen, pageBusy, pdf])
 
-  const checkExport = useCallback(async () => {
+  const checkExport = useCallback(async (signal: AbortSignal) => {
     const draft = draftRef.current
     if (!draft || !store.state.pages?.length) throw new Error('Der Export ist gerade nicht verfügbar.')
     const version = store.getVersion()
@@ -760,7 +760,7 @@ export default function App() {
       original: new Uint8Array(draft.bytes), sources: store.state.pageSources ?? [], pages: store.state.pages,
       overlays: store.state.overlays.map(cloneOverlay),
       secure: !!store.state.redactionApplied || store.state.pages.some(page => page.redacted),
-    })
+    }, { signal })
     checkedVersionRef.current = version
     return report
   }, [store])
