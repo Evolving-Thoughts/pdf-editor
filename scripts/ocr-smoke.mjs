@@ -161,9 +161,46 @@ assert.match(await pageText(2), /quick/)
 assert.equal((await pageText(3)).trim(), '')
 await task.destroy()
 
+// A scanned table: recognized text feeds the table workspace, with a warning.
+const tableScan = await page.evaluate(() => {
+  const canvas = document.createElement('canvas')
+  canvas.width = 1654
+  canvas.height = 2339
+  const context = canvas.getContext('2d')
+  context.fillStyle = '#fff'
+  context.fillRect(0, 0, canvas.width, canvas.height)
+  context.fillStyle = '#000'
+  context.font = '60px Arial, sans-serif'
+  const rows = [['Artikel', 'Menge', 'Preis'], ['Papier', '12,5', '89,90'], ['Toner', '3', '45,00']]
+  rows.forEach((row, rowIndex) => row.forEach((text, column) => context.fillText(text, 180 + column * 460, 400 + rowIndex * 130)))
+  return canvas.toDataURL('image/png')
+})
+const tableDoc = await PDFDocument.create()
+const tableImage = await tableDoc.embedPng(tableScan)
+tableDoc.addPage([595, 842]).drawImage(tableImage, { x: 0, y: 0, width: 595, height: 842 })
+await open(await tableDoc.save(), 'tabellenscan.pdf')
+await page.getByRole('button', { name: 'Dokument', exact: true }).click()
+await page.getByRole('menuitem', { name: 'Tabelle exportieren …' }).click()
+await page.getByText('Diese Seite hat keine Textebene').waitFor()
+await page.getByRole('button', { name: 'Zur Dokumentbearbeitung', exact: true }).click()
+await openDialog()
+await run('1', 'Deutsch')
+await dialog().getByRole('textbox', { name: 'Erkannter Text von Seite 1' }).waitFor({ timeout: 120000 })
+await dialog().getByRole('button', { name: 'Übernehmen', exact: true }).click()
+await page.waitForFunction(() => document.querySelector('.page[data-page-index="0"] .textLayer span'), null, { timeout: 30000 })
+await page.getByRole('button', { name: 'Dokument', exact: true }).click()
+await page.getByRole('menuitem', { name: 'Tabelle exportieren …' }).click()
+await page.getByRole('button', { name: 'Ganze Seite', exact: true }).click()
+await page.getByLabel('Zeile 1, Spalte 1').waitFor()
+assert.match(await page.locator('.table-review').textContent(), /Texterkennung/)
+const scanned = []
+for (let row = 1; row <= 3; row++) for (let column = 1; column <= 3; column++) scanned.push(await page.getByLabel(`Zeile ${row}, Spalte ${column}`, { exact: true }).inputValue())
+assert.deepEqual(scanned, ['Artikel', 'Menge', 'Preis', 'Papier', '12,5', '89,90', 'Toner', '3', '45,00'])
+await page.getByRole('button', { name: 'Zur Dokumentbearbeitung', exact: true }).click()
+
 // Nothing left this machine: every request stayed on the app's own address.
 const origin = new URL(base).origin
 assert.deepEqual(requests.filter(url => !url.startsWith(origin) && !url.startsWith('blob:') && !url.startsWith('data:')), [])
 assert.deepEqual(errors, [])
-console.log('PASS ocr: Start nur per Button, Umlaute, Prüfung, Verwerfen, pixelgleich, Suche, Undo, Entwurf, Export, keine externen Anfragen')
+console.log('PASS ocr: Start nur per Button, Umlaute, Tabellen aus Scans, Prüfung, Verwerfen, pixelgleich, Suche, Undo, Entwurf, Export, keine externen Anfragen')
 await browser.close()

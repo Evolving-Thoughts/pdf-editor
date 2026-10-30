@@ -137,6 +137,7 @@ export function TablePanel({ pdf, pages, fileName, initialPage, onClose }: { pdf
   }
 
   const uncertain = rows.flat().filter(cell => cell.note).length
+  const recognized = !!pages[pageIndex].ocr?.length
   const shownRegion = draft ?? region
   const columns = rows[0]?.length ?? 0
 
@@ -186,8 +187,9 @@ export function TablePanel({ pdf, pages, fileName, initialPage, onClose }: { pdf
           <button type="button" onClick={onClose}>Zur Dokumentbearbeitung</button>
         </div>
         {problem && <p role="alert" className="export-error">{problem}</p>}
-        {!rows.length && !problem && <p className="table-hint">{pageWords && !pageWords.length ? 'Diese Seite hat keine Textebene. Bei einem Scan zuerst über „Dokument“ die Texterkennung nutzen.' : 'Noch kein Bereich gewählt.'}</p>}
+        {!rows.length && !problem && <p className="table-hint">{pageWords && !pageWords.length ? 'Diese Seite hat keine Textebene. Bei einem Scan zuerst über „Dokument“ den Text erkennen lassen, dann lässt sich die Tabelle hier übernehmen.' : 'Noch kein Bereich gewählt.'}</p>}
         {!!rows.length && <>
+          {recognized && <p className="password-warning">Diese Seite ist ein Scan. Der Text stammt aus der Texterkennung, Ziffern und Trennzeichen können falsch sein. Bitte Werte besonders mit dem Scan vergleichen.</p>}
           <p className="table-hint">{rows.length} Zeilen, {columns} Spalten. Die Zuordnung ist aus den Textpositionen geschätzt und muss geprüft werden.{uncertain ? ` ${uncertain} Zellen sind markiert.` : ''}</p>
           <div className="table-grid-wrap">
             <table className="table-grid">
