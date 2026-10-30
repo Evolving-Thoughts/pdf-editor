@@ -106,6 +106,7 @@ try {
     'search-import-smoke',
     'large-document-smoke',
     'text-selection-smoke',
+    'preflight-smoke',
     'compression-smoke',
     ...(syntheticOnly ? [] : ['mvp-real-smoke']),
   ]

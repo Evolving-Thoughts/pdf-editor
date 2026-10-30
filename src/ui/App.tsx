@@ -2,6 +2,7 @@ import { SourceTextPanel } from './SourceTextPanel'
 import type { SourceHistory } from './SourceTextPanel'
 import { ExportDialog, type PreparedExport } from './ExportDialog'
 import { compressPdf, checkExportAbort, type CompressionPreset } from '../core/pdf/compressPdf'
+import { inspectStructures, preflightExport, type TextIssue } from '../core/pdf/preflight'
 import { encodeCompressedImage } from '../core/images/compressImage'
 import { preparePdf, unlockPdf, encryptPdf, PasswordRequiredError, IncorrectPasswordError } from '../core/pdf/unlockPdf'
 import { PasswordDialog, type PasswordRequest } from './PasswordDialog'
@@ -75,6 +76,9 @@ export default function App() {
   const [sourceHistory, setSourceHistory] = useState<SourceHistory | null>(null)
   const [exportDialogOpen, setExportDialogOpen] = useState(false)
   const [exportBusy, setExportBusy] = useState(false)
+  const [signedDocument, setSignedDocument] = useState<ArrayBuffer | null>(null)
+  // The export must describe the same editing state as the check the user read.
+  const checkedVersionRef = useRef<number | null>(null)
   const [searchOpen, setSearchOpen] = useState(false)
   const [searchResult, setSearchResult] = useState<{
     hits: SearchHit[]
@@ -175,6 +179,14 @@ export default function App() {
     }).catch(problem => { if (!cancelled) setError(problem instanceof Error ? problem.message : 'Formularfelder konnten nicht erkannt werden.') })
     return () => { cancelled = true }
   }, [originalBytes, documentPages, documentSources])
+  useEffect(() => {
+    if (!originalBytes) return
+    let cancelled = false
+    void inspectStructures(new Uint8Array(originalBytes)).then(findings => {
+      if (!cancelled) setSignedDocument(findings.some(item => item.kind === 'signature' && item.state === 'present') ? originalBytes : null)
+    })
+    return () => { cancelled = true }
+  }, [originalBytes])
   const pageBusy = !!documentPages?.length && renderedPages !== documentPages
   useEffect(() => {
     if (!documentPages || !draftRef.current || pdfPagesRef.current === documentPages) return
@@ -714,6 +726,26 @@ export default function App() {
     return () => cancelAnimationFrame(frame)
   }, [pageManagerOpen, sourceTextOpen, pageBusy, pdf])
 
+  const checkExport = useCallback(async () => {
+    const draft = draftRef.current
+    if (!draft || !store.state.pages?.length) throw new Error('Der Export ist gerade nicht verfügbar.')
+    const version = store.getVersion()
+    const report = await preflightExport({
+      original: new Uint8Array(draft.bytes), sources: store.state.pageSources ?? [], pages: store.state.pages,
+      overlays: store.state.overlays.map(cloneOverlay),
+      secure: !!store.state.redactionApplied || store.state.pages.some(page => page.redacted),
+    })
+    checkedVersionRef.current = version
+    return report
+  }, [store])
+  const jumpToIssue = useCallback((issue: TextIssue) => {
+    setExportDialogOpen(false)
+    setPageManagerOpen(false)
+    setSourceTextOpen(false)
+    setTool('select')
+    setSelectedId(issue.overlayId)
+    requestAnimationFrame(() => workspaceRef.current?.querySelector(`.page[data-page-index="${issue.pageIndex}"]`)?.scrollIntoView({ block: 'center' }))
+  }, [])
   const prepareExport = useCallback(
     async (preset: CompressionPreset | undefined, signal: AbortSignal, onProgress: (done: number, total: number) => void): Promise<PreparedExport> => {
       const draft = draftRef.current
@@ -724,6 +756,8 @@ export default function App() {
         checkExportAbort(signal)
         if (store.state.redactions?.length)
           throw new Error('Vorgemerkte Schwärzungen zuerst anwenden oder verwerfen; sie sind noch nicht sicher entfernt.')
+        if (checkedVersionRef.current !== store.getVersion())
+          throw new Error('Der Stand hat sich seit der Prüfung geändert. Bitte den Export neu öffnen.')
         const original = await exportPageDocument(
           new Uint8Array(draft.bytes), store.state.pageSources ?? [], store.state.pages,
           store.state.overlays.map(cloneOverlay), undefined, store.state.formValues,
@@ -1177,6 +1211,7 @@ export default function App() {
           {error}
         </p>
       )}
+      {signedDocument === originalBytes && originalBytes && <p role="status" className="hint">Dieses PDF ist digital signiert. Jede Änderung macht die Signatur ungültig.</p>}
       {sizeWarning && !error && (
         <p role="status" className="hint">
           ⚠️ Große Datei (über 50 MB) – automatisches Speichern und Exportieren können träge werden.
@@ -1240,7 +1275,7 @@ export default function App() {
         </div>
         </>}
       </div>
-      {exportDialogOpen && <ExportDialog onCancel={()=>setExportDialogOpen(false)} onPrepare={prepareExport} onDownload={downloadExport}/> }
+      {exportDialogOpen && <ExportDialog onCancel={()=>setExportDialogOpen(false)} onCheck={checkExport} onJump={jumpToIssue} onPrepare={prepareExport} onDownload={downloadExport}/> }
       {passwordRequest && <PasswordDialog key={passwordEpoch.current} request={passwordRequest}/>}
       {pdf && !pageManagerOpen && !sourceTextOpen && !pageBusy && (
         <footer

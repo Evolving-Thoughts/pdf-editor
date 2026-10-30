@@ -47,6 +47,17 @@ export async function inspectPages(
   })
 }
 
+/** True when an export keeps the original page tree, and so its document-level
+ * structures (forms, metadata, outlines, tags). */
+export async function keepsPageTree(original: Uint8Array, pages: DocumentPage[], secure: boolean): Promise<boolean> {
+  if (secure || !pages.every((page, index) => page.sourceId === 'original' && page.sourceIndex === index)) return false
+  const initial = await inspectPages(original, 'original')
+  return initial.length === pages.length && initial.every((page, index) =>
+    JSON.stringify(page.box) === JSON.stringify(pages[index].box) &&
+    page.unit === pages[index].unit &&
+    page.rotation === pages[index].rotation)
+}
+
 /** Base content only. Overlays remain editable and are applied by exportPdf afterwards. */
 export async function composePages(
   original: Uint8Array,
@@ -58,23 +69,12 @@ export async function composePages(
   if (!pages.length) throw new Error('Ein PDF muss mindestens eine Seite enthalten.')
   // An ordinary overlay edit must not rebuild the page tree: preserve forms,
   // metadata, outlines and other document-level structures when no page changed.
-  if (!secure && pages.every((page, index) => page.sourceId === 'original' && page.sourceIndex === index)) {
-    const initial = await inspectPages(original, 'original')
-    if (
-      initial.length === pages.length &&
-      initial.every(
-        (page, index) =>
-          JSON.stringify(page.box) === JSON.stringify(pages[index].box) &&
-          page.unit === pages[index].unit &&
-          page.rotation === pages[index].rotation,
-      )
-    ) {
-      if (!Object.keys(formValues).length) return original.slice()
-      const doc = await PDFDocument.load(original)
-      if (doc.catalog.lookupMaybe(PDFName.of('AcroForm'), PDFDict)?.has(PDFName.of('XFA'))) throw new Error('XFA-Formulare werden noch nicht unterstützt.')
-      if (applyFormValues(doc, 'original', formValues)) { await updateFormAppearances(doc); return doc.save({ updateFieldAppearances: false }) }
-      return original.slice()
-    }
+  if (await keepsPageTree(original, pages, secure)) {
+    if (!Object.keys(formValues).length) return original.slice()
+    const doc = await PDFDocument.load(original)
+    if (doc.catalog.lookupMaybe(PDFName.of('AcroForm'), PDFDict)?.has(PDFName.of('XFA'))) throw new Error('XFA-Formulare werden noch nicht unterstützt.')
+    if (applyFormValues(doc, 'original', formValues)) { await updateFormAppearances(doc); return doc.save({ updateFieldAppearances: false }) }
+    return original.slice()
   }
 
   const output = await PDFDocument.create()

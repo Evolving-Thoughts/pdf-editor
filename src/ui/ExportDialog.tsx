@@ -4,6 +4,7 @@ import {
   type CompressionPreset,
   type CompressionResult,
 } from '../core/pdf/compressPdf'
+import { rejection, type Assessment, type PreflightReport, type TextIssue } from '../core/pdf/preflight'
 export interface PreparedExport {
   name: string
   original: Uint8Array
@@ -13,12 +14,18 @@ function formatSize(bytes: number) {
   const unit = bytes >= 1024 * 1024 ? 'MiB' : 'KiB'
   return `${new Intl.NumberFormat('de-DE', { maximumFractionDigits: 1 }).format(bytes / (unit === 'MiB' ? 1024 * 1024 : 1024))} ${unit}`
 }
+const VISIBLE_TEXT_ISSUES = 5
+
 export function ExportDialog({
   onCancel,
+  onCheck,
+  onJump,
   onPrepare,
   onDownload,
 }: {
   onCancel: () => void
+  onCheck: () => Promise<PreflightReport>
+  onJump: (issue: TextIssue) => void
   onPrepare: (
     preset: CompressionPreset | undefined,
     signal: AbortSignal,
@@ -45,6 +52,17 @@ export function ExportDialog({
     [progress, setProgress] = useState('')
   const [prepared, setPrepared] = useState<PreparedExport | null>(null)
   const [failedPreparation, setFailedPreparation] = useState(false)
+  // Absent while the check runs; the export stays locked until it reports.
+  const [report, setReport] = useState<PreflightReport | null>(null)
+  const [confirmed, setConfirmed] = useState<ReadonlySet<Assessment['kind']>>(new Set())
+  const [textConfirmed, setTextConfirmed] = useState(false)
+  useEffect(() => {
+    let current = true
+    void onCheck().then(result => { if (current) setReport(result) }).catch(() => {
+      if (current) setReport({ rebuilt: true, textIssues: [], assessments: [{ kind: 'signature', state: 'unknown', decision: 'confirm', message: 'Die Prüfung konnte nicht abgeschlossen werden. Bitte das Ergebnis selbst kontrollieren.' }] })
+    })
+    return () => { current = false }
+  }, [onCheck])
   useEffect(() => {
     const element = dialog.current
     element?.showModal()
@@ -149,6 +167,10 @@ export function ExportDialog({
       if (!signal.aborted) close()
     })
   }
+  const rejected = report ? rejection(report) : undefined
+  const open = report?.assessments.filter(item => item.decision === 'confirm' && !confirmed.has(item.kind)) ?? []
+  const textOpen = !!report?.textIssues.length && !textConfirmed
+  const checkPending = !report || !!rejected || open.length > 0 || textOpen
   const stats = prepared?.compression
   const saved = stats ? prepared!.original.length - stats.bytes.length : 0
   return (
@@ -172,6 +194,42 @@ export function ExportDialog({
           {prepared ? 'Export vorbereitet' : 'PDF exportieren'}
         </h2>
         <p>Originaldatei und lokaler Entwurf bleiben unverändert.</p>
+        {!prepared && (
+          <section className="export-check" aria-label="Prüfung vor dem Export">
+            {!report && <p role="status">Dokument wird geprüft …</p>}
+            {report?.assessments.filter(item => item.decision === 'reject').map(item => <p key={item.kind} role="alert" className="export-error">{item.message}</p>)}
+            {report?.assessments.filter(item => item.decision === 'confirm').map(item => (
+              <label key={item.kind} className="export-confirm">
+                <input type="checkbox" disabled={busy} checked={confirmed.has(item.kind)} onChange={event => setConfirmed(current => {
+                  const next = new Set(current)
+                  if (event.target.checked) next.add(item.kind)
+                  else next.delete(item.kind)
+                  return next
+                })} />
+                <span>{item.message}</span>
+              </label>
+            ))}
+            {!!report?.textIssues.length && <div className="export-text-issues">
+              <p><strong>Nicht darstellbare Zeichen</strong></p>
+              <ul>
+                {report.textIssues.slice(0, VISIBLE_TEXT_ISSUES).map(issue => (
+                  <li key={issue.overlayId}>
+                    <span>Seite {issue.pageIndex + 1}: {issue.characters.map(character => `„${character}“`).join(', ')} fehlt in {issue.font} · {issue.excerpt}</span>
+                    <button type="button" disabled={busy} onClick={() => onJump(issue)}>Zur Stelle</button>
+                  </li>
+                ))}
+              </ul>
+              {report.textIssues.length > VISIBLE_TEXT_ISSUES && <p className="export-detail">und {report.textIssues.length - VISIBLE_TEXT_ISSUES} weitere Textfelder.</p>}
+              <label className="export-confirm">
+                <input type="checkbox" disabled={busy} checked={textConfirmed} onChange={event => setTextConfirmed(event.target.checked)} />
+                <span>Diese Zeichen im Export durch „?“ ersetzen. In Symbolfeldern werden sie weggelassen.</span>
+              </label>
+            </div>}
+            {report && !report.assessments.some(item => item.decision !== 'ok') && !report.textIssues.length && <p className="export-detail">Keine Risiken gefunden.</p>}
+            {report?.assessments.filter(item => item.decision === 'ok' && item.state === 'present').map(item => <p key={item.kind} className="export-detail">{item.message}</p>)}
+            {report && <p className="export-detail">Diese Prüfung ist keine Sicherheits- oder Konformitätsbestätigung.</p>}
+          </section>
+        )}
         {!prepared ? (
           <fieldset disabled={busy}>
             <label className="export-toggle">
@@ -340,7 +398,7 @@ export function ExportDialog({
           <button
             ref={actionRef}
             type="submit"
-            disabled={busy}
+            disabled={busy || (!prepared && checkPending)}
             className="export-primary"
           >
             {prepared
@@ -359,7 +417,7 @@ export function ExportDialog({
           <button
             className="export-fallback"
             type="button"
-            disabled={busy}
+            disabled={busy || (!prepared && checkPending)}
             onClick={() => (prepared ? save(true) : prepare(true))}
           >
             Stattdessen ohne Komprimierung exportieren
