@@ -112,6 +112,7 @@ try {
     'export-worker-smoke',
     'metadata-smoke',
     'page-labels-smoke',
+    'stamps-smoke',
     ...(syntheticOnly ? [] : ['mvp-real-smoke']),
   ]
   for (const name of scripts) {

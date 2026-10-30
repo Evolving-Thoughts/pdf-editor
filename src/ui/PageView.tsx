@@ -38,6 +38,7 @@ interface PageViewProps {
   strokeColor?: string
   strokeWidth?: number
   onImageDrop: (file: File, pageIndex: number, point: StrokePoint) => void
+  onPlaceStamp?: (pageIndex: number, point: StrokePoint, page: PageSize) => void
   shapeStyle: ShapeStyle
   markerStyle: ShapeStyle
   eraserRadius?: number
@@ -59,7 +60,7 @@ interface DrawingGesture {
 export function PageView({
   searchHits = [], activeSearchHit, redactionFill = 'black', nativeWidgets = [], highlightFields = false, onFormError,
   pdf, readOnly = false, pageIndex, zoom, tool, symbol, overlays, store, selectedId, onSelect,
-  shapeStyle, markerStyle, onImageDrop, strokeColor = '#111111', strokeWidth = 3, eraserRadius = 8,
+  shapeStyle, markerStyle, onImageDrop, onPlaceStamp, strokeColor = '#111111', strokeWidth = 3, eraserRadius = 8,
 }: PageViewProps) {
   const canvasRef = useRef<HTMLCanvasElement>(null)
   const wrapperRef = useRef<HTMLDivElement>(null)
@@ -168,6 +169,10 @@ export function PageView({
       setPreview({ ...gestureRef.current, points: [...gestureRef.current.points] })
       return
     }
+    if (tool === 'stamp') {
+      onPlaceStamp?.(pageIndex, pointFrom(event.clientX, event.clientY), pageSize)
+      return
+    }
     const placingSymbol = tool === 'symbol'
     const box: Textbox = {
       id: createId(),
@@ -245,7 +250,7 @@ export function PageView({
   const shapePreview = isShapeTool(tool) && previewPoints.length > 0 ? createShape(tool, previewPoints, pageIndex, preview!.style) : null
   return (
     <div
-      className={`page${tool==='redact'?' redact-tool':''}${tool === 'text' ? ' text-tool' : ''}${tool === 'symbol' ? ' symbol-tool' : ''}${drawing ? ' drawing-tool' : ''}`}
+      className={`page${tool==='redact'?' redact-tool':''}${tool === 'text' ? ' text-tool' : ''}${tool === 'symbol' || tool === 'stamp' ? ' symbol-tool' : ''}${drawing ? ' drawing-tool' : ''}`}
       ref={wrapperRef}
       data-page-index={pageIndex}
       inert={readOnly}

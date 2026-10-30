@@ -49,6 +49,9 @@ import { downloadPdf } from '../core/pdf/downloadPdf'
 import { composePages, inspectPages } from '../core/pdf/pageOperations'
 import { pageSize, type DocumentPage, type PageSource } from '../core/pages'
 import { SymbolPicker } from './SymbolPicker'
+import { StampPicker, type ChosenStamp } from './StampPicker'
+import { renderStampImage } from './stampImage'
+import { stampOverlay } from '../core/stamps'
 import type { Tool } from './tools'
 import './app.css'
 
@@ -121,6 +124,7 @@ export default function App() {
   const [zoom, setZoom] = useState(1)
   const [tool, setTool] = useState<Tool>('select')
   const [symbol, setSymbol] = useState('✓')
+  const [stamp, setStamp] = useState<ChosenStamp | null>(null)
   const [strokeColor, setStrokeColor] = useState('#111111')
   const [strokeWidth, setStrokeWidth] = useState(3)
   const [shapeStyle,setShapeStyle] = useState<ShapeStyle>({fill:null,strokeColor:'#2455c7',strokeWidth:3})
@@ -683,6 +687,15 @@ export default function App() {
     return () => window.removeEventListener('keydown', onKeyDown)
   }, [sourceTextOpen, store, selectedId, zoom, pageBusy, pageManagerOpen, cropActive, redactionBusy, openingFile, exportBusy, loadingDraftId, pdf])
 
+  const placeStamp = useCallback((pageIndex: number, point: { x: number; y: number }, page: { width: number; height: number }) => {
+    if (!stamp) return
+    try {
+      store.dispatch(addImage(stampOverlay(renderStampImage(stamp.lines, stamp.design.color), stamp.design.text, pageIndex, point, page)))
+    } catch (problem) {
+      setError(problem instanceof Error ? problem.message : 'Der Stempel konnte nicht platziert werden.')
+    }
+  }, [stamp, store])
+
   const onSearchJump = useCallback(
     (hit: SearchHit) => {
       const scroller = workspaceRef.current?.querySelector<HTMLElement>('.pages')
@@ -1125,6 +1138,14 @@ export default function App() {
                     setTool('symbol')
                   }}
                 />
+                <StampPicker
+                  active={tool === 'stamp'}
+                  onPick={(chosen) => {
+                    setSelectedId(null)
+                    setStamp(chosen)
+                    setTool('stamp')
+                  }}
+                />
               </div>
             </div>
             <div
@@ -1297,6 +1318,7 @@ export default function App() {
               selectedId={selectedId}
               onSelect={setSelectedId}
               onImageDrop={(file, pageIndex, point) => void onImportImage(file, pageIndex, point)}
+              onPlaceStamp={placeStamp}
             />
             </VirtualPage>
           ))}
