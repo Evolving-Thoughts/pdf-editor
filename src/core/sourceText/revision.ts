@@ -20,7 +20,7 @@ export function sourceRevisions(state: EditorState, revisions: readonly { pageId
   }
   const beforePages = state.pages!, beforeSources = state.pageSources ?? []
   const sources = new Map(revisions.map(r => [r.pageId, { id: createId(), bytes: r.bytes.slice(0) } as PageSource]))
-  const afterPages = beforePages.map(value => sources.has(value.id) ? { ...value, sourceId: sources.get(value.id)!.id } : value)
+  const afterPages = beforePages.map(value => sources.has(value.id) ? { ...value, sourceId: sources.get(value.id)!.id, revisionOf: value.revisionOf ?? value.sourceId } : value)
   const afterSources = [...beforeSources, ...sources.values()]
   return { label: 'Originaltext korrigieren', apply(target) { target.pages = afterPages; target.pageSources = afterSources }, revert(target) { target.pages = beforePages; target.pageSources = beforeSources } }
 }

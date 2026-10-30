@@ -5,7 +5,7 @@ import { PDFArray, PDFDict, PDFDocument, PDFName, PDFNumber, PDFRef, PDFStream, 
 import { isTextbox, type Overlay, type Textbox } from '../model'
 import type { DocumentPage, PageSource } from '../pages'
 import { embedOverlayFont, unsupportedCharacters } from './exportPdf'
-import { keepsPageTree } from './pageOperations'
+import { keepsPageTree, tagsSurvive } from './pageOperations'
 
 export type StructureKind = 'signature' | 'activeContent' | 'attachments' | 'xfa' | 'forms' | 'outline' | 'tags'
 export type StructureState = 'none' | 'present' | 'unknown'
@@ -145,7 +145,7 @@ const LABELS: Record<StructureKind, string> = {
 
 /** What exporting does to one structure. Rebuilt documents get a new page tree (T7),
  * so structures that hang off the old catalog do not arrive unless the code copies them. */
-export function assessExport(finding: StructureFinding, rebuilt: boolean): Assessment {
+export function assessExport(finding: StructureFinding, rebuilt: boolean, kept: { outline?: boolean; tags?: boolean } = {}): Assessment {
   const label = LABELS[finding.kind], assessed = (decision: Decision, message: string): Assessment => ({ kind: finding.kind, state: finding.state, decision, message })
   if (finding.state === 'unknown') return assessed('confirm', `${label}: konnte nicht zuverlässig geprüft werden. Bitte das Ergebnis selbst kontrollieren.`)
   if (finding.state === 'none') return assessed('ok', `${label}: keine gefunden.`)
@@ -162,6 +162,12 @@ export function assessExport(finding: StructureFinding, rebuilt: boolean): Asses
       return rebuilt
         ? assessed('confirm', 'Aktive Inhalte: gehen durch die Seitenänderungen verloren.')
         : assessed('ok', 'Aktive Inhalte: bleiben in der Datei. Der Editor führt sie nicht aus.')
+    case 'outline':
+      if (rebuilt && kept.outline) return assessed('ok', 'Lesezeichen: bleiben erhalten, soweit ihre Zielseiten im Dokument bleiben.')
+      return rebuilt ? assessed('confirm', 'Lesezeichen: gehen verloren.') : assessed('ok', 'Lesezeichen: bleiben erhalten.')
+    case 'tags':
+      if (rebuilt && !kept.tags) return assessed('confirm', 'Struktur-Tags: gehen verloren, weil sich Seiten geändert haben.')
+      return assessed('ok', 'Struktur-Tags: bleiben erhalten.')
     default:
       return rebuilt
         ? assessed('confirm', `${label}: gehen durch die Seitenänderungen verloren.`)
@@ -211,7 +217,8 @@ export async function preflightExport({ original, sources, pages, overlays, secu
   const used = new Set(pages.map(page => page.sourceId))
   const inputs = [...(used.has('original') ? [original] : []), ...sources.filter(source => used.has(source.id)).map(source => new Uint8Array(source.bytes))]
   const findings = mergeFindings(await Promise.all(inputs.map(inspectStructures)))
-  return { rebuilt, assessments: findings.map(finding => assessExport(finding, rebuilt)), textIssues: await findTextIssues(overlays) }
+  const kept = { outline: !secure, tags: await tagsSurvive(original, sources, pages, secure) }
+  return { rebuilt, assessments: findings.map(finding => assessExport(finding, rebuilt, kept)), textIssues: await findTextIssues(overlays) }
 }
 
 export const needsConfirmation = (report: PreflightReport) => report.assessments.filter(item => item.decision === 'confirm')

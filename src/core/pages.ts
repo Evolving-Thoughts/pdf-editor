@@ -23,6 +23,8 @@ export interface DocumentPage {
   hasForms?: boolean
   /** XFA is not supported by pdf-lib; refuse page edits rather than lose it. */
   hasXfa?: boolean
+  /** Set by text corrections: the source this page is a revision of, for its outlines and tags. */
+  revisionOf?: string
   /** Recognized words, written as invisible text whenever the page is composed. */
   ocr?: OcrSourceWord[]
 }

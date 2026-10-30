@@ -1,7 +1,8 @@
 import { sanitizeRedactedSource } from './redactionSafety'
 import type { FormValues } from '../forms'
 import { applyFormValues, updateFormAppearances } from './acroForm'
-import { PDFDict, PDFDocument, PDFName, PDFNumber, PDFObjectCopier, PDFPage, PDFPageLeaf, StandardFonts, degrees } from 'pdf-lib'
+import { PDFDict, PDFDocument, PDFName, PDFNumber, PDFObjectCopier, PDFPage, PDFPageLeaf, PDFRef, StandardFonts, degrees } from 'pdf-lib'
+import { copyOutlines, copyTags, keepsTagOrder, pageOrigin } from './preserveStructure'
 import { cloneOverlay, createId, type Overlay } from '../model'
 import { exportPdf } from './exportPdf'
 import { pageSize, type DocumentPage, type PageSource } from '../pages'
@@ -59,6 +60,16 @@ export async function keepsPageTree(original: Uint8Array, pages: DocumentPage[],
     page.rotation === pages[index].rotation)
 }
 
+const sourceBytes = (id: string, original: Uint8Array, sources: PageSource[]) => (id === 'original' ? original : sources.find(source => source.id === id)?.bytes)
+
+/** Whether a rebuilt document can keep its tags: all pages of one source, complete and in order. */
+export async function tagsSurvive(original: Uint8Array, sources: PageSource[], pages: DocumentPage[], secure: boolean): Promise<boolean> {
+  if (secure || !pages.length) return false
+  const bytes = sourceBytes(pageOrigin(pages[0]), original, sources)
+  if (!bytes) return false
+  return keepsTagOrder(pages, (await PDFDocument.load(bytes, { updateMetadata: false })).getPageCount())
+}
+
 /** Base content only. Overlays remain editable and are applied by exportPdf afterwards. */
 export async function composePages(
   original: Uint8Array,
@@ -90,6 +101,7 @@ async function composeBase(
 
   const output = await PDFDocument.create({ updateMetadata: false })
   const loaded = new Map<string, { doc: PDFDocument; copier: PDFObjectCopier }>()
+  const outputRefs: PDFRef[] = []
   for (const page of pages) {
     let source = loaded.get(page.sourceId)
     if (!source) {
@@ -113,14 +125,48 @@ async function composeBase(
     copied.setCropBox(page.box.x, page.box.y, page.box.width, page.box.height)
     copied.node.set(PDFName.of('UserUnit'), PDFNumber.of(page.unit))
     output.addPage(copied)
+    outputRefs.push(ref as PDFRef)
   }
   // Stable names: preserve original field names even when attachments move before them.
   for (const id of ['original', ...sources.map(s => s.id)]) {
     const source = loaded.get(id)
     if (source) mergeAcroForm(source.doc, output, source.copier)
   }
+  // A redacted export carries no navigation: it could name what was blacked out.
+  if (!secure) await carryStructure(original, sources, pages, output, outputRefs, loaded)
   return output.save({ updateFieldAppearances: false })
 }
+async function carryStructure(
+  original: Uint8Array,
+  sources: PageSource[],
+  pages: DocumentPage[],
+  output: PDFDocument,
+  outputRefs: PDFRef[],
+  loaded: Map<string, { doc: PDFDocument; copier: PDFObjectCopier }>,
+) {
+  const origins = new Map<string, { doc: PDFDocument; pages: Map<PDFRef, PDFRef> }>()
+  for (const [index, page] of pages.entries()) {
+    const id = pageOrigin(page)
+    let origin = origins.get(id)
+    if (!origin) {
+      // A fully corrected document no longer loads its origin for the page content.
+      const bytes = sourceBytes(id, original, sources)
+      const doc = loaded.get(id)?.doc ?? (bytes ? await PDFDocument.load(bytes, { updateMetadata: false }) : undefined)
+      if (!doc) continue
+      origin = { doc, pages: new Map() }
+      origins.set(id, origin)
+    }
+    const ref = origin.doc.getPage(page.sourceIndex).ref
+    if (!origin.pages.has(ref)) origin.pages.set(ref, outputRefs[index])
+  }
+  copyOutlines([...origins.values()], output)
+  const [origin] = origins.values()
+  if (origins.size === 1 && keepsTagOrder(pages, origin.doc.getPageCount())) {
+    const copier = loaded.get(pageOrigin(pages[0]))?.copier ?? PDFObjectCopier.for(origin.doc.context, output.context)
+    copyTags(origin.doc, output, copier, origin.pages)
+  }
+}
+
 /** A white sheet; the actual image is an editable overlay, not baked into the PDF. */
 export async function imagePageBytes(size: { width: number; height: number }): Promise<Uint8Array> {
   const doc = await PDFDocument.create()

@@ -130,6 +130,7 @@ test('signature decision: a signature always needs confirmation, with or without
 test('page changes turn preserved structures into a confirmed loss and reject XFA', () => {
   const state = (kind: StructureKind): StructureFinding => ({ kind, state: 'present', count: 1 })
   for (const kind of ['outline', 'tags', 'attachments', 'activeContent'] as const) {
+    // Without a statement about what survives, a rebuild counts as a loss.
     expect(assessExport(state(kind), false).decision).toBe('ok')
     expect(assessExport(state(kind), true).decision).toBe('confirm')
   }
@@ -152,7 +153,7 @@ test('report on an unchanged document: structures stay, and they really are stil
   for (const kind of ['forms', 'outline', 'tags', 'attachments'] as const) expect(find(output, kind).state).toBe('present')
 })
 
-test('report on reordered pages names every lost structure, and the export confirms each prediction', async () => {
+test('report on reordered pages names the lost tags, keeps the outline, and the export confirms both', async () => {
   const doc = await withForm()
   doc.addPage([300, 300])
   addOutline(doc)
@@ -161,10 +162,10 @@ test('report on reordered pages names every lost structure, and the export confi
   const pages = (await inspectPages(bytes, 'a.pdf')).reverse()
   const report = await preflightExport({ original: bytes, sources: [], pages, overlays: [], secure: false })
   expect(report.rebuilt).toBe(true)
-  expect(needsConfirmation(report).map(item => item.kind).sort()).toEqual(['outline', 'tags'])
+  expect(needsConfirmation(report).map(item => item.kind)).toEqual(['tags'])
   const output = await inspectStructures(await exportPageDocument(bytes, [], pages, []))
   expect(find(output, 'forms').state).toBe('present')
-  expect(find(output, 'outline').state).toBe('none')
+  expect(find(output, 'outline').state).toBe('present')
   expect(find(output, 'tags').state).toBe('none')
 })
 
