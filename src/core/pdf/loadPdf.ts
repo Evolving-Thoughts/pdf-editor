@@ -1,7 +1,7 @@
 // Core module: load, render and release PDFs (PDF.js).
 // The UI only ever talks to the PdfHandle, never to pdfjs-dist directly
 // (core/UI boundary, ADR-004).
-import { getDocument, GlobalWorkerOptions } from 'pdfjs-dist'
+import { getDocument, GlobalWorkerOptions, TextLayer } from 'pdfjs-dist'
 import workerUrl from 'pdfjs-dist/build/pdf.worker.min.mjs?url'
 import type { OverlayFont } from '../model'
 import type { Redaction } from '../redactions'
@@ -32,6 +32,8 @@ export interface PdfHandle {
   getPageSize(pageNumber: number): Promise<PageSize>
   /** Opt-in source mapping; keep the existing size-only contract unchanged. */
   getPageGeometry(pageNumber: number): Promise<SourcePageGeometry>
+  /** Fills the container with transparent, selectable spans over the page. Says whether the page has text. */
+  renderTextLayer(pageNumber: number, container: HTMLElement, zoom: number, signal: AbortSignal): Promise<boolean>
   /** Text and geometry from PDF.js; raster/image pages return no text. */
   getSearchText(pageNumber: number): Promise<SearchFragment[]>
   /** Lossless 300-dpi pixels with outward-rounded opaque masks; never returns source content. */
@@ -83,6 +85,20 @@ export async function loadPdf(fileName: string, bytes: Uint8Array): Promise<PdfH
     },
 
     renderStats: () => queue.stats(),
+
+    async renderTextLayer(pageNumber, container, zoom, signal) {
+      const page = await pdfDocument.getPage(pageNumber)
+      if (signal.aborted) return false
+      const viewport = page.getViewport({ scale: zoom })
+      const content = await page.getTextContent()
+      if (signal.aborted) return false
+      container.style.setProperty('--total-scale-factor', String(viewport.scale * viewport.userUnit))
+      const layer = new TextLayer({ textContentSource: content, container, viewport })
+      const cancel = () => layer.cancel()
+      signal.addEventListener('abort', cancel, { once: true })
+      try { await layer.render() } finally { signal.removeEventListener('abort', cancel) }
+      return content.items.some(item => 'str' in item && item.str.trim().length > 0)
+    },
 
     async getPageSize(pageNumber) {
       const cached = sizeCache.get(pageNumber)

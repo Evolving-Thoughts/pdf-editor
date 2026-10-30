@@ -602,6 +602,7 @@ export default function App() {
       if (event.key === 'Escape') {
         setSelectedId(null)
         setTool('select')
+        window.getSelection()?.removeAllRanges()
         return
       }
       if ((event.key === 'Delete' || event.key === 'Backspace') && selectedId) {

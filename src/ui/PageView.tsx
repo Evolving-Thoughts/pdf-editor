@@ -63,6 +63,12 @@ export function PageView({
 }: PageViewProps) {
   const canvasRef = useRef<HTMLCanvasElement>(null)
   const wrapperRef = useRef<HTMLDivElement>(null)
+  const textLayerRef = useRef<HTMLDivElement>(null)
+  const textPointerRef = useRef<{ x: number; y: number } | null>(null)
+  const [hasText, setHasText] = useState<{ pdf: PdfHandle; pageIndex: number; value: boolean } | null>(null)
+  const [noTextHint, setNoTextHint] = useState(false)
+  const selectableText = !readOnly && tool === 'select'
+  const pageHasNoText = hasText?.pdf === pdf && hasText.pageIndex === pageIndex && !hasText.value
   const [pageSize, setPageSize] = useState<PageSize | null>(null)
   const [renderError, setRenderError] = useState<{ pdf: PdfHandle; pageIndex: number; zoom: number; message: string } | null>(null)
   const gestureRef = useRef<DrawingGesture | null>(null)
@@ -95,6 +101,44 @@ export function PageView({
     })
     return () => { cancelled = true; controller.abort() }
   }, [pdf, pageIndex, zoom])
+
+  // Text selection belongs to the select tool only, so drawing never hits text spans.
+  useEffect(() => {
+    const layer = textLayerRef.current
+    if (!selectableText || !layer) return
+    const controller = new AbortController()
+    void pdf.renderTextLayer(pageIndex + 1, layer, zoom, controller.signal).then(value => {
+      if (controller.signal.aborted) return
+      const end = document.createElement('div')
+      end.className = 'endOfContent'
+      layer.append(end)
+      setHasText({ pdf, pageIndex, value })
+    }).catch(error => {
+      // Aborted layers are expected; a missing layer never blocks the page itself.
+      if (!controller.signal.aborted) console.warn(error)
+    })
+    return () => {
+      controller.abort()
+      const selection = window.getSelection()
+      if (selection?.anchorNode && layer.contains(selection.anchorNode)) selection.removeAllRanges()
+      layer.replaceChildren()
+    }
+  }, [pdf, pageIndex, zoom, selectableText])
+
+  useEffect(() => {
+    if (!noTextHint) return
+    const timer = setTimeout(() => setNoTextHint(false), 5000)
+    return () => clearTimeout(timer)
+  }, [noTextHint])
+
+  const onTextLayerKeyDown = (event: React.KeyboardEvent<HTMLDivElement>) => {
+    if (!(event.ctrlKey || event.metaKey) || event.key.toLowerCase() !== 'a') return
+    event.preventDefault()
+    const selection = window.getSelection(), range = document.createRange()
+    range.selectNodeContents(event.currentTarget)
+    selection?.removeAllRanges()
+    selection?.addRange(range)
+  }
 
   const onPagePointerDown = (event: React.PointerEvent<HTMLDivElement>) => {
     if (readOnly) return
@@ -220,6 +264,27 @@ export function PageView({
       onLostPointerCapture={cancelDrawing}
     >
       <canvas ref={canvasRef} />
+      {selectableText && <div
+        ref={textLayerRef}
+        className="textLayer"
+        tabIndex={0}
+        role="region"
+        aria-label={pageHasNoText ? `Seite ${pageIndex + 1}: keine Textebene` : `Text von Seite ${pageIndex + 1}, markierbar`}
+        onKeyDown={onTextLayerKeyDown}
+        onFocus={event => { if (pageHasNoText && event.currentTarget.matches(':focus-visible')) setNoTextHint(true) }}
+        onPointerDown={event => {
+          textPointerRef.current = { x: event.clientX, y: event.clientY }
+          event.currentTarget.classList.add('selecting')
+        }}
+        onPointerUp={event => {
+          event.currentTarget.classList.remove('selecting')
+          const start = textPointerRef.current
+          textPointerRef.current = null
+          if (pageHasNoText && start && Math.hypot(event.clientX - start.x, event.clientY - start.y) > 6) setNoTextHint(true)
+        }}
+        onPointerCancel={event => event.currentTarget.classList.remove('selecting')}
+      />}
+      {selectableText && pageHasNoText && noTextHint && <p role="status" className="page-no-text">Diese Seite hat keine Textebene. Text lässt sich hier nicht markieren.</p>}
       {renderError?.pdf === pdf && renderError.pageIndex === pageIndex && renderError.zoom === zoom && <p role="alert">{renderError.message}</p>}
       {pageSize && !!searchHits.length && <svg className="search-highlights" viewBox={`0 0 ${pageSize.width} ${pageSize.height}`} aria-hidden="true">
         {searchHits.flatMap((hit,index)=>hit.polygons.map((polygon,part)=><polygon key={`${index}-${part}`} data-search-active={hit===activeSearchHit?'true':undefined} points={polygon.map(p=>`${p.x},${p.y}`).join(' ')} className={hit===activeSearchHit?'active':''}/>))}

@@ -105,6 +105,7 @@ try {
     'redaction-geometry-smoke',
     'search-import-smoke',
     'large-document-smoke',
+    'text-selection-smoke',
     'compression-smoke',
     ...(syntheticOnly ? [] : ['mvp-real-smoke']),
   ]
