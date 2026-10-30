@@ -104,7 +104,9 @@ try {
   await page.locator('.pages').evaluate(container => {
     container.scrollTop = container.querySelectorAll('.page')[1].offsetTop - 16
   })
-  const secondSheet = await page.locator('.page').nth(1).boundingBox()
+  // The page swaps from placeholder to canvas while it scrolls in (T20).
+  await page.locator('.page[data-page-index="1"] canvas').waitFor()
+  const secondSheet = await page.locator('.page[data-page-index="1"]').boundingBox()
   await page.mouse.move(secondSheet.x + 90, secondSheet.y + 210)
   await page.mouse.down()
   await page.mouse.move(secondSheet.x + 240, secondSheet.y + 210)

@@ -1,9 +1,9 @@
 import { SourceTextPanel } from './SourceTextPanel'
 import type { SourceHistory } from './SourceTextPanel'
-import { ExportDialog, type PreparedExport } from './ExportDialog'
-import { checkExportAbort } from '../core/pdf/compressPdf'
-import type { ExportProgress, ExportSize } from '../core/pdf/exportPipeline'
-import { encryptInWorker, exportInWorker, preflightInWorker } from '../core/pdf/exportJob'
+import { ExportDialog } from './ExportDialog'
+import { useDraftPersistence, type ActiveDraft } from './useDraftPersistence'
+import { useExportFlow } from './useExportFlow'
+import { ToolbarTools } from './ToolbarTools'
 import { inspectStructures, type TextIssue } from '../core/pdf/preflight'
 import { setMetadataCommand, type MetadataEdit } from '../core/pdf/metadata'
 import { preparePdf, unlockPdf, PasswordRequiredError, IncorrectPasswordError } from '../core/pdf/unlockPdf'
@@ -19,23 +19,14 @@ import { useCallback, useEffect, useRef, useState, useSyncExternalStore } from '
 import { addImage, clearDrawing, nudgeImage, nudgeShape, nudgeTextbox, removeImage, removeShape, removeTextbox } from '../core/commands'
 import { EditorStore } from '../core/editorStore'
 import { cloneOverlay, createId, isImage, isMarker, isShape, isStroke, isTextbox } from '../core/model'
-import {
-  deleteDraft,
-  DRAFT_SIZE_WARN_BYTES,
-  listDrafts,
-  loadDraft,
-  openDraftDb,
-  saveDraft,
-  type DraftRecord,
-  type DraftSummary,
-} from '../core/persistence/drafts'
+import { deleteDraft, DRAFT_SIZE_WARN_BYTES, loadDraft } from '../core/persistence/drafts'
 import { loadPdf, type PdfHandle } from '../core/pdf/loadPdf'
 import { assertFileBudget } from '../core/pdf/documentBudget'
 import { importImage } from '../core/images/importImage'
 import { imageGeometry, initialImageGeometry, moveImage } from '../core/images/geometry'
 import { shapeGeometry, moveShape, type ShapeStyle } from '../core/shapes'
 import { ShapeToolbar } from './ShapeToolbar'
-import { SHAPE_TOOLS, isShapeTool } from './tools'
+import { isShapeTool } from './tools'
 import { zoomIn, zoomOut } from '../core/viewerState'
 import { DraftsMenu } from './DraftsMenu'
 import { DocumentMenu } from './DocumentMenu'
@@ -47,50 +38,21 @@ import { DrawingToolbar } from './DrawingToolbar'
 import { PageView } from './PageView'
 import { VirtualPage } from './VirtualPage'
 import { PagesManager } from './PagesManager'
-import { downloadPdf } from '../core/pdf/downloadPdf'
 import { composePages, inspectPages } from '../core/pdf/pageOperations'
 import { pageSize, type DocumentPage, type PageSource } from '../core/pages'
-import { SymbolPicker } from './SymbolPicker'
-import { StampPicker, type ChosenStamp } from './StampPicker'
+import type { ChosenStamp } from './StampPicker'
 import { renderStampImage } from './stampImage'
 import { stampOverlay } from '../core/stamps'
 import type { Tool } from './tools'
 import './app.css'
-
-interface ManualSave {
-  draftId: string
-  version: number
-  status: 'saving' | 'saved' | 'error'
-}
-
-interface ActiveDraft {
-  id: string
-  name: string
-  createdAt: number
-  bytes: ArrayBuffer
-}
-
-function draftSummary(record: DraftRecord): DraftSummary {
-  return {
-    id: record.id,
-    name: record.name,
-    updatedAt: record.updatedAt,
-    sizeBytes: record.pdfBytes.byteLength + (record.pageSources ?? []).filter(source => record.pages?.some(page => page.sourceId === source.id)).reduce((size, source) => size + source.bytes.byteLength, 0),
-    overlayCount: record.overlays.length,
-  }
-}
 
 export default function App() {
   const [sourceTextOpen, setSourceTextOpen] = useState(false)
   // Unchecked inline drafts of the correction panel come before document history.
   const [sourceHistory, setSourceHistory] = useState<SourceHistory | null>(null)
   const [exportDialogOpen, setExportDialogOpen] = useState(false)
-  const [exportBusy, setExportBusy] = useState(false)
   const [signedDocument, setSignedDocument] = useState<ArrayBuffer | null>(null)
   const [documentDialog, setDocumentDialog] = useState<'info' | 'labels' | 'ocr' | 'table' | null>(null)
-  // The export must describe the same editing state as the check the user read.
-  const checkedVersionRef = useRef<number | null>(null)
-  const exportRunningRef = useRef(false)
   const [searchOpen, setSearchOpen] = useState(false)
   const [searchResult, setSearchResult] = useState<{
     hits: SearchHit[]
@@ -136,19 +98,11 @@ export default function App() {
   const [error, setError] = useState<string | null>(null)
   const [selectedId, setSelectedId] = useState<string | null>(null)
   const [sizeWarning, setSizeWarning] = useState(false)
-  const [drafts, setDrafts] = useState<DraftSummary[]>([])
-  const [draftsError, setDraftsError] = useState<string | null>(null)
   const [activeDraftId, setActiveDraftId] = useState<string | null>(null)
-  const [manualSave, setManualSave] = useState<ManualSave | null>(null)
-  const manualSaveRequestRef = useRef<object | null>(null)
-  const inputEpochRef = useRef(0)
   const [loadingDraftId, setLoadingDraftId] = useState<string | null>(null)
   // Current handle in a ref so destroy() runs outside React state updaters
   // (updaters must stay pure; StrictMode double-invokes them in dev).
   const pdfRef = useRef<PdfHandle | null>(null)
-  // Active auto-save draft + lazily opened IndexedDB handle.
-  const draftRef = useRef<ActiveDraft | null>(null)
-  const dbRef = useRef<IDBDatabase | null>(null)
   const fileInputRef = useRef<HTMLInputElement>(null)
   const imageInputRef = useRef<HTMLInputElement>(null)
   const documentIntentRef = useRef(0)
@@ -171,14 +125,16 @@ export default function App() {
     return best
   }, [])
   const onViewedPage = useCallback((index: number) => { viewedPageRef.current = index }, [])
-  const saveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
-  const saveQueueRef = useRef<Promise<void>>(Promise.resolve())
-  const persistenceGenerationRef = useRef(0)
 
   // Editor state lives in the framework-free store (ADR-002/ADR-004);
   // React re-renders on store notifications.
   const [store] = useState(() => new EditorStore())
   useSyncExternalStore(store.subscribe, store.getVersion)
+  const {
+    drafts, setDrafts, draftsError, setDraftsError, manualSave, setManualSave, manualSaveRequestRef, inputEpochRef,
+    draftRef, saveTimerRef, persistenceGenerationRef, ensureDraftDb, queuePersistence, reportDraftProblem,
+    persistActiveDraft, onManualSave, onDraftsMenuOpen,
+  } = useDraftPersistence(store)
   const redactions = store.state.redactions ?? []
   const overlays = store.state.overlays
   const documentPages = store.state.pages
@@ -202,6 +158,7 @@ export default function App() {
   }, [originalBytes])
   const pageBusy = !!documentPages?.length && renderedPages !== documentPages
   const tableOpen = documentDialog === 'table'
+  const { exportBusy, checkExport, prepareExport, downloadExport } = useExportFlow(store, draftRef, documentIntentRef, pageBusy)
   useEffect(() => {
     if (!documentPages || !draftRef.current || pdfPagesRef.current === documentPages) return
     const draft = draftRef.current, sources = [...(store.state.pageSources ?? [])]
@@ -220,7 +177,7 @@ export default function App() {
       if (!cancelled) {setError(problem instanceof Error ? problem.message : 'Die Seiten konnten nicht aktualisiert werden.')}
     })
     return () => {cancelled = true}
-  }, [documentPages, store])
+  }, [documentPages, store, draftRef])
   const selectedShape = overlays.find(o=>o.id===selectedId && isShape(o))
   const shapePage = selectedShape?.pageIndex
   useEffect(()=>{
@@ -228,120 +185,6 @@ export default function App() {
     if(pdf && shapePage!==undefined) void pdf.getPageSize(shapePage+1).then(size=>{if(!cancelled)setShapePageSize({pdf,pageIndex:shapePage,size})})
     return ()=>{cancelled=true}
   },[pdf,shapePage])
-
-  const ensureDraftDb = useCallback(async () => {
-    dbRef.current ??= await openDraftDb()
-    return dbRef.current
-  }, [])
-
-  // IndexedDB operations are serialized. That keeps delete-after-autosave and
-  // document switches deterministic even when a debounced save is in flight.
-  const queuePersistence = useCallback(<T,>(work: () => Promise<T>): Promise<T> => {
-    const queued = saveQueueRef.current.then(work)
-    saveQueueRef.current = queued.then(
-      () => undefined,
-      () => undefined,
-    )
-    return queued
-  }, [])
-
-  const rememberDraft = useCallback((record: DraftRecord) => {
-    const summary = draftSummary(record)
-    setDrafts((current) =>
-      [summary, ...current.filter((draft) => draft.id !== summary.id)].sort((a, b) => b.updatedAt - a.updatedAt),
-    )
-  }, [])
-
-  const reportDraftProblem = useCallback((problem: unknown, message: string) => {
-    console.warn(message, problem)
-    setDraftsError(message)
-  }, [])
-
-  const persistActiveDraft = useCallback(async () => {
-    if (saveTimerRef.current) {
-      clearTimeout(saveTimerRef.current)
-      saveTimerRef.current = null
-    }
-    const draft = draftRef.current
-    if (!draft) return null
-    const generation = persistenceGenerationRef.current
-    // Copy the overlays now: the record must describe this save point even if
-    // the user keeps editing while the queued IndexedDB write is waiting.
-    const overlaysSnapshot = store.state.overlays.map(cloneOverlay)
-    const redactionAppliedSnapshot = store.state.redactionApplied
-    const redactionSnapshot = structuredClone(store.state.redactions ?? [])
-    const formSnapshot = store.state.formValues ? structuredClone(store.state.formValues) : undefined
-    const pagesSnapshot = store.state.pages ? structuredClone(store.state.pages) : undefined
-    const metadataSnapshot = store.state.metadata ? structuredClone(store.state.metadata) : undefined
-    const sourcesSnapshot = [...(store.state.pageSources ?? [])]
-    const record = await queuePersistence(async () => {
-      if (generation !== persistenceGenerationRef.current) return null
-      const db = await ensureDraftDb()
-      return saveDraft(db, {
-        id: draft.id,
-        name: draft.name,
-        createdAt: draft.createdAt,
-        pdfBytes: draft.bytes,
-        overlays: overlaysSnapshot,
-        pages: pagesSnapshot,
-        pageSources: sourcesSnapshot,
-        formValues: formSnapshot,
-        redactionApplied: redactionAppliedSnapshot,
-        redactions: redactionSnapshot,
-        metadata: metadataSnapshot,
-      })
-    })
-    if (record) {
-      rememberDraft(record)
-      setDraftsError(null)
-    }
-    return record
-  }, [ensureDraftDb, queuePersistence, rememberDraft, store])
-
-  const onManualSave = useCallback(async () => {
-    const draft = draftRef.current
-    if (!draft || (manualSave?.draftId === draft.id && manualSave.status === 'saving')) return
-    const request = {}
-    manualSaveRequestRef.current = request
-    const generation = persistenceGenerationRef.current
-    const version = store.getVersion()
-    const inputEpoch = inputEpochRef.current
-    const stillCurrent = () => manualSaveRequestRef.current === request &&
-      draftRef.current?.id === draft.id && persistenceGenerationRef.current === generation
-    setManualSave({ draftId: draft.id, version, status: 'saving' })
-    try {
-      // A normal button click blurs the active textarea first, committing its
-      // text before persistActiveDraft snapshots and queues this save point.
-      const record = await persistActiveDraft()
-      if (!stillCurrent()) return
-      setManualSave(record && store.getVersion() === version && inputEpochRef.current === inputEpoch
-        ? { draftId: draft.id, version, status: 'saved' } : null)
-    } catch (problem) {
-      if (!stillCurrent()) return
-      reportDraftProblem(problem, 'Der Entwurf konnte nicht gespeichert werden. Bitte erneut versuchen.')
-      setManualSave({ draftId: draft.id, version, status: 'error' })
-    }
-  }, [manualSave, persistActiveDraft, reportDraftProblem, store])
-
-  const refreshDrafts = useCallback(async () => {
-    const list = await queuePersistence(async () => listDrafts(await ensureDraftDb()))
-    setDrafts(list)
-    setDraftsError(null)
-  }, [ensureDraftDb, queuePersistence])
-
-  useEffect(() => {
-    let cancelled = false
-    void queuePersistence(async () => listDrafts(await ensureDraftDb()))
-      .then((list) => {
-        if (!cancelled) setDrafts(list)
-      })
-      .catch((problem) => {
-        if (!cancelled) reportDraftProblem(problem, 'Gespeicherte Entwürfe sind auf diesem Gerät nicht verfügbar.')
-      })
-    return () => {
-      cancelled = true
-    }
-  }, [ensureDraftDb, queuePersistence, reportDraftProblem])
 
   const replaceDocument = useCallback(
     (next: PdfHandle, draft: ActiveDraft, nextOverlays: typeof store.state.overlays, pages: DocumentPage[], sources: PageSource[] = [], formValues?: FormValues, pendingRedactions?: Redaction[], redactionApplied?: boolean, metadata?: MetadataEdit) => {
@@ -373,7 +216,7 @@ export default function App() {
       setRenderedPages(store.state.pages)
       void previous?.destroy()
     },
-    [store],
+    [store, draftRef, manualSaveRequestRef, persistenceGenerationRef, saveTimerRef, setManualSave],
   )
 
   const onOpenFile = useCallback(
@@ -498,7 +341,7 @@ export default function App() {
         setLoadingDraftId(null)
       }
     },
-    [ensureDraftDb, loadingDraftId, persistActiveDraft, queuePersistence, replaceDocument, reportDraftProblem],
+    [ensureDraftDb, loadingDraftId, persistActiveDraft, queuePersistence, replaceDocument, reportDraftProblem, setDrafts],
   )
 
   const onDeleteDraft = useCallback(
@@ -546,38 +389,11 @@ export default function App() {
         reportDraftProblem(problem, 'Der Entwurf konnte nicht gelöscht werden.')
       }
     },
-    [activeDraftId, drafts, ensureDraftDb, persistActiveDraft, queuePersistence, reportDraftProblem, store],
+    [activeDraftId, draftRef, drafts, ensureDraftDb, manualSaveRequestRef, persistActiveDraft, persistenceGenerationRef, queuePersistence, reportDraftProblem, saveTimerRef, setDrafts, setDraftsError, setManualSave, store],
   )
-
-  const onDraftsMenuOpen = useCallback(() => {
-    void (async () => {
-      await persistActiveDraft()
-      await refreshDrafts()
-    })().catch((problem) => reportDraftProblem(problem, 'Die Entwurfsliste konnte nicht aktualisiert werden.'))
-  }, [persistActiveDraft, refreshDrafts, reportDraftProblem])
 
   // Release the worker document when the app unmounts.
   useEffect(() => () => { documentIntentRef.current += 1; passwordPending.current?.(null); void pdfRef.current?.destroy() }, [])
-
-  // Auto-save: every store change (edits, moves, deletes) persists the draft
-  // to IndexedDB, debounced so gestures like dragging or typing coalesce.
-  useEffect(() => {
-    const unsubscribe = store.subscribe(() => {
-      if (!draftRef.current) return
-      if (saveTimerRef.current) clearTimeout(saveTimerRef.current)
-      saveTimerRef.current = setTimeout(() => {
-        saveTimerRef.current = null
-        // Persistence must never break editing (e.g. private browsing).
-        void persistActiveDraft().catch((problem) =>
-          reportDraftProblem(problem, 'Der Entwurf konnte nicht gespeichert werden.'),
-        )
-      }, 500)
-    })
-    return () => {
-      unsubscribe()
-      if (saveTimerRef.current) clearTimeout(saveTimerRef.current)
-    }
-  }, [persistActiveDraft, reportDraftProblem, store])
 
   const onImportImage = useCallback(async (file: File, targetPage?: number, dropPoint?: { x: number; y: number }) => {
     const handle = pdfRef.current
@@ -752,18 +568,6 @@ export default function App() {
     return () => cancelAnimationFrame(frame)
   }, [pageManagerOpen, sourceTextOpen, tableOpen, pageBusy, pdf])
 
-  const checkExport = useCallback(async (signal: AbortSignal) => {
-    const draft = draftRef.current
-    if (!draft || !store.state.pages?.length) throw new Error('Der Export ist gerade nicht verfügbar.')
-    const version = store.getVersion()
-    const report = await preflightInWorker({
-      original: new Uint8Array(draft.bytes), sources: store.state.pageSources ?? [], pages: store.state.pages,
-      overlays: store.state.overlays.map(cloneOverlay),
-      secure: !!store.state.redactionApplied || store.state.pages.some(page => page.redacted),
-    }, { signal })
-    checkedVersionRef.current = version
-    return report
-  }, [store])
   const jumpToIssue = useCallback((issue: TextIssue) => {
     setExportDialogOpen(false)
     setPageManagerOpen(false)
@@ -772,51 +576,6 @@ export default function App() {
     setSelectedId(issue.overlayId)
     requestAnimationFrame(() => workspaceRef.current?.querySelector(`.page[data-page-index="${issue.pageIndex}"]`)?.scrollIntoView({ block: 'center' }))
   }, [])
-  const prepareExport = useCallback(
-    async (size: ExportSize, signal: AbortSignal, onProgress: (progress: ExportProgress) => void): Promise<PreparedExport> => {
-      const draft = draftRef.current
-      if (!draft || !store.state.pages?.length || pageBusy || exportRunningRef.current)
-        throw new Error('Der Export ist gerade nicht verfügbar.')
-      exportRunningRef.current = true
-      setExportBusy(true)
-      const version = store.getVersion(), intent = documentIntentRef.current
-      try {
-        checkExportAbort(signal)
-        if (store.state.redactions?.length)
-          throw new Error('Vorgemerkte Schwärzungen zuerst anwenden oder verwerfen; sie sind noch nicht sicher entfernt.')
-        if (checkedVersionRef.current !== store.getVersion())
-          throw new Error('Der Stand hat sich seit der Prüfung geändert. Bitte den Export neu öffnen.')
-        const result = await exportInWorker({
-          original: new Uint8Array(draft.bytes), sources: store.state.pageSources ?? [], pages: store.state.pages,
-          overlays: store.state.overlays.map(cloneOverlay), formValues: store.state.formValues,
-          secure: !!store.state.redactionApplied || store.state.pages.some(page => page.redacted), size,
-          metadata: store.state.metadata,
-        }, { signal, onProgress })
-        checkExportAbort(signal)
-        // An outdated result is thrown away, whatever changed in the meantime.
-        if (draftRef.current !== draft || documentIntentRef.current !== intent || store.getVersion() !== version)
-          throw new Error('Das Dokument hat sich während des Exports geändert. Bitte erneut exportieren.')
-        return { name: draft.name, ...result }
-      } finally {
-        exportRunningRef.current = false
-        setExportBusy(false)
-      }
-    }, [store, pageBusy],
-  )
-  const downloadExport = useCallback(async (bytes: Uint8Array, name: string, password: string | undefined, signal: AbortSignal) => {
-    exportRunningRef.current = true
-    setExportBusy(true)
-    try {
-      checkExportAbort(signal)
-      const output = password === undefined ? bytes : await encryptInWorker(bytes, password, { signal })
-      checkExportAbort(signal)
-      downloadPdf(output, name)
-    } finally {
-      exportRunningRef.current = false
-      setExportBusy(false)
-    }
-  }, [])
-
   const onApplyRedactions = async () => {
     const draft=draftRef.current,version=store.getVersion(),intent=documentIntentRef.current
     if(!draft||redactionBusy||pageBusy||!store.state.redactions?.length)return
@@ -836,32 +595,6 @@ export default function App() {
     : visibleSave?.status === 'saved' ? '✓ Entwurf gespeichert · Nur auf diesem Gerät.'
     : visibleSave?.status === 'error' ? 'Der Entwurf konnte nicht gespeichert werden. Bitte erneut versuchen.'
     : 'Automatisches Speichern ist aktiv · Entwürfe bleiben unverschlüsselt auf diesem Gerät.'
-
-  const shapeToolButton = (option: (typeof SHAPE_TOOLS)[number]) => (
-    <button
-      key={option.tool}
-      type="button"
-      className="tool"
-      aria-label={option.label}
-      aria-pressed={tool === option.tool}
-      onClick={() => {
-        setSelectedId(null)
-        setTool(option.tool)
-      }}
-    >
-      <svg
-        className="tool-icon"
-        viewBox="0 0 24 24"
-        fill="none"
-        stroke="currentColor"
-        strokeWidth="1.7"
-        aria-hidden="true"
-      >
-        <path d={option.path} />
-      </svg>
-      {option.label}
-    </button>
-  )
 
   return (
     <div className="app" onDragOverCapture={event=>{if(event.dataTransfer.types.includes('Files')){event.preventDefault();event.dataTransfer.dropEffect='copy'}}}
@@ -1100,163 +833,15 @@ export default function App() {
           )}
         </div>
         {pdf && !pageManagerOpen && !sourceTextOpen && !tableOpen && (
-          <div
-            className="toolbar-tools"
-            role="group"
-            aria-label="Bearbeitungswerkzeuge"
-          >
-            <div
-              className="toolbar-tool-group"
-              role="group"
-              aria-label="Einfügen und Auswählen"
-            >
-              <span className="toolbar-group-label" aria-hidden="true">
-                Einfügen und Auswählen
-              </span>
-              <div className="toolbar-group-actions">
-                <button
-                  type="button"
-                  className="tool"
-                  aria-pressed={tool === 'select'}
-                  title="Auswahl-Werkzeug (Esc)"
-                  onClick={() => setTool('select')}
-                >
-                  ⬚ Auswahl
-                </button>
-                <button
-                  type="button"
-                  className="tool"
-                  aria-pressed={tool === 'text'}
-                  title="Text-Werkzeug"
-                  onClick={() => setTool('text')}
-                >
-                  T Text
-                </button>
-                <button
-                  type="button"
-                  onClick={() => imageInputRef.current?.click()}
-                  aria-label="Bild einfügen"
-                  title="PNG- oder JPG-Bild einfügen · auch per Drag & Drop"
-                >
-                  + Bild<span className="compact-hide"> einfügen</span>
-                </button>
-                <SymbolPicker
-                  value={symbol}
-                  active={tool === 'symbol'}
-                  onPick={(nextSymbol) => {
-                    setSymbol(nextSymbol)
-                    setTool('symbol')
-                  }}
-                />
-                <StampPicker
-                  active={tool === 'stamp'}
-                  onPick={(chosen) => {
-                    setSelectedId(null)
-                    setStamp(chosen)
-                    setTool('stamp')
-                  }}
-                />
-              </div>
-            </div>
-            <div
-              className="toolbar-tool-group"
-              role="group"
-              aria-label="Zeichnen"
-            >
-              <span className="toolbar-group-label" aria-hidden="true">
-                Zeichnen
-              </span>
-              <div className="toolbar-group-actions">
-                <button
-                  type="button"
-                  className="tool"
-                  aria-label="Stift"
-                  aria-pressed={tool === 'pen'}
-                  onClick={() => {
-                    setSelectedId(null)
-                    setTool('pen')
-                  }}
-                >
-                  <svg
-                    className="tool-icon"
-                    viewBox="0 0 24 24"
-                    fill="none"
-                    stroke="currentColor"
-                    strokeWidth="1.7"
-                    strokeLinecap="round"
-                    strokeLinejoin="round"
-                    aria-hidden="true"
-                  >
-                    <path d="m 4 16 12 -12 4 4 -12 12 -5 1 1 -5 M 13 7 l 4 4" />
-                  </svg>
-                  Stift
-                </button>
-                <button
-                  type="button"
-                  className="tool"
-                  aria-label="Radierer"
-                  aria-pressed={tool === 'eraser'}
-                  onClick={() => {
-                    setSelectedId(null)
-                    setTool('eraser')
-                  }}
-                >
-                  <svg
-                    className="tool-icon"
-                    viewBox="0 0 24 24"
-                    fill="none"
-                    stroke="currentColor"
-                    strokeWidth="1.7"
-                    strokeLinecap="round"
-                    strokeLinejoin="round"
-                    aria-hidden="true"
-                  >
-                    <path d="m 4 14 10 -10 7 7 -10 10 H 7 l -3 -3 Z M 9 9 l 7 7 M 11 21 h 10" />
-                  </svg>
-                  Radierer
-                </button>
-                {SHAPE_TOOLS.filter((option) => option.tool === 'marker').map(
-                  shapeToolButton,
-                )}
-              </div>
-            </div>
-            <div
-              className="toolbar-tool-group toolbar-form-group"
-              role="group"
-              aria-label="Formen"
-            >
-              <span className="toolbar-group-label" aria-hidden="true">
-                Formen
-              </span>
-              <div className="toolbar-group-actions">
-                {SHAPE_TOOLS.filter((option) => option.tool !== 'marker').map(
-                  shapeToolButton,
-                )}
-              </div>
-            </div>
-            <div
-              className="toolbar-tool-group toolbar-confidential-group"
-              role="group"
-              aria-label="Vertraulich"
-            >
-              <span className="toolbar-group-label" aria-hidden="true">
-                Vertraulich
-              </span>
-              <div className="toolbar-group-actions">
-                <button
-                  type="button"
-                  className="tool"
-                  aria-pressed={tool === 'redact'}
-                  onClick={() => {
-                    setSelectedId(null)
-                    setTool('redact')
-                  }}
-                >
-                  Schwärzen
-                </button>
-              </div>
-            </div>
-          </div>
+          <ToolbarTools
+            tool={tool}
+            symbol={symbol}
+            imageInputRef={imageInputRef}
+            onTool={setTool}
+            onClearSelection={() => setSelectedId(null)}
+            onSymbol={setSymbol}
+            onStamp={setStamp}
+          />
         )}
       </header>
       {pdf && <p className="draft-save-status" role={visibleSave?.status === 'error' ? 'alert' : 'status'}>
