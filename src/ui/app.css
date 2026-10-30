@@ -1311,3 +1311,19 @@
 
 .source-pages button { position:relative; }
 .source-page-mark { position:absolute; top:4px; right:4px; background:#2f7d4f; color:white; border-radius:8px; padding:1px 6px; font-size:11px; line-height:16px; }
+
+/* T17 to T26: these dialogs and popovers build on shared rules and override them here. */
+.password-dialog.page-labels-dialog, .password-dialog.ocr-dialog { width: 760px; text-align: left; }
+.password-dialog.document-info-dialog { text-align: left; }
+.page-labels-fields label { margin: 0; }
+.page-labels-fields input, .page-labels-row select { margin-top: 4px; padding: 8px; }
+.symbol-popover.stamp-popover { grid-template-columns: minmax(0, 1fr); width: 260px; padding: 8px; gap: 6px; text-align: left; line-height: 1.35; }
+.table-panel { text-align: left; }
+.table-grid input { width: 140px; }
+.export-dialog .export-size .export-toggle { margin: 6px 0; }
+.export-size .export-toggle strong, .export-size .export-toggle small { line-height: 1.35; }
+.export-size .export-toggle small { margin-top: 1px; }
+.export-dialog .password-actions { position: sticky; bottom: -20px; z-index: 1; padding-block: 10px; margin-bottom: -10px; background: var(--bg); }
+.password-dialog .export-primary { background: #7132c1; border-color: #7132c1; color: white; }
+.password-dialog button:disabled { opacity: .5; cursor: default; }
+.stamp-chip { display: inline-flex; align-items: center; height: 22px; box-sizing: border-box; }
