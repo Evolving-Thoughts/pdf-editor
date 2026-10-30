@@ -110,6 +110,7 @@ try {
     'compression-smoke',
     'structure-optimization-smoke',
     'export-worker-smoke',
+    'metadata-smoke',
     ...(syntheticOnly ? [] : ['mvp-real-smoke']),
   ]
   for (const name of scripts) {

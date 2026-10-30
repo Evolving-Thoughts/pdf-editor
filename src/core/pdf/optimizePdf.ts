@@ -107,7 +107,8 @@ function deflatePlainStreams(doc: PDFDocument): void {
   }
 }
 
-function dropUnreachableObjects(doc: PDFDocument): void {
+/** Objects nothing refers to stay readable in the file until they are dropped. */
+export function dropUnreachableObjects(doc: PDFDocument): void {
   const reached = new Set<PDFRef>(), pending: PDFObject[] = [doc.context.trailerInfo.Root as PDFObject]
   if (doc.context.trailerInfo.Info) pending.push(doc.context.trailerInfo.Info as PDFObject)
   while (pending.length) {

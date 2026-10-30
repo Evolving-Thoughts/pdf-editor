@@ -1,6 +1,7 @@
 import type { Redaction } from './redactions'
 import type { FormValues } from './forms'
 import type { DocumentPage, PageSource } from './pages'
+import type { MetadataEdit } from './pdf/metadata'
 // Domain model for overlay elements. Pure data, no framework, no PDF libraries.
 
 /** 'zapfdingbats' = symbol font; the text then holds Unicode symbols (✓, ■, …). */
@@ -126,6 +127,8 @@ export interface EditorState {
   pages?: DocumentPage[]
   pageSources?: PageSource[]
   overlays: Overlay[]
+  /** Decisions about document info; the export writes them. */
+  metadata?: MetadataEdit
 }
 
 let counter = 0

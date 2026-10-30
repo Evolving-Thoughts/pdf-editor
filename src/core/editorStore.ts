@@ -5,6 +5,7 @@ import type { DocumentPage, PageSource } from './pages'
 // stack (ADR-002). Framework-free; the UI subscribes and re-renders.
 import { CommandStack, type Command } from './commands'
 import { cloneOverlay, type EditorState, type Overlay } from './model'
+import type { MetadataEdit } from './pdf/metadata'
 
 export class EditorStore {
   readonly state: EditorState = { overlays: [] }
@@ -56,18 +57,20 @@ export class EditorStore {
     this.state.overlays = []
     this.state.pages = undefined
     this.state.pageSources = undefined
+    this.state.metadata = undefined
     this.stack = new CommandStack(this.state)
     this.notify()
   }
 
   /** Replaces overlays with a stored draft's state and clears history. */
-  restore(overlays: Overlay[], pages?: DocumentPage[], sources?: PageSource[], formValues?: FormValues, redactions?: Redaction[], redactionApplied?: boolean): void {
+  restore(overlays: Overlay[], pages?: DocumentPage[], sources?: PageSource[], formValues?: FormValues, redactions?: Redaction[], redactionApplied?: boolean, metadata?: MetadataEdit): void {
     this.state.redactionApplied = redactionApplied
     this.state.redactions = redactions ? structuredClone(redactions) : undefined
     this.state.formValues = formValues ? structuredClone(formValues) : undefined
     this.state.overlays = overlays.map(cloneOverlay)
     this.state.pages = pages ? structuredClone(pages) : undefined
     this.state.pageSources = sources ? [...sources] : undefined
+    this.state.metadata = metadata ? structuredClone(metadata) : undefined
     this.stack = new CommandStack(this.state)
     this.notify()
   }

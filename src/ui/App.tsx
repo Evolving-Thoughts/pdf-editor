@@ -5,6 +5,7 @@ import { checkExportAbort } from '../core/pdf/compressPdf'
 import type { ExportProgress, ExportSize } from '../core/pdf/exportPipeline'
 import { encryptInWorker, exportInWorker, preflightInWorker } from '../core/pdf/exportJob'
 import { inspectStructures, type TextIssue } from '../core/pdf/preflight'
+import { setMetadataCommand, type MetadataEdit } from '../core/pdf/metadata'
 import { preparePdf, unlockPdf, PasswordRequiredError, IncorrectPasswordError } from '../core/pdf/unlockPdf'
 import { PasswordDialog, type PasswordRequest } from './PasswordDialog'
 import { SearchWindow } from './SearchWindow'
@@ -37,6 +38,8 @@ import { ShapeToolbar } from './ShapeToolbar'
 import { SHAPE_TOOLS, isShapeTool } from './tools'
 import { zoomIn, zoomOut } from '../core/viewerState'
 import { DraftsMenu } from './DraftsMenu'
+import { DocumentMenu } from './DocumentMenu'
+import { DocumentInfoDialog } from './DocumentInfoDialog'
 import { DrawingToolbar } from './DrawingToolbar'
 import { PageView } from './PageView'
 import { VirtualPage } from './VirtualPage'
@@ -78,6 +81,7 @@ export default function App() {
   const [exportDialogOpen, setExportDialogOpen] = useState(false)
   const [exportBusy, setExportBusy] = useState(false)
   const [signedDocument, setSignedDocument] = useState<ArrayBuffer | null>(null)
+  const [documentDialog, setDocumentDialog] = useState<'info' | null>(null)
   // The export must describe the same editing state as the check the user read.
   const checkedVersionRef = useRef<number | null>(null)
   const exportRunningRef = useRef(false)
@@ -260,6 +264,7 @@ export default function App() {
     const redactionSnapshot = structuredClone(store.state.redactions ?? [])
     const formSnapshot = store.state.formValues ? structuredClone(store.state.formValues) : undefined
     const pagesSnapshot = store.state.pages ? structuredClone(store.state.pages) : undefined
+    const metadataSnapshot = store.state.metadata ? structuredClone(store.state.metadata) : undefined
     const sourcesSnapshot = [...(store.state.pageSources ?? [])]
     const record = await queuePersistence(async () => {
       if (generation !== persistenceGenerationRef.current) return null
@@ -275,6 +280,7 @@ export default function App() {
         formValues: formSnapshot,
         redactionApplied: redactionAppliedSnapshot,
         redactions: redactionSnapshot,
+        metadata: metadataSnapshot,
       })
     })
     if (record) {
@@ -330,7 +336,7 @@ export default function App() {
   }, [ensureDraftDb, queuePersistence, reportDraftProblem])
 
   const replaceDocument = useCallback(
-    (next: PdfHandle, draft: ActiveDraft, nextOverlays: typeof store.state.overlays, pages: DocumentPage[], sources: PageSource[] = [], formValues?: FormValues, pendingRedactions?: Redaction[], redactionApplied?: boolean) => {
+    (next: PdfHandle, draft: ActiveDraft, nextOverlays: typeof store.state.overlays, pages: DocumentPage[], sources: PageSource[] = [], formValues?: FormValues, pendingRedactions?: Redaction[], redactionApplied?: boolean, metadata?: MetadataEdit) => {
       documentIntentRef.current += 1
       persistenceGenerationRef.current += 1
       if (saveTimerRef.current) {
@@ -350,10 +356,11 @@ export default function App() {
       setRedactionFill('black')
       setPageManagerOpen(false)
       setCropActive(false)
+      setDocumentDialog(null)
       setOriginalBytes(draft.bytes)
       setSizeWarning(draft.bytes.byteLength > DRAFT_SIZE_WARN_BYTES)
       setPdf(next)
-      store.restore(nextOverlays, pages, sources, formValues, pendingRedactions, redactionApplied)
+      store.restore(nextOverlays, pages, sources, formValues, pendingRedactions, redactionApplied, metadata)
       pdfPagesRef.current = store.state.pages
       setRenderedPages(store.state.pages)
       void previous?.destroy()
@@ -475,7 +482,7 @@ export default function App() {
           next,
           { id: record.id, name: record.name, createdAt: record.createdAt, bytes },
           record.overlays.map(cloneOverlay),
-          pages, sources, record.formValues, record.redactions, record.redactionApplied,
+          pages, sources, record.formValues, record.redactions, record.redactionApplied, record.metadata,
         )
       } catch {
         if(documentIntentRef.current===intent)setError('Der Entwurf konnte nicht geöffnet werden.')
@@ -766,6 +773,7 @@ export default function App() {
           original: new Uint8Array(draft.bytes), sources: store.state.pageSources ?? [], pages: store.state.pages,
           overlays: store.state.overlays.map(cloneOverlay), formValues: store.state.formValues,
           secure: !!store.state.redactionApplied || store.state.pages.some(page => page.redacted), size,
+          metadata: store.state.metadata,
         }, { signal, onProgress })
         checkExportAbort(signal)
         // An outdated result is thrown away, whatever changed in the meantime.
@@ -978,6 +986,10 @@ export default function App() {
                 >
                   Suchen
                 </button>
+                <DocumentMenu
+                  disabled={pageBusy || cropActive || redactions.length > 0}
+                  items={[{ label: 'Dokumentinfo …', onSelect: () => setDocumentDialog('info') }]}
+                />
                 {!pageManagerOpen && (
                   <div className="toolbar-zoom">
                     <button
@@ -1288,6 +1300,7 @@ export default function App() {
         </>}
       </div>
       {exportDialogOpen && <ExportDialog onCancel={()=>setExportDialogOpen(false)} onCheck={checkExport} onJump={jumpToIssue} onPrepare={prepareExport} onDownload={downloadExport}/> }
+      {documentDialog === 'info' && originalBytes && <DocumentInfoDialog original={originalBytes} edit={store.state.metadata} onApply={edit => store.dispatch(setMetadataCommand(store.state.metadata, edit))} onClose={() => setDocumentDialog(null)} />}
       {passwordRequest && <PasswordDialog key={passwordEpoch.current} request={passwordRequest}/>}
       {pdf && !pageManagerOpen && !sourceTextOpen && !pageBusy && (
         <footer

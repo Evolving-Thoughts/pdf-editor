@@ -77,7 +77,7 @@ export async function composePages(
     return original.slice()
   }
 
-  const output = await PDFDocument.create()
+  const output = await PDFDocument.create({ updateMetadata: false })
   const loaded = new Map<string, { doc: PDFDocument; copier: PDFObjectCopier }>()
   for (const page of pages) {
     let source = loaded.get(page.sourceId)

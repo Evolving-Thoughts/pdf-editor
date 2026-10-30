@@ -90,7 +90,8 @@ export async function embedOverlayFont(doc: PDFDocument, overlay: Textbox, fonts
 }
 
 export async function exportPdf(bytes: Uint8Array, overlays: Overlay[] = []): Promise<Uint8Array> {
-  const doc = await PDFDocument.load(bytes)
+  // No library entries: metadata is decided in T24 and must not come back by itself.
+  const doc = await PDFDocument.load(bytes, { updateMetadata: false })
   const fonts = new Map<string, PDFFont>()
   const images = new Map<string, PDFImage>()
   for (const overlay of overlays) {
