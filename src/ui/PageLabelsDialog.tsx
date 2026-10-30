@@ -141,7 +141,7 @@ export function PageLabelsDialog({ pdf, store, onClose }: { pdf: PdfHandle; stor
           <input type="checkbox" checked={accepted} onChange={event => setAccepted(event.target.checked)} />
           <span>Überdeckt vorhandene Inhalte auf {hits.length === 1 ? 'Seite' : 'den Seiten'} {hits.slice(0, 8).map(index => index + 1).join(', ')}{hits.length > 8 ? ' und weiteren' : ''}. Trotzdem anwenden.</span>
         </label>}
-        <p className="export-detail">Die Prüfung erkennt Text und Overlays, aber keine Bilder im PDF. Die Vorschau zeigt die echte Seite. Ein zweites Anwenden an derselben Position ersetzt die Beschriftung. Nach dem Umsortieren von Seiten bitte neu anwenden.</p>
+        <p className="export-detail">Die Prüfung erkennt Text und Overlays, aber keine Bilder im PDF. Die Vorschau zeigt die echte Seite. Ein zweites Anwenden an derselben Position ersetzt die Beschriftung. Die Nummern folgen automatisch, wenn Seiten umsortiert oder gelöscht werden. Von Hand geänderte Beschriftungen bleiben, wie sie sind.</p>
         <div className="password-actions">
           <button type="button" onClick={onClose}>Abbrechen</button>
           <button type="submit" className="export-primary" disabled={!checked || (!!hits?.length && !accepted)}>{plan.labels.length ? `Auf ${plan.labels.length} ${plan.labels.length === 1 ? 'Seite' : 'Seiten'} anwenden` : 'Anwenden'}</button>

@@ -94,6 +94,18 @@ for (const item of found) {
   assert.ok(Math.abs(item.center - item.width / 2) <= 2, `centered on page ${item.page}`)
   assert.equal(item.fromBottom, 28)
 }
+// Reordering afterwards: the numbers follow without applying again.
+await page.getByRole('button', { name: 'Seiten verwalten', exact: true }).click()
+await page.getByRole('button', { name: 'Seite 3 nach oben', exact: true }).click()
+await page.waitForTimeout(600)
+await page.getByRole('button', { name: 'Zur Dokumentbearbeitung', exact: true }).click()
+await page.waitForSelector('.pages .page canvas')
+const [second] = await Promise.all([page.waitForEvent('download'), (async () => {
+  await page.getByRole('button', { name: 'Exportieren', exact: true }).click()
+  await confirmDefaultExport(page)
+})()])
+const moved = await labels(new Uint8Array(readFileSync(await second.path())))
+assert.deepEqual(moved.map(item => [item.page, item.text]), [[2, 'Seite 7'], [3, 'Seite 8']], 'labelled pages keep counting in page order')
 assert.deepEqual(errors, [])
 console.log('PASS page labels: Vorschau, Bereiche, Überdeckung, Undo, Ersetzen, Export')
 await browser.close()

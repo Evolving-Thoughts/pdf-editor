@@ -1,5 +1,6 @@
 // Repeating text on chosen pages (T22). Labels are ordinary textboxes, so they stay
 // editable, undoable and real PDF text. Geometry is in displayed page points.
+import { labelText } from './labelNumbers'
 import { createId, isImage, isShape, isTextbox, type Overlay, type OverlayFont, type Textbox } from './model'
 import { TEXT_LINE_HEIGHT } from './textLayout'
 import type { DocumentPage } from './pages'
@@ -39,9 +40,7 @@ export function parsePageRange(text: string, total: number): number[] {
   return [...pages].sort((a, b) => a - b)
 }
 
-export function labelText(template: string, number: number, last: number): string {
-  return template.replace(/\{n\}/g, String(number)).replace(/\{gesamt\}/g, String(last))
-}
+export { labelText }
 
 export function labelPosition(size: { width: number; height: number }, width: number, config: Pick<LabelConfig, 'position' | 'margin' | 'fontSize'>) {
   const [vertical, horizontal] = config.position.split('-')
@@ -71,6 +70,7 @@ export function labelOverlays(labels: PlannedLabel[], config: LabelConfig): Text
   return labels.map(label => ({
     id: createId(), pageIndex: label.pageIndex, x: label.x, y: label.y, text: label.text, font: config.font,
     fontSize: config.fontSize, bold: false, italic: false, underline: false, labelGroup: config.position,
+    label: { template: config.template, start: config.start, text: label.text },
   }))
 }
 

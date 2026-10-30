@@ -2,6 +2,7 @@ import type { Redaction } from './redactions'
 import type { FormValues } from './forms'
 import type { DocumentPage, PageSource } from './pages'
 import type { MetadataEdit } from './pdf/metadata'
+import type { LabelSource } from './labelNumbers'
 // Domain model for overlay elements. Pure data, no framework, no PDF libraries.
 
 /** 'zapfdingbats' = symbol font; the text then holds Unicode symbols (✓, ■, …). */
@@ -27,6 +28,8 @@ export interface Textbox extends OverlayClipping {
   underline: boolean
   /** Set on page labels (T22): the position they replace when applied again. */
   labelGroup?: string
+  /** Set on page labels: lets the number follow the page order. */
+  label?: LabelSource
 }
 
 export interface StrokePoint {

@@ -1,6 +1,7 @@
 import type { Command } from './commands'
 import { cloneOverlay, isStroke, isTextbox, type Overlay, type EditorState } from './model'
 import { assertPageBudget, assertSourceBudget } from './pdf/documentBudget'
+import { renumberLabels } from './labelNumbers'
 
 export const A4_WIDTH = 210 * 72 / 25.4
 export const A4_HEIGHT = 297 * 72 / 25.4
@@ -70,6 +71,7 @@ function pageCommand(
   const before = snapshot(state),
     after = snapshot(state)
   mutate(after)
+  renumberLabels(after.overlays)
   const assign = (target: EditorState, value: typeof before) => {
     target.redactionApplied = value.redactionApplied
     target.redactions = structuredClone(value.redactions)
