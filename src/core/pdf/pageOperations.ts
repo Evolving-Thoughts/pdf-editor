@@ -93,7 +93,7 @@ async function composeBase(
   // metadata, outlines and other document-level structures when no page changed.
   if (await keepsPageTree(original, pages, secure)) {
     if (!Object.keys(formValues).length) return original.slice()
-    const doc = await PDFDocument.load(original)
+    const doc = await PDFDocument.load(original, { updateMetadata: false })
     if (doc.catalog.lookupMaybe(PDFName.of('AcroForm'), PDFDict)?.has(PDFName.of('XFA'))) throw new Error('XFA-Formulare werden noch nicht unterstützt.')
     if (applyFormValues(doc, 'original', formValues)) { await updateFormAppearances(doc); return doc.save({ updateFieldAppearances: false }) }
     return original.slice()
