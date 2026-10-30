@@ -41,6 +41,7 @@ import { DraftsMenu } from './DraftsMenu'
 import { DocumentMenu } from './DocumentMenu'
 import { DocumentInfoDialog } from './DocumentInfoDialog'
 import { PageLabelsDialog } from './PageLabelsDialog'
+import { OcrDialog } from './OcrDialog'
 import { DrawingToolbar } from './DrawingToolbar'
 import { PageView } from './PageView'
 import { VirtualPage } from './VirtualPage'
@@ -85,7 +86,7 @@ export default function App() {
   const [exportDialogOpen, setExportDialogOpen] = useState(false)
   const [exportBusy, setExportBusy] = useState(false)
   const [signedDocument, setSignedDocument] = useState<ArrayBuffer | null>(null)
-  const [documentDialog, setDocumentDialog] = useState<'info' | 'labels' | null>(null)
+  const [documentDialog, setDocumentDialog] = useState<'info' | 'labels' | 'ocr' | null>(null)
   // The export must describe the same editing state as the check the user read.
   const checkedVersionRef = useRef<number | null>(null)
   const exportRunningRef = useRef(false)
@@ -1005,6 +1006,7 @@ export default function App() {
                   items={[
                     { label: 'Dokumentinfo …', onSelect: () => setDocumentDialog('info') },
                     { label: 'Seitenzahlen, Kopf- und Fußzeile …', onSelect: () => { setPageManagerOpen(false); setSourceTextOpen(false); setDocumentDialog('labels') } },
+                    { label: 'Text erkennen (OCR) …', onSelect: () => { if (!pageManagerOpen && !sourceTextOpen) viewedPageRef.current = visiblePageIndex(); setPageManagerOpen(false); setSourceTextOpen(false); setDocumentDialog('ocr') } },
                   ]}
                 />
                 {!pageManagerOpen && (
@@ -1328,6 +1330,7 @@ export default function App() {
       {exportDialogOpen && <ExportDialog onCancel={()=>setExportDialogOpen(false)} onCheck={checkExport} onJump={jumpToIssue} onPrepare={prepareExport} onDownload={downloadExport}/> }
       {documentDialog === 'info' && originalBytes && <DocumentInfoDialog original={originalBytes} edit={store.state.metadata} onApply={edit => store.dispatch(setMetadataCommand(store.state.metadata, edit))} onClose={() => setDocumentDialog(null)} />}
       {documentDialog === 'labels' && pdf && <PageLabelsDialog pdf={pdf} store={store} onClose={() => setDocumentDialog(null)} />}
+      {documentDialog === 'ocr' && pdf && <OcrDialog pdf={pdf} store={store} initialPage={viewedPageRef.current} onClose={() => setDocumentDialog(null)} />}
       {passwordRequest && <PasswordDialog key={passwordEpoch.current} request={passwordRequest}/>}
       {pdf && !pageManagerOpen && !sourceTextOpen && !pageBusy && (
         <footer

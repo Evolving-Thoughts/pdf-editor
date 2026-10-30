@@ -9,6 +9,7 @@ import { importImage } from '../images/importImage'
 import { initialImageGeometry } from '../images/geometry'
 import { retainPageWidgets, namespaceFormResources, mergeAcroForm } from './preserveForms'
 import { assertFileBudget, assertPageBudget } from './documentBudget'
+import { writeOcrLayers } from '../ocr/ocrLayer'
 
 export async function inspectPages(
   bytes: Uint8Array,
@@ -65,6 +66,16 @@ export async function composePages(
   pages: DocumentPage[],
   formValues: FormValues = {},
   secure = pages.some(page => page.redacted),
+): Promise<Uint8Array> {
+  return writeOcrLayers(await composeBase(original, sources, pages, formValues, secure), pages)
+}
+
+async function composeBase(
+  original: Uint8Array,
+  sources: PageSource[],
+  pages: DocumentPage[],
+  formValues: FormValues,
+  secure: boolean,
 ): Promise<Uint8Array> {
   if (!pages.length) throw new Error('Ein PDF muss mindestens eine Seite enthalten.')
   // An ordinary overlay edit must not rebuild the page tree: preserve forms,

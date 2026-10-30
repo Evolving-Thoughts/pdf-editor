@@ -23,7 +23,11 @@ export interface DocumentPage {
   hasForms?: boolean
   /** XFA is not supported by pdf-lib; refuse page edits rather than lose it. */
   hasXfa?: boolean
+  /** Recognized words, written as invisible text whenever the page is composed. */
+  ocr?: OcrSourceWord[]
 }
+/** One recognized word in source coordinates: baseline start, direction and height. */
+export interface OcrSourceWord { text: string; x: number; y: number; dx: number; dy: number; height: number }
 export interface PageSource {
   id: string
   bytes: ArrayBuffer
@@ -104,6 +108,15 @@ export function deletePages(state: EditorState, ids: readonly string[]): Command
 }
 export function deletePage(state: EditorState, id: string): Command {
   return deletePages(state, [id])
+}
+/** One undo step for all pages of a recognition run. */
+export function setPageOcr(state: EditorState, words: ReadonlyMap<string, OcrSourceWord[]>): Command {
+  return pageCommand(state, 'Add recognized text', next => {
+    next.pages.forEach(page => {
+      const recognized = words.get(page.id)
+      if (recognized) page.ocr = structuredClone(recognized)
+    })
+  })
 }
 export function insertPages(
   state: EditorState,

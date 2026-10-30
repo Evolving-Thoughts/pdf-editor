@@ -4,7 +4,9 @@
   "version": "0.0.0",
   "type": "module",
   "scripts": {
+    "predev": "node scripts/copy-ocr-assets.mjs",
     "dev": "vite",
+    "prebuild": "node scripts/copy-ocr-assets.mjs",
     "build": "tsc -b && vite build",
     "lint": "eslint .",
     "preview": "vite preview",
@@ -12,6 +14,7 @@
     "fixtures:real": "node scripts/fetch-real-fixtures.mjs",
     "qa": "node scripts/qa.mjs",
     "qa:ci": "node scripts/qa.mjs --synthetic-only",
+    "prebuild:pages": "node scripts/copy-ocr-assets.mjs",
     "build:pages": "tsc -b && vite build --base=/pdf-editor/",
     "test:pages": "node scripts/pages-deployment-smoke.mjs"
   },
@@ -25,10 +28,15 @@
     "@fontsource/noto-serif": "^5.3.0",
     "@fontsource/roboto-mono": "^5.3.0",
     "@pdf-lib/fontkit": "^1.1.1",
+    "@tesseract.js-data/deu": "1.0.0",
+    "@tesseract.js-data/eng": "1.0.0",
+    "fflate": "0.8.3",
     "pdf-lib": "^1.17.1",
     "pdfjs-dist": "^6.4.299",
     "react": "^19.2.8",
-    "react-dom": "^19.2.8"
+    "react-dom": "^19.2.8",
+    "tesseract.js": "7.0.0",
+    "tesseract.js-core": "7.0.0"
   },
   "devDependencies": {
     "@eslint/js": "^10.0.1",

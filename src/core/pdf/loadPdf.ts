@@ -5,11 +5,12 @@ import { getDocument, GlobalWorkerOptions, TextLayer } from 'pdfjs-dist'
 import workerUrl from 'pdfjs-dist/build/pdf.worker.min.mjs?url'
 import type { OverlayFont } from '../model'
 import type { Redaction } from '../redactions'
-import { renderPlan, validatePageSize } from './renderBudget'
+import { MAX_RENDER_PIXELS, renderPlan, validatePageSize } from './renderBudget'
 import { RenderQueue } from './renderQueue'
 import type { SearchFragment } from '../search'
 
 GlobalWorkerOptions.workerSrc = workerUrl
+const OCR_DPI = 300
 
 export interface PageSize {
   width: number
@@ -36,6 +37,8 @@ export interface PdfHandle {
   renderTextLayer(pageNumber: number, container: HTMLElement, zoom: number, signal: AbortSignal): Promise<boolean>
   /** Text and geometry from PDF.js; raster/image pages return no text. */
   getSearchText(pageNumber: number): Promise<SearchFragment[]>
+  /** The displayed page as a picture for text recognition. `scale` is pixels per page point. */
+  renderForOcr(pageNumber: number): Promise<{ image: Blob; scale: number }>
   /** Lossless 300-dpi pixels with outward-rounded opaque masks; never returns source content. */
   rasterizePage(pageNumber:number, marks:Redaction[]):Promise<RasterizedPage>
   /** Releases worker resources; call when switching or closing documents. */
@@ -85,6 +88,21 @@ export async function loadPdf(fileName: string, bytes: Uint8Array): Promise<PdfH
     },
 
     renderStats: () => queue.stats(),
+
+    renderForOcr: pageNumber => queue.run(async () => {
+      const page = await pdfDocument.getPage(pageNumber)
+      const base = page.getViewport({ scale: 1 })
+      const scale = Math.min(OCR_DPI / 72, Math.sqrt(MAX_RENDER_PIXELS / base.width / base.height))
+      const viewport = page.getViewport({ scale })
+      const canvas = document.createElement('canvas')
+      canvas.width = Math.ceil(viewport.width)
+      canvas.height = Math.ceil(viewport.height)
+      try {
+        await page.render({ canvas, viewport, background: 'rgb(255,255,255)' }).promise
+        const image = await new Promise<Blob>((resolve, reject) => canvas.toBlob(blob => blob ? resolve(blob) : reject(new Error('Die Seite konnte nicht für die Erkennung vorbereitet werden.')), 'image/png'))
+        return { image, scale }
+      } finally { canvas.width = 1; canvas.height = 1; page.cleanup() }
+    }),
 
     async renderTextLayer(pageNumber, container, zoom, signal) {
       const page = await pdfDocument.getPage(pageNumber)

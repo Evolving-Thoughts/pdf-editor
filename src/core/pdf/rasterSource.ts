@@ -8,7 +8,7 @@ export async function writeRasterSource(rows: RasterPage[]): Promise<{ source: P
   for (const [index, row] of rows.entries()) {
     const size = pageSize(row.page), page = doc.addPage([size.width, size.height]), image = await doc.embedPng(row.png)
     page.drawImage(image, { x: 0, y: 0, width: size.width, height: size.height })
-    replacements.push({ ...row.page, sourceId: id, sourceIndex: index, box: { x: 0, y: 0, width: size.width, height: size.height }, unit: 1, rotation: 0, hasForms: false, hasXfa: false, cropped: false, previewBox: undefined, redacted: true })
+    replacements.push({ ...row.page, sourceId: id, sourceIndex: index, box: { x: 0, y: 0, width: size.width, height: size.height }, unit: 1, rotation: 0, hasForms: false, hasXfa: false, cropped: false, previewBox: undefined, redacted: true, ocr: undefined })
   }
   return { source: { id, bytes: (await doc.save()).slice().buffer }, replacements }
 }
