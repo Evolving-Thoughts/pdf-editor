@@ -254,10 +254,12 @@
   overflow: hidden;
 }
 
-.page {
+.page,
+.page-slot {
   flex-shrink: 0;
   align-self: safe center;
 }
+.page-placeholder { background: #fff; }
 
 .drawing-toolbar {
   position: absolute;

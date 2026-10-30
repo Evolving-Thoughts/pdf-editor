@@ -27,6 +27,7 @@ import {
   type DraftSummary,
 } from '../core/persistence/drafts'
 import { loadPdf, type PdfHandle } from '../core/pdf/loadPdf'
+import { assertFileBudget } from '../core/pdf/documentBudget'
 import { importImage } from '../core/images/importImage'
 import { imageGeometry, initialImageGeometry, moveImage } from '../core/images/geometry'
 import { shapeGeometry, moveShape, type ShapeStyle } from '../core/shapes'
@@ -36,10 +37,11 @@ import { zoomIn, zoomOut } from '../core/viewerState'
 import { DraftsMenu } from './DraftsMenu'
 import { DrawingToolbar } from './DrawingToolbar'
 import { PageView } from './PageView'
+import { VirtualPage } from './VirtualPage'
 import { PagesManager } from './PagesManager'
 import { downloadPdf } from '../core/pdf/downloadPdf'
 import { composePages, exportPageDocument, inspectPages } from '../core/pdf/pageOperations'
-import type { DocumentPage, PageSource } from '../core/pages'
+import { pageSize, type DocumentPage, type PageSource } from '../core/pages'
 import { SymbolPicker } from './SymbolPicker'
 import type { Tool } from './tools'
 import './app.css'
@@ -355,6 +357,7 @@ export default function App() {
       try {
         // Do not discard the current document if its last save failed.
         await persistActiveDraft()
+        assertFileBudget(file.size)
         const input = new Uint8Array(await file.arrayBuffer())
         if (documentIntentRef.current !== intent) return
         let bytes: Uint8Array
@@ -422,7 +425,7 @@ export default function App() {
           setError(
             problem instanceof IncorrectPasswordError
               ? problem.message
-              : `„${file.name}“ konnte nicht geöffnet werden. ${problem instanceof Error && /entschlüsselt/.test(problem.message) ? problem.message : 'Datei beschädigt, kein gültiges PDF oder bisheriger Entwurf nicht speicherbar. Der bisherige Stand bleibt geöffnet.'}`,
+              : `„${file.name}“ konnte nicht geöffnet werden. ${problem instanceof Error && /entschlüsselt|Möglich sind/.test(problem.message) ? problem.message : 'Datei beschädigt, kein gültiges PDF oder bisheriger Entwurf nicht speicherbar. Der bisherige Stand bleibt geöffnet.'}`,
           )
       } finally {
         if (openingIntent.current === intent) setOpeningFile(false)
@@ -1201,8 +1204,14 @@ export default function App() {
         <div className="pages">
         {pdf && !pageBusy &&
           (documentPages ?? Array.from({length:pdf.pageCount},(_,index)=>({id:String(index)}))).map((page,index) => (
-            <PageView
+            <VirtualPage
               key={`${activeDraftId}-${page.id}`}
+              index={index}
+              size={documentPages ? pageSize(documentPages[index]) : undefined}
+              zoom={zoom}
+              keepMounted={overlays.some(overlay => overlay.id === selectedId && overlay.pageIndex === index) || redactions.some(mark => mark.id === selectedId && mark.pageId === page.id)}
+            >
+            <PageView
               pdf={pdf}
               searchHits={searchOpen?searchResult.hits.filter(hit=>hit.pageIndex===index):[]}
               activeSearchHit={searchOpen?searchResult.hits[searchResult.active]:undefined}
@@ -1225,6 +1234,7 @@ export default function App() {
               onSelect={setSelectedId}
               onImageDrop={(file, pageIndex, point) => void onImportImage(file, pageIndex, point)}
             />
+            </VirtualPage>
           ))}
         </div>
         </>}

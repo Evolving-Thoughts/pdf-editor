@@ -8,6 +8,7 @@ import { pageSize, type DocumentPage, type PageSource } from '../pages'
 import { importImage } from '../images/importImage'
 import { initialImageGeometry } from '../images/geometry'
 import { retainPageWidgets, namespaceFormResources, mergeAcroForm } from './preserveForms'
+import { assertFileBudget, assertPageBudget } from './documentBudget'
 
 export async function inspectPages(
   bytes: Uint8Array,
@@ -15,6 +16,7 @@ export async function inspectPages(
   sourceId = 'original',
 ): Promise<DocumentPage[]> {
   const doc = await PDFDocument.load(bytes)
+  assertPageBudget(doc.getPageCount())
   const hasXfa = !!doc.catalog.lookupMaybe(PDFName.of('AcroForm'), PDFDict)?.has(PDFName.of('XFA'))
   if (hasXfa && sourceId !== 'original')
     throw new Error('XFA-Formulare werden bei Seitenoperationen noch nicht unterstützt.')
@@ -151,6 +153,7 @@ export async function textPageBytes(text: string, size = { width: 595.28, height
   return doc.save()
 }
 export async function importPageFile(file: File, size = { width: 595.28, height: 841.89 }) {
+  assertFileBudget(file.size)
   if (/\.pdf$/i.test(file.name) || file.type === 'application/pdf')
     return preparePages(new Uint8Array(await file.arrayBuffer()), file.name)
   const image = await importImage(file)

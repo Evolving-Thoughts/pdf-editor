@@ -86,12 +86,14 @@ export function PageView({
 
   useEffect(() => {
     let cancelled = false
-    if (canvasRef.current) void pdf.renderPage(pageIndex + 1, canvasRef.current, zoom).then(() => {
+    // Aborting removes queued work and cancels running work of an unmounted page.
+    const controller = new AbortController()
+    if (canvasRef.current) void pdf.renderPage(pageIndex + 1, canvasRef.current, zoom, controller.signal).then(() => {
       if (!cancelled) setRenderError(null)
     }).catch(error => {
       if (!cancelled) setRenderError({ pdf, pageIndex, zoom, message: error instanceof Error ? error.message : 'Die Seite konnte nicht angezeigt werden.' })
     })
-    return () => { cancelled = true }
+    return () => { cancelled = true; controller.abort() }
   }, [pdf, pageIndex, zoom])
 
   const onPagePointerDown = (event: React.PointerEvent<HTMLDivElement>) => {

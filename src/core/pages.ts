@@ -1,5 +1,6 @@
 import type { Command } from './commands'
 import { cloneOverlay, isStroke, isTextbox, type Overlay, type EditorState } from './model'
+import { assertPageBudget, assertSourceBudget } from './pdf/documentBudget'
 
 export const A4_WIDTH = 210 * 72 / 25.4
 export const A4_HEIGHT = 297 * 72 / 25.4
@@ -119,6 +120,9 @@ export function insertPages(
   )
     throw new Error('Doppelte Seitenkennung.')
   if (pages.some(p => p.hasXfa)) throw new Error('XFA-Formulare werden bei Seitenoperationen noch nicht unterstützt.')
+  assertPageBudget((state.pages?.length ?? 0) + pages.length)
+  if (!state.pageSources?.some(existing => existing.id === source.id))
+    assertSourceBudget((state.pageSources ?? []).reduce((total, existing) => total + existing.bytes.byteLength, 0), source.bytes.byteLength)
   if (overlays.some((o) => !Number.isInteger(o.pageIndex) || o.pageIndex < 0 || o.pageIndex >= pages.length))
     throw new Error('Ungültige Overlay-Seite.')
   return pageCommand(state, 'Insert pages', (next) => {

@@ -6,6 +6,7 @@ import workerUrl from 'pdfjs-dist/build/pdf.worker.min.mjs?url'
 import type { OverlayFont } from '../model'
 import type { Redaction } from '../redactions'
 import { renderPlan, validatePageSize } from './renderBudget'
+import { RenderQueue } from './renderQueue'
 import type { SearchFragment } from '../search'
 
 GlobalWorkerOptions.workerSrc = workerUrl
@@ -23,8 +24,10 @@ export interface RasterizedPage { png: Uint8Array; replacements: {markId:string;
 export interface PdfHandle {
   readonly fileName: string
   readonly pageCount: number
-  /** Renders a page (1-based) into the canvas; renders per canvas are serialized internally. */
-  renderPage(pageNumber: number, canvas: HTMLCanvasElement, zoom: number): Promise<void>
+  /** Renders a page (1-based) into the canvas. Per canvas in order; all canvases share a parallelism limit. */
+  renderPage(pageNumber: number, canvas: HTMLCanvasElement, zoom: number, signal?: AbortSignal): Promise<void>
+  /** Measurable render load, used by large-document checks. */
+  renderStats(): { active: number; queued: number; peak: number }
   /** Page size in PDF points (1-based page number), cached after first call. */
   getPageSize(pageNumber: number): Promise<PageSize>
   /** Opt-in source mapping; keep the existing size-only contract unchanged. */
@@ -50,15 +53,16 @@ export async function loadPdf(fileName: string, bytes: Uint8Array): Promise<PdfH
   // Offscreen thumbnails unmount their canvases; do not retain those canvases here.
   const renderQueues = new WeakMap<HTMLCanvasElement, Promise<void>>()
   const sizeCache = new Map<number, PageSize>()
+  const queue = new RenderQueue()
 
   return {
     fileName,
     pageCount: pdfDocument.numPages,
 
-    renderPage(pageNumber, canvas, zoom) {
+    renderPage(pageNumber, canvas, zoom, signal) {
       canvas.dataset.renderState = 'loading'
       const queued = renderQueues.get(canvas) ?? Promise.resolve()
-      const run = queued.catch(() => undefined).then(async () => {
+      const run = queued.catch(() => undefined).then(() => queue.run(async active => {
         const page = await pdfDocument.getPage(pageNumber)
         const base = page.getViewport({ scale: 1 })
         const plan = renderPlan(base.width, base.height, zoom, window.devicePixelRatio ?? 1)
@@ -67,12 +71,18 @@ export async function loadPdf(fileName: string, bytes: Uint8Array): Promise<PdfH
         canvas.height = Math.max(1, Math.floor(viewport.height))
         canvas.style.width = `${Math.floor(plan.cssWidth)}px`
         canvas.style.height = `${Math.floor(plan.cssHeight)}px`
-        await page.render({ canvas, viewport }).promise
+        const task = page.render({ canvas, viewport })
+        const cancel = () => task.cancel()
+        if (active.aborted) cancel()
+        active.addEventListener('abort', cancel, { once: true })
+        try { await task.promise } finally { active.removeEventListener('abort', cancel) }
         if (renderQueues.get(canvas) === run) canvas.dataset.renderState = 'ready'
-      })
+      }, signal))
       renderQueues.set(canvas, run)
       return run
     },
+
+    renderStats: () => queue.stats(),
 
     async getPageSize(pageNumber) {
       const cached = sizeCache.get(pageNumber)
@@ -155,6 +165,9 @@ export async function loadPdf(fileName: string, bytes: Uint8Array): Promise<PdfH
       } finally {canvas.width=1;canvas.height=1;page.cleanup()}
     },
 
-    destroy: () => loadingTask.destroy(),
+    destroy() {
+      queue.clear()
+      return loadingTask.destroy()
+    },
   }
 }
