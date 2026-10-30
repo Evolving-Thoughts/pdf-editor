@@ -111,6 +111,7 @@ try {
     'structure-optimization-smoke',
     'export-worker-smoke',
     'metadata-smoke',
+    'page-labels-smoke',
     ...(syntheticOnly ? [] : ['mvp-real-smoke']),
   ]
   for (const name of scripts) {

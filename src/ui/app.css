@@ -1031,6 +1031,24 @@
 .document-info-technical dd { margin: 0; text-align: right; overflow-wrap: anywhere; }
 .document-info-confirm { display: grid; gap: 8px; margin-block: 10px; }
 .document-info-confirm p { margin: 0; }
+.page-labels-dialog { width: 760px; }
+.page-labels-layout { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 320px); gap: 16px; }
+.page-labels-fields { display: grid; gap: 10px; align-content: start; font-size: 14px; }
+.page-labels-fields small { display: block; margin-top: 4px; color: var(--text); }
+.page-labels-position { display: grid; grid-template-columns: repeat(3, 1fr); gap: 4px; margin: 0; padding: 6px 8px; border: 1px solid var(--border); border-radius: 6px; }
+.page-labels-position legend { font-size: 14px; }
+.page-labels-position label { display: grid; place-items: center; min-height: 28px; }
+.page-labels-position input { display: inline-block; width: 18px; height: 18px; margin: 0; accent-color: var(--accent); }
+.page-labels-row { display: grid; grid-template-columns: 1.4fr 1fr 1fr; gap: 8px; }
+.page-labels-row select { display: block; width: 100%; box-sizing: border-box; font: inherit; padding: 10px; margin-top: 6px; }
+.page-labels-preview { display: grid; gap: 8px; justify-items: center; align-content: start; min-width: 0; }
+.page-labels-sheet { position: relative; background: #fff; box-shadow: var(--shadow); overflow: hidden; max-width: 100%; }
+.page-labels-sheet canvas { display: block; }
+.page-labels-sheet span { position: absolute; line-height: 1; color: #111; white-space: pre; }
+.page-labels-pager { display: flex; gap: 8px; align-items: center; font-size: 13px; }
+.page-labels-pager button { font: inherit; min-width: 32px; min-height: 32px; border: 1px solid var(--border); border-radius: 6px; background: var(--bg); color: var(--text-h); cursor: pointer; }
+.page-labels-pager button:disabled { opacity: .4; cursor: default; }
+@media (max-width: 720px) { .page-labels-layout { grid-template-columns: minmax(0, 1fr); } }
 .export-progress { display: grid; gap: 6px; margin-block: 12px; }
 .export-progress p { margin: 0; }
 .export-progress progress { width: 100%; accent-color: var(--accent); }

@@ -25,6 +25,8 @@ export interface Textbox extends OverlayClipping {
   italic: boolean
   /** Drawn as a line under the text (not a font variant). */
   underline: boolean
+  /** Set on page labels (T22): the position they replace when applied again. */
+  labelGroup?: string
 }
 
 export interface StrokePoint {
