@@ -171,7 +171,7 @@ try {
   await page.locator('.export-dialog').waitFor({ state: 'visible' })
   assert.equal(
     await page
-      .getByRole('checkbox', { name: /Bilddaten komprimieren/ })
+      .getByRole('radio', { name: /Bilddaten komprimieren/ })
       .isChecked(),
     false,
   )

@@ -1,4 +1,4 @@
-import { chromiumPath } from './browser-helper.mjs'
+import { chromiumPath, revealInPages } from './browser-helper.mjs'
 import {
   confirmDefaultExport,
   openProtectedExport,
@@ -211,7 +211,7 @@ try {
   await p.reload()
   await p.getByRole('button', { name: /Entwürfe/ }).click()
   await p.locator('.draft-open').first().click()
-  await p.locator('.textbox textarea').waitFor()
+  await revealInPages(p, '.textbox textarea')
   await btn('Suchen').click()
   await query('InsertedOnly', 1)
   await query('OverlayUnique', 1)

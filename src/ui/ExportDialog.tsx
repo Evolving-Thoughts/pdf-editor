@@ -1,28 +1,31 @@
 import { useEffect, useRef, useState } from 'react'
-import {
-  COMPRESSION_PRESETS,
-  type CompressionPreset,
-  type CompressionResult,
-} from '../core/pdf/compressPdf'
-export interface PreparedExport {
+import { COMPRESSION_PRESETS, type CompressionPreset } from '../core/pdf/compressPdf'
+import type { ExportProgress, ExportResult, ExportSize } from '../core/pdf/exportPipeline'
+import { rejection, type Assessment, type PreflightReport, type TextIssue } from '../core/pdf/preflight'
+export interface PreparedExport extends ExportResult {
   name: string
-  original: Uint8Array
-  compression?: CompressionResult
 }
+type SizeMode = ExportSize['mode']
 function formatSize(bytes: number) {
   const unit = bytes >= 1024 * 1024 ? 'MiB' : 'KiB'
   return `${new Intl.NumberFormat('de-DE', { maximumFractionDigits: 1 }).format(bytes / (unit === 'MiB' ? 1024 * 1024 : 1024))} ${unit}`
 }
+const VISIBLE_TEXT_ISSUES = 5
+
 export function ExportDialog({
   onCancel,
+  onCheck,
+  onJump,
   onPrepare,
   onDownload,
 }: {
   onCancel: () => void
+  onCheck: (signal: AbortSignal) => Promise<PreflightReport>
+  onJump: (issue: TextIssue) => void
   onPrepare: (
-    preset: CompressionPreset | undefined,
+    size: ExportSize,
     signal: AbortSignal,
-    onProgress: (done: number, total: number) => void,
+    onProgress: (progress: ExportProgress) => void,
   ) => Promise<PreparedExport>
   onDownload: (
     bytes: Uint8Array,
@@ -35,16 +38,28 @@ export function ExportDialog({
   const operation = useRef<AbortController | null>(null)
   const actionRef = useRef<HTMLButtonElement>(null)
   // Fresh component on every open: neither preference nor password enters drafts.
-  const [compression, setCompression] = useState(false),
+  const [sizeMode, setSizeMode] = useState<SizeMode>('none'),
     [protect, setProtect] = useState(false)
   const [preset, setPreset] = useState<CompressionPreset>('balanced')
   const [password, setPassword] = useState(''),
     [confirmation, setConfirmation] = useState('')
   const [error, setError] = useState(''),
     [busy, setBusy] = useState(false),
-    [progress, setProgress] = useState('')
+    [progress, setProgress] = useState(''),
+    [progressShare, setProgressShare] = useState<number | null>(null)
   const [prepared, setPrepared] = useState<PreparedExport | null>(null)
   const [failedPreparation, setFailedPreparation] = useState(false)
+  // Absent while the check runs; the export stays locked until it reports.
+  const [report, setReport] = useState<PreflightReport | null>(null)
+  const [confirmed, setConfirmed] = useState<ReadonlySet<Assessment['kind']>>(new Set())
+  const [textConfirmed, setTextConfirmed] = useState(false)
+  useEffect(() => {
+    const controller = new AbortController()
+    void onCheck(controller.signal).then(result => { if (!controller.signal.aborted) setReport(result) }).catch(() => {
+      if (!controller.signal.aborted) setReport({ rebuilt: true, textIssues: [], assessments: [{ kind: 'signature', state: 'unknown', decision: 'confirm', message: 'Die Prüfung konnte nicht abgeschlossen werden. Bitte das Ergebnis selbst kontrollieren.' }] })
+    })
+    return () => controller.abort()
+  }, [onCheck])
   useEffect(() => {
     const element = dialog.current
     element?.showModal()
@@ -105,11 +120,14 @@ export function ExportDialog({
       let result: PreparedExport
       try {
         result = await onPrepare(
-          compression && !withoutCompression ? preset : undefined,
+          withoutCompression || sizeMode === 'none' ? { mode: 'none' } : sizeMode === 'structure' ? { mode: 'structure' } : { mode: 'images', preset },
           signal,
-          (done, total) => {
-            if (!signal.aborted)
-              setProgress(`Bilddaten optimieren: ${done} / ${total}`)
+          (step) => {
+            if (signal.aborted) return
+            setProgressShare(step.stage === 'images' && step.total ? step.done / step.total : null)
+            if (step.stage === 'images') setProgress(`Bilddaten optimieren: ${step.done} / ${step.total}`)
+            else if (step.stage === 'structure') setProgress('Struktur wird optimiert …')
+            else setProgress('PDF wird vorbereitet …')
           },
         )
       } catch (problem) {
@@ -117,8 +135,9 @@ export function ExportDialog({
         throw problem
       }
       if (signal.aborted) return
-      if (compression && !withoutCompression) setPrepared(result)
+      if (sizeMode !== 'none' && !withoutCompression) setPrepared(result)
       else {
+        setProgressShare(null)
         setProgress(
           protect ? 'PDF wird verschlüsselt …' : 'PDF wird gespeichert …',
         )
@@ -132,16 +151,16 @@ export function ExportDialog({
       }
     })
   }
+  const output = prepared?.optimization?.bytes ?? prepared?.compression?.bytes ?? prepared?.original
   const save = (original = false) => {
-    if (!prepared || !validPassword()) return
+    if (!prepared || !output || !validPassword()) return
     void run(async (signal) => {
+      setProgressShare(null)
       setProgress(
         protect ? 'PDF wird verschlüsselt …' : 'PDF wird gespeichert …',
       )
       await onDownload(
-        original
-          ? prepared.original
-          : (prepared.compression?.bytes ?? prepared.original),
+        original ? prepared.original : output,
         prepared.name,
         protect ? password : undefined,
         signal,
@@ -149,8 +168,17 @@ export function ExportDialog({
       if (!signal.aborted) close()
     })
   }
+  const rejected = report ? rejection(report) : undefined
+  const open = report?.assessments.filter(item => item.decision === 'confirm' && !confirmed.has(item.kind)) ?? []
+  const textOpen = !!report?.textIssues.length && !textConfirmed
+  const checkPending = !report || !!rejected || open.length > 0 || textOpen
   const stats = prepared?.compression
-  const saved = stats ? prepared!.original.length - stats.bytes.length : 0
+  const saved = prepared && output ? prepared.original.length - output.length : 0
+  const outcomeNote = saved > 0
+    ? `${Math.round((saved / prepared!.original.length) * 100)} % kleiner · ${prepared?.optimization ? 'Verlustfrei' : COMPRESSION_PRESETS[preset].label}`
+    : prepared?.optimization?.outcome === 'not-verified'
+      ? 'Die Optimierung ließ sich nicht sicher bestätigen. Die unveränderte Ausgabe wird verwendet.'
+      : 'Keine Ersparnis. Die unveränderte Ausgabe wird verwendet.'
   return (
     <dialog
       ref={dialog}
@@ -172,27 +200,71 @@ export function ExportDialog({
           {prepared ? 'Export vorbereitet' : 'PDF exportieren'}
         </h2>
         <p>Originaldatei und lokaler Entwurf bleiben unverändert.</p>
+        {!prepared && (
+          <section className="export-check" aria-label="Prüfung vor dem Export">
+            {!report && <p role="status">Dokument wird geprüft …</p>}
+            {report?.assessments.filter(item => item.decision === 'reject').map(item => <p key={item.kind} role="alert" className="export-error">{item.message}</p>)}
+            {report?.assessments.filter(item => item.decision === 'confirm').map(item => (
+              <label key={item.kind} className="export-confirm">
+                <input type="checkbox" disabled={busy} checked={confirmed.has(item.kind)} onChange={event => setConfirmed(current => {
+                  const next = new Set(current)
+                  if (event.target.checked) next.add(item.kind)
+                  else next.delete(item.kind)
+                  return next
+                })} />
+                <span>{item.message}</span>
+              </label>
+            ))}
+            {!!report?.textIssues.length && <div className="export-text-issues">
+              <p><strong>Nicht darstellbare Zeichen</strong></p>
+              <ul>
+                {report.textIssues.slice(0, VISIBLE_TEXT_ISSUES).map(issue => (
+                  <li key={issue.overlayId}>
+                    <span>Seite {issue.pageIndex + 1}: {issue.characters.map(character => `„${character}“`).join(', ')} fehlt in {issue.font} · {issue.excerpt}</span>
+                    <button type="button" disabled={busy} onClick={() => onJump(issue)}>Zur Stelle</button>
+                  </li>
+                ))}
+              </ul>
+              {report.textIssues.length > VISIBLE_TEXT_ISSUES && <p className="export-detail">und {report.textIssues.length - VISIBLE_TEXT_ISSUES} weitere Textfelder.</p>}
+              <label className="export-confirm">
+                <input type="checkbox" disabled={busy} checked={textConfirmed} onChange={event => setTextConfirmed(event.target.checked)} />
+                <span>Diese Zeichen im Export durch „?“ ersetzen. In Symbolfeldern werden sie weggelassen.</span>
+              </label>
+            </div>}
+            {report && !report.assessments.some(item => item.decision !== 'ok') && !report.textIssues.length && <p className="export-detail">Keine Risiken gefunden.</p>}
+            {report?.assessments.filter(item => item.decision === 'ok' && item.state === 'present').map(item => <p key={item.kind} className="export-detail">{item.message}</p>)}
+            {report && <p className="export-detail">Diese Prüfung ist keine Sicherheits- oder Konformitätsbestätigung.</p>}
+          </section>
+        )}
         {!prepared ? (
           <fieldset disabled={busy}>
-            <label className="export-toggle">
-              <input
-                autoFocus
-                type="checkbox"
-                checked={compression}
-                onChange={(event) => {
-                  setCompression(event.target.checked)
-                  setError('')
-                  setFailedPreparation(false)
-                }}
-              />
-              <span>
-                <strong>Bilddaten komprimieren</strong>
-                <small>
-                  Optional · besonders für gerasterte Seiten und Bilder.
-                </small>
-              </span>
-            </label>
-            {compression ? (
+            <div role="radiogroup" aria-labelledby="export-size-label" className="export-size">
+              <p id="export-size-label"><strong>Dateigröße</strong></p>
+              {([
+                ['none', 'Nicht optimieren', 'Die Datei wird so geschrieben, wie sie ist.'],
+                ['structure', 'Struktur optimieren', 'Verlustfrei · Bilder, Text und Vektoren bleiben identisch. Keine Einsparung garantiert.'],
+                ['images', 'Bilddaten komprimieren', 'Qualität kann sinken · besonders für gerasterte Seiten und Bilder.'],
+              ] as const).map(([value, title, detail], index) => (
+                <label key={value} className="export-toggle">
+                  <input
+                    autoFocus={index === 0}
+                    type="radio"
+                    name="export-size"
+                    checked={sizeMode === value}
+                    onChange={() => {
+                      setSizeMode(value)
+                      setError('')
+                      setFailedPreparation(false)
+                    }}
+                  />
+                  <span>
+                    <strong>{title}</strong>
+                    <small>{detail}</small>
+                  </span>
+                </label>
+              ))}
+            </div>
+            {sizeMode === 'images' && (
               <div className="export-quality">
                 <label htmlFor="export-quality">Bildqualität</label>
                 <select
@@ -220,10 +292,6 @@ export function ExportDialog({
                   unverändert.
                 </p>
               </div>
-            ) : (
-              <p className="export-detail">
-                Ohne Komprimierung: Export in der bisherigen Qualität.
-              </p>
             )}
             <div className="export-protection">
               <label className="export-toggle">
@@ -280,21 +348,15 @@ export function ExportDialog({
             </p>
             <dl className="export-sizes">
               <div>
-                <dt>Ohne Komprimierung</dt>
+                <dt>Ohne Optimierung</dt>
                 <dd>{formatSize(prepared.original.length)}</dd>
               </div>
               <div>
                 <dt>Gewählte Ausgabe</dt>
-                <dd>
-                  {formatSize(stats?.bytes.length ?? prepared.original.length)}
-                </dd>
+                <dd>{formatSize(output?.length ?? prepared.original.length)}</dd>
               </div>
             </dl>
-            <p className="password-warning">
-              {saved > 0
-                ? `${Math.round((saved / prepared.original.length) * 100)} % kleiner · ${COMPRESSION_PRESETS[preset].label}`
-                : 'Keine Ersparnis. Die Ausgabe ohne Komprimierung wird verwendet.'}
-            </p>
+            <p className="password-warning">{outcomeNote}</p>
             {stats && (
               <p className="export-detail">
                 {stats.optimizedImages} Bildobjekte optimiert ·{' '}
@@ -317,9 +379,11 @@ export function ExportDialog({
           </p>
         )}
         {busy && (
-          <p role="status" aria-live="polite">
-            {progress}
-          </p>
+          <div className="export-progress">
+            <p role="status" aria-live="polite">{progress}</p>
+            <progress aria-label="Exportfortschritt" {...(progressShare === null ? {} : { value: progressShare, max: 1 })} />
+            <p className="export-detail">Die Bearbeitung wartet, bis der Export fertig ist. „Abbrechen“ beendet ihn sofort.</p>
+          </div>
         )}
         <div className="password-actions">
           <button type="button" onClick={close}>
@@ -340,29 +404,29 @@ export function ExportDialog({
           <button
             ref={actionRef}
             type="submit"
-            disabled={busy}
+            disabled={busy || (!prepared && checkPending)}
             className="export-primary"
           >
             {prepared
               ? saved > 0
                 ? 'Kleinere Datei speichern'
                 : 'Datei speichern'
-              : compression
+              : sizeMode !== 'none'
                 ? 'Export vorbereiten'
                 : protect
                   ? 'Geschützt exportieren'
-                  : 'Ohne Komprimierung exportieren'}
+                  : 'Ohne Optimierung exportieren'}
           </button>
         </div>
         {((prepared && saved > 0) ||
-          (!prepared && failedPreparation && compression)) && (
+          (!prepared && failedPreparation && sizeMode !== 'none')) && (
           <button
             className="export-fallback"
             type="button"
-            disabled={busy}
+            disabled={busy || (!prepared && checkPending)}
             onClick={() => (prepared ? save(true) : prepare(true))}
           >
-            Stattdessen ohne Komprimierung exportieren
+            Stattdessen ohne Optimierung exportieren
           </button>
         )}
       </form>

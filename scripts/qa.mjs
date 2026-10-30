@@ -13,8 +13,8 @@ function notRun(name, reason) {
   results.push({ name, status: 'NOT_RUN', reason })
   console.log(`NOT_RUN ${name}: ${reason}`)
 }
-async function run(name, command, args, env = {}) {
-  const result = await runQaStep({ name, command, args, root, env })
+async function run(name, command, args, env = {}, timeoutMs) {
+  const result = await runQaStep({ name, command, args, root, env, timeoutMs })
   results.push(result)
 }
 
@@ -104,7 +104,17 @@ try {
     'redaction-smoke',
     'redaction-geometry-smoke',
     'search-import-smoke',
+    'large-document-smoke',
+    'text-selection-smoke',
+    'preflight-smoke',
     'compression-smoke',
+    'structure-optimization-smoke',
+    'export-worker-smoke',
+    'metadata-smoke',
+    'page-labels-smoke',
+    'stamps-smoke',
+    'ocr-smoke',
+    'table-smoke',
     ...(syntheticOnly ? [] : ['mvp-real-smoke']),
   ]
   for (const name of scripts) {
@@ -117,7 +127,7 @@ try {
       SMOKE_URL: url,
       CHROMIUM_PATH: browser,
       SMOKE_ARTIFACT_DIR: out,
-    })
+    }, fontGroup ? 420000 : undefined)
   }
   if (syntheticOnly) {
     notRun(

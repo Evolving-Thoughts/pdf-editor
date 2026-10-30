@@ -1,6 +1,7 @@
 import { expect, test, vi } from 'vitest'
 import { PDFDict, PDFDocument, PDFName, PDFNumber, PDFString, StandardFonts, degrees } from 'pdf-lib'
 import { composePages, imagePageBytes, inspectPages, pageSize, preparePages, textPageBytes } from '../../src/core/pdf/pageOperations'
+import { formKey } from '../../src/core/forms'
 import { exportPdf } from '../../src/core/pdf/exportPdf'
 const original = async () => {
   const doc = await PDFDocument.create()
@@ -79,6 +80,20 @@ test('unchanged page plans preserve original document metadata and existing Acro
   const out = await PDFDocument.load(await composePages(bytes, [], plan))
   expect(out.getTitle()).toBe('Original metadata')
   expect(out.getForm().getTextField('name').getText()).toBe('Ada')
+})
+
+test('a filled form on unchanged pages keeps the document program info and adds none of its own', async () => {
+  const doc = await PDFDocument.create({ updateMetadata: false }), page = doc.addPage([200, 300])
+  const modified = new Date('2024-01-02T03:04:05Z')
+  doc.setProducer('Druckwerk 3')
+  doc.setModificationDate(modified)
+  doc.getForm().createTextField('name').addToPage(page, { x: 20, y: 100, width: 120, height: 20 })
+  const bytes = await doc.save({ updateFieldAppearances: false }), plan = await inspectPages(bytes, 'original')
+  const composed = await composePages(bytes, [], plan, { [formKey('original', 'name')]: 'Ada' })
+  const out = await PDFDocument.load(composed, { updateMetadata: false })
+  expect(out.getForm().getTextField('name').getText()).toBe('Ada')
+  expect(out.getProducer()).toBe('Druckwerk 3')
+  expect(out.getModificationDate()).toEqual(modified)
 })
 
 test('unchanged pages without native edits skip the additional PDF load and return independent original bytes', async () => {

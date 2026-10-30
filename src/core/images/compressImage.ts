@@ -5,19 +5,18 @@ import {
   type ImageEncoder,
 } from '../pdf/compressPdf'
 
-/** Local browser adapter. Opaque images only; no upload, no PDF-page rastering. */
+/** Local adapter for window and worker. Opaque images only; no upload, no PDF-page rastering. */
 export const encodeCompressedImage: ImageEncoder = async (
   image,
   preset,
   signal,
 ) => {
   checkExportAbort(signal)
-  const source = document.createElement('canvas'),
-    output = document.createElement('canvas')
+  const source = new OffscreenCanvas(image.width, image.height)
+  const size = compressionDimensions(image.width, image.height, preset)
+  const output = new OffscreenCanvas(size.width, size.height)
   let bitmap: ImageBitmap | undefined
   try {
-    source.width = image.width
-    source.height = image.height
     const ctx = source.getContext('2d')
     if (!ctx)
       throw new Error(
@@ -49,9 +48,6 @@ export const encodeCompressedImage: ImageEncoder = async (
       ctx.putImageData(pixels, 0, 0)
     }
     checkExportAbort(signal)
-    const size = compressionDimensions(image.width, image.height, preset)
-    output.width = size.width
-    output.height = size.height
     const target = output.getContext('2d', { willReadFrequently: true })
     if (!target) throw new Error('Bildkomprimierung ist nicht verfügbar.')
     target.imageSmoothingEnabled = true
@@ -64,16 +60,8 @@ export const encodeCompressedImage: ImageEncoder = async (
       rgb[p + 1] = rgba[i + 1]
       rgb[p + 2] = rgba[i + 2]
     }
-    const blob = await new Promise<Blob>((resolve, reject) =>
-      output.toBlob(
-        (value) =>
-          value?.type === 'image/jpeg'
-            ? resolve(value)
-            : reject(new Error('JPEG-Komprimierung fehlgeschlagen.')),
-        'image/jpeg',
-        COMPRESSION_PRESETS[preset].jpegQuality,
-      ),
-    )
+    const blob = await output.convertToBlob({ type: 'image/jpeg', quality: COMPRESSION_PRESETS[preset].jpegQuality })
+    if (blob.type !== 'image/jpeg') throw new Error('JPEG-Komprimierung fehlgeschlagen.')
     checkExportAbort(signal)
     return { ...size, rgb, jpeg: new Uint8Array(await blob.arrayBuffer()) }
   } finally {

@@ -51,7 +51,7 @@ export function SymbolPicker({ value, active, onPick }: SymbolPickerProps) {
         title="Symbol auswählen und per Klick platzieren"
         onClick={() => setOpen((isOpen) => !isOpen)}
       >
-        <span aria-hidden="true">{value}</span> Symbol
+        <span aria-hidden="true">{value}</span> <span className="symbol-word">Symbol</span>
         <span className="toolbar-chevron" aria-hidden="true" />
       </button>
       {open && (

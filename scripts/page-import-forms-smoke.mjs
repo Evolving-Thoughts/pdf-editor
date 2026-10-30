@@ -67,6 +67,8 @@ try {
   await btn('Speichern').click()
   await p.waitForFunction(() => document.querySelector('.draft-save-status').textContent.includes('Entwurf gespeichert'))
   await p.reload(); await p.getByRole('button', { name: /Entwürfe/ }).click(); await p.locator('.draft-open').first().click()
+  // The image sits on page 4, which only mounts near the view (T20).
+  await p.locator('.page[data-page-index="3"]').scrollIntoViewIfNeeded()
   await p.waitForSelector('.image-overlay'); assert.deepEqual(await geometry(), edited)
   await btn('Seiten verwalten').click(); await settled()
   await p.locator('.page-manager-row').first().getByRole('button').first().click(); await settled()
