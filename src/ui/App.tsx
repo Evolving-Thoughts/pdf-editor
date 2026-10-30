@@ -1,7 +1,8 @@
 import { SourceTextPanel } from './SourceTextPanel'
 import type { SourceHistory } from './SourceTextPanel'
 import { ExportDialog, type PreparedExport } from './ExportDialog'
-import { compressPdf, checkExportAbort, type CompressionPreset } from '../core/pdf/compressPdf'
+import { checkExportAbort } from '../core/pdf/compressPdf'
+import { runExport, type ExportProgress, type ExportSize } from '../core/pdf/exportPipeline'
 import { inspectStructures, preflightExport, type TextIssue } from '../core/pdf/preflight'
 import { encodeCompressedImage } from '../core/images/compressImage'
 import { preparePdf, unlockPdf, encryptPdf, PasswordRequiredError, IncorrectPasswordError } from '../core/pdf/unlockPdf'
@@ -41,7 +42,7 @@ import { PageView } from './PageView'
 import { VirtualPage } from './VirtualPage'
 import { PagesManager } from './PagesManager'
 import { downloadPdf } from '../core/pdf/downloadPdf'
-import { composePages, exportPageDocument, inspectPages } from '../core/pdf/pageOperations'
+import { composePages, inspectPages } from '../core/pdf/pageOperations'
 import { pageSize, type DocumentPage, type PageSource } from '../core/pages'
 import { SymbolPicker } from './SymbolPicker'
 import type { Tool } from './tools'
@@ -747,7 +748,7 @@ export default function App() {
     requestAnimationFrame(() => workspaceRef.current?.querySelector(`.page[data-page-index="${issue.pageIndex}"]`)?.scrollIntoView({ block: 'center' }))
   }, [])
   const prepareExport = useCallback(
-    async (preset: CompressionPreset | undefined, signal: AbortSignal, onProgress: (done: number, total: number) => void): Promise<PreparedExport> => {
+    async (size: ExportSize, signal: AbortSignal, onProgress: (progress: ExportProgress) => void): Promise<PreparedExport> => {
       const draft = draftRef.current
       if (!draft || !store.state.pages?.length || pageBusy || exportBusy)
         throw new Error('Der Export ist gerade nicht verfügbar.')
@@ -758,15 +759,13 @@ export default function App() {
           throw new Error('Vorgemerkte Schwärzungen zuerst anwenden oder verwerfen; sie sind noch nicht sicher entfernt.')
         if (checkedVersionRef.current !== store.getVersion())
           throw new Error('Der Stand hat sich seit der Prüfung geändert. Bitte den Export neu öffnen.')
-        const original = await exportPageDocument(
-          new Uint8Array(draft.bytes), store.state.pageSources ?? [], store.state.pages,
-          store.state.overlays.map(cloneOverlay), undefined, store.state.formValues,
-          store.state.redactionApplied || store.state.pages.some(page => page.redacted),
-        )
+        const result = await runExport({
+          original: new Uint8Array(draft.bytes), sources: store.state.pageSources ?? [], pages: store.state.pages,
+          overlays: store.state.overlays.map(cloneOverlay), formValues: store.state.formValues,
+          secure: !!store.state.redactionApplied || store.state.pages.some(page => page.redacted), size,
+        }, encodeCompressedImage, { signal, onProgress })
         checkExportAbort(signal)
-        const compression = preset ? await compressPdf(original, preset, encodeCompressedImage, { signal, onProgress }) : undefined
-        checkExportAbort(signal)
-        return { name: draft.name, original, compression }
+        return { name: draft.name, ...result }
       } finally { setExportBusy(false) }
     }, [store, pageBusy, exportBusy],
   )

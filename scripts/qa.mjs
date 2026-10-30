@@ -108,6 +108,7 @@ try {
     'text-selection-smoke',
     'preflight-smoke',
     'compression-smoke',
+    'structure-optimization-smoke',
     ...(syntheticOnly ? [] : ['mvp-real-smoke']),
   ]
   for (const name of scripts) {

@@ -91,7 +91,7 @@ try {
   await page.keyboard.type(' Font')
   await page.evaluate(() => document.fonts.ready)
   await button('Exportieren').click()
-  assert.equal(await page.getByRole('checkbox', { name: /Bilddaten komprimieren/ }).isChecked(), false)
+  assert.equal(await page.getByRole('radio', { name: /Bilddaten komprimieren/ }).isChecked(), false)
   assert.equal(await page.getByRole('checkbox', { name: /Mit Passwort schützen/ }).isChecked(), false)
   const plain = await download(() => confirmDefaultExport(page))
   assert.equal((await PDFDocument.load(plain)).getForm().getTextField('Name').getText(), 'Grace')

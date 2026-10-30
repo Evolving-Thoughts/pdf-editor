@@ -21,7 +21,7 @@ const p = await browser.newPage({
   errors = []
 p.on('pageerror', (e) => errors.push(String(e)))
 const btn = (name) => p.getByRole('button', { name, exact: true })
-const comp = () => p.getByRole('checkbox', { name: /Bilddaten komprimieren/ })
+const comp = () => p.getByRole('radio', { name: /Bilddaten komprimieren/ })
 const protect = () => p.getByRole('checkbox', { name: /Mit Passwort schützen/ })
 const dialog = () => p.getByRole('dialog')
 async function open(bytes, name = 'compression.pdf') {
@@ -173,7 +173,7 @@ try {
   const originalDraft = await draft()
   await initial()
   await p.screenshot({ path: join(out, 'export-default-desktop.png') })
-  const plain = await save('Ohne Komprimierung exportieren', 'plain.pdf')
+  const plain = await save('Ohne Optimierung exportieren', 'plain.pdf')
   await initial()
   await prepare()
   await p.screenshot({ path: join(out, 'prepared-desktop.png') })
@@ -198,7 +198,7 @@ try {
   await initial()
   await prepare()
   const originalFallback = await save(
-    'Stattdessen ohne Komprimierung exportieren',
+    'Stattdessen ohne Optimierung exportieren',
     'fallback.pdf',
   )
   assert.deepEqual(await inspect(originalFallback), parsedPlain)
@@ -336,7 +336,7 @@ try {
   await p.locator('.textbox textarea').press('Escape')
   await initial()
   const redactedPlain = await save(
-    'Ohne Komprimierung exportieren',
+    'Ohne Optimierung exportieren',
     'redacted-plain.pdf',
   )
   await initial()
