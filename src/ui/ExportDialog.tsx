@@ -45,7 +45,8 @@ export function ExportDialog({
     [confirmation, setConfirmation] = useState('')
   const [error, setError] = useState(''),
     [busy, setBusy] = useState(false),
-    [progress, setProgress] = useState('')
+    [progress, setProgress] = useState(''),
+    [progressShare, setProgressShare] = useState<number | null>(null)
   const [prepared, setPrepared] = useState<PreparedExport | null>(null)
   const [failedPreparation, setFailedPreparation] = useState(false)
   // Absent while the check runs; the export stays locked until it reports.
@@ -123,8 +124,10 @@ export function ExportDialog({
           signal,
           (step) => {
             if (signal.aborted) return
+            setProgressShare(step.stage === 'images' && step.total ? step.done / step.total : null)
             if (step.stage === 'images') setProgress(`Bilddaten optimieren: ${step.done} / ${step.total}`)
             else if (step.stage === 'structure') setProgress('Struktur wird optimiert …')
+            else setProgress('PDF wird vorbereitet …')
           },
         )
       } catch (problem) {
@@ -134,6 +137,7 @@ export function ExportDialog({
       if (signal.aborted) return
       if (sizeMode !== 'none' && !withoutCompression) setPrepared(result)
       else {
+        setProgressShare(null)
         setProgress(
           protect ? 'PDF wird verschlüsselt …' : 'PDF wird gespeichert …',
         )
@@ -151,6 +155,7 @@ export function ExportDialog({
   const save = (original = false) => {
     if (!prepared || !output || !validPassword()) return
     void run(async (signal) => {
+      setProgressShare(null)
       setProgress(
         protect ? 'PDF wird verschlüsselt …' : 'PDF wird gespeichert …',
       )
@@ -374,9 +379,11 @@ export function ExportDialog({
           </p>
         )}
         {busy && (
-          <p role="status" aria-live="polite">
-            {progress}
-          </p>
+          <div className="export-progress">
+            <p role="status" aria-live="polite">{progress}</p>
+            <progress aria-label="Exportfortschritt" {...(progressShare === null ? {} : { value: progressShare, max: 1 })} />
+            <p className="export-detail">Die Bearbeitung wartet, bis der Export fertig ist. „Abbrechen“ beendet ihn sofort.</p>
+          </div>
         )}
         <div className="password-actions">
           <button type="button" onClick={close}>

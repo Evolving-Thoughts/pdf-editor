@@ -1019,6 +1019,9 @@
 .search-highlights { position: absolute; inset: 0; width: 100%; height: 100%; z-index: 8; pointer-events: none; overflow: hidden; }
 .search-highlights polygon { fill: #ffde5966; stroke: none; }
 .search-highlights polygon.active { fill: #ffae0080; stroke: #995700; stroke-width: 1; }
+.export-progress { display: grid; gap: 6px; margin-block: 12px; }
+.export-progress p { margin: 0; }
+.export-progress progress { width: 100%; accent-color: var(--accent); }
 .export-size { display: grid; gap: 8px; margin-bottom: 12px; }
 .export-size p { margin: 0; font-size: 14px; }
 .export-check { display: grid; gap: 8px; margin-block: 12px; padding: 10px 12px; border: 1px solid var(--border); border-radius: 8px; font-size: 14px; }

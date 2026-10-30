@@ -264,53 +264,22 @@ try {
   await initial()
   assert.equal(await comp().isChecked(), false)
   await p.keyboard.press('Escape')
-  // Individual image failure is visible and never corrupts the baseline.
-  await p.evaluate(() => {
-    window.__toBlob = HTMLCanvasElement.prototype.toBlob
-    HTMLCanvasElement.prototype.toBlob = function (callback) {
-      queueMicrotask(() => callback(null))
-    }
-  })
-  await initial()
-  await prepare()
-  assert.match(await dialog().innerText(), /konnten nicht optimiert werden/)
-  assert.match(await dialog().innerText(), /Keine Ersparnis/)
-  await btn('Abbrechen').click()
-  await p.evaluate(() => {
-    HTMLCanvasElement.prototype.toBlob = window.__toBlob
-    delete window.__toBlob
-  })
-  // Cancel while the real encoder's callback is delayed: no late download.
+  // Cancel while the worker runs: no late download. Failed single images are
+  // covered in compressPdf.test.ts; the encoder lives in the worker now.
   let lateDownloads = 0
   const countDownload = () => {
     lateDownloads++
   }
   p.on('download', countDownload)
-  await p.evaluate(() => {
-    window.__toBlob = HTMLCanvasElement.prototype.toBlob
-    window.__encodingStarted = false
-    HTMLCanvasElement.prototype.toBlob = function (callback, ...args) {
-      window.__encodingStarted = true
-      window.__toBlob.call(
-        this,
-        (blob) => setTimeout(() => callback(blob), 800),
-        ...args,
-      )
-    }
-  })
   await initial()
   await comp().check()
   await btn('Export vorbereiten').click()
-  await p.waitForFunction(() => window.__encodingStarted)
+  await p.getByRole('progressbar', { name: 'Exportfortschritt' }).waitFor()
   await btn('Abbrechen').click()
   await p.waitForFunction(() => !document.querySelector('.toolbar').inert)
+  await p.waitForTimeout(800)
   assert.equal(lateDownloads, 0)
   p.off('download', countDownload)
-  await p.evaluate(() => {
-    HTMLCanvasElement.prototype.toBlob = window.__toBlob
-    delete window.__toBlob
-    delete window.__encodingStarted
-  })
   await initial()
   await p.keyboard.press('Escape')
   // Redaction + replacement: optimize only sanitized export pixels, never source.

@@ -2,10 +2,10 @@ import { SourceTextPanel } from './SourceTextPanel'
 import type { SourceHistory } from './SourceTextPanel'
 import { ExportDialog, type PreparedExport } from './ExportDialog'
 import { checkExportAbort } from '../core/pdf/compressPdf'
-import { runExport, type ExportProgress, type ExportSize } from '../core/pdf/exportPipeline'
-import { inspectStructures, preflightExport, type TextIssue } from '../core/pdf/preflight'
-import { encodeCompressedImage } from '../core/images/compressImage'
-import { preparePdf, unlockPdf, encryptPdf, PasswordRequiredError, IncorrectPasswordError } from '../core/pdf/unlockPdf'
+import type { ExportProgress, ExportSize } from '../core/pdf/exportPipeline'
+import { encryptInWorker, exportInWorker, preflightInWorker } from '../core/pdf/exportJob'
+import { inspectStructures, type TextIssue } from '../core/pdf/preflight'
+import { preparePdf, unlockPdf, PasswordRequiredError, IncorrectPasswordError } from '../core/pdf/unlockPdf'
 import { PasswordDialog, type PasswordRequest } from './PasswordDialog'
 import { SearchWindow } from './SearchWindow'
 import type { SearchHit } from '../core/search'
@@ -80,6 +80,7 @@ export default function App() {
   const [signedDocument, setSignedDocument] = useState<ArrayBuffer | null>(null)
   // The export must describe the same editing state as the check the user read.
   const checkedVersionRef = useRef<number | null>(null)
+  const exportRunningRef = useRef(false)
   const [searchOpen, setSearchOpen] = useState(false)
   const [searchResult, setSearchResult] = useState<{
     hits: SearchHit[]
@@ -731,7 +732,7 @@ export default function App() {
     const draft = draftRef.current
     if (!draft || !store.state.pages?.length) throw new Error('Der Export ist gerade nicht verfügbar.')
     const version = store.getVersion()
-    const report = await preflightExport({
+    const report = await preflightInWorker({
       original: new Uint8Array(draft.bytes), sources: store.state.pageSources ?? [], pages: store.state.pages,
       overlays: store.state.overlays.map(cloneOverlay),
       secure: !!store.state.redactionApplied || store.state.pages.some(page => page.redacted),
@@ -750,33 +751,45 @@ export default function App() {
   const prepareExport = useCallback(
     async (size: ExportSize, signal: AbortSignal, onProgress: (progress: ExportProgress) => void): Promise<PreparedExport> => {
       const draft = draftRef.current
-      if (!draft || !store.state.pages?.length || pageBusy || exportBusy)
+      if (!draft || !store.state.pages?.length || pageBusy || exportRunningRef.current)
         throw new Error('Der Export ist gerade nicht verfügbar.')
+      exportRunningRef.current = true
       setExportBusy(true)
+      const version = store.getVersion(), intent = documentIntentRef.current
       try {
         checkExportAbort(signal)
         if (store.state.redactions?.length)
           throw new Error('Vorgemerkte Schwärzungen zuerst anwenden oder verwerfen; sie sind noch nicht sicher entfernt.')
         if (checkedVersionRef.current !== store.getVersion())
           throw new Error('Der Stand hat sich seit der Prüfung geändert. Bitte den Export neu öffnen.')
-        const result = await runExport({
+        const result = await exportInWorker({
           original: new Uint8Array(draft.bytes), sources: store.state.pageSources ?? [], pages: store.state.pages,
           overlays: store.state.overlays.map(cloneOverlay), formValues: store.state.formValues,
           secure: !!store.state.redactionApplied || store.state.pages.some(page => page.redacted), size,
-        }, encodeCompressedImage, { signal, onProgress })
+        }, { signal, onProgress })
         checkExportAbort(signal)
+        // An outdated result is thrown away, whatever changed in the meantime.
+        if (draftRef.current !== draft || documentIntentRef.current !== intent || store.getVersion() !== version)
+          throw new Error('Das Dokument hat sich während des Exports geändert. Bitte erneut exportieren.')
         return { name: draft.name, ...result }
-      } finally { setExportBusy(false) }
-    }, [store, pageBusy, exportBusy],
+      } finally {
+        exportRunningRef.current = false
+        setExportBusy(false)
+      }
+    }, [store, pageBusy],
   )
   const downloadExport = useCallback(async (bytes: Uint8Array, name: string, password: string | undefined, signal: AbortSignal) => {
+    exportRunningRef.current = true
     setExportBusy(true)
     try {
       checkExportAbort(signal)
-      const output = password === undefined ? bytes : await encryptPdf(bytes, password)
+      const output = password === undefined ? bytes : await encryptInWorker(bytes, password, { signal })
       checkExportAbort(signal)
       downloadPdf(output, name)
-    } finally { setExportBusy(false) }
+    } finally {
+      exportRunningRef.current = false
+      setExportBusy(false)
+    }
   }, [])
 
   const onApplyRedactions = async () => {
