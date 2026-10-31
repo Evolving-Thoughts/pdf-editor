@@ -1,7 +1,6 @@
-import { chromiumPath } from './browser-helper.mjs'
+import { collectErrors, launchBrowser } from './browser-helper.mjs'
 import { confirmDefaultExport } from './export-smoke-helper.mjs'
 import { PNG_DATA_URL } from '../tests/imageFixtures.js'
-import { chromium } from 'playwright'
 import { PDFDocument } from 'pdf-lib'
 import assert from 'node:assert/strict'
 import { mkdirSync, mkdtempSync, readFileSync } from 'node:fs'
@@ -10,13 +9,10 @@ import { join } from 'node:path'
 const base = process.env.SMOKE_URL ?? 'http://localhost:5207'
 const out = process.env.SMOKE_ARTIFACT_DIR ?? mkdtempSync(join(tmpdir(), 'pdf-editor-pages-'))
 mkdirSync(out, { recursive: true })
-const browser = await chromium.launch({
-  executablePath: chromiumPath(),
-  args: ['--no-sandbox'],
-})
+const browser = await launchBrowser()
 const p = await browser.newPage({ viewport: { width: 1280, height: 1000 }, acceptDownloads: true })
 const errors = []
-p.on('pageerror', (e) => errors.push(String(e)))
+collectErrors(p, errors)
 p.on('dialog', (d) => void d.accept())
 const button = (name) => p.getByRole('button', { name, exact: true })
 async function settled() {

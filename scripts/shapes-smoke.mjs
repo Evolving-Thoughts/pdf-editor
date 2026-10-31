@@ -1,8 +1,7 @@
 import { fileURLToPath } from 'node:url'
-import { chromiumPath } from './browser-helper.mjs'
+import { clickExport, collectErrors, launchBrowser, pdfInput } from './browser-helper.mjs'
 import { confirmDefaultExport } from './export-smoke-helper.mjs'
 // Real UI/command/export boundaries; isolated browser data, no fixture store injection.
-import { chromium } from 'playwright'
 import assert from 'node:assert/strict'
 import { mkdirSync, mkdtempSync, readFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
@@ -11,18 +10,15 @@ import { PDFDocument, PDFName, PDFNumber, degrees, StandardFonts, rgb } from 'pd
 const base = process.env.SMOKE_URL ?? 'http://localhost:5203'
 const artifacts = process.env.SMOKE_ARTIFACT_DIR ?? mkdtempSync(join(tmpdir(), 'pdf-editor-t5-'))
 mkdirSync(artifacts, { recursive: true })
-const browser = await chromium.launch({
-  executablePath: chromiumPath(),
-  args: ['--no-sandbox'],
-})
+const browser = await launchBrowser()
 const errors = [],
   fixture = fileURLToPath(new URL('../tests/fixtures/zweiseitig.pdf', import.meta.url))
 const context = await browser.newContext({ viewport: { width: 1280, height: 1000 }, acceptDownloads: true })
 const page = await context.newPage()
-page.on('pageerror', (e) => errors.push(String(e)))
+collectErrors(page, errors)
 async function open(p) {
   await p.goto(base)
-  await p.locator('input[accept="application/pdf"]').setInputFiles(fixture)
+  await pdfInput(p).setInputFiles(fixture)
   await p.waitForFunction(() => document.querySelector('.page canvas')?.width > 0)
 }
 async function draw(p, label, a, b) {
@@ -228,7 +224,7 @@ try {
   await page.waitForSelector('.shape-overlay')
   assert.equal(await page.locator('.shape-overlay').count(), 5)
   const download = page.waitForEvent('download')
-  await page.getByRole('button', { name: 'Exportieren', exact: true }).click(); await confirmDefaultExport(page)
+  await clickExport(page); await confirmDefaultExport(page)
   await (await download).saveAs(join(artifacts, 'shapes-export.pdf'))
   // Capture selected rectangle, then narrow light/dark controls with unchanged layout.
   await page.locator('.shape-overlay').first().focus()
@@ -245,7 +241,7 @@ try {
   // Actual PDF.js rasterization: independently expected local CW rectangle corners,
   // original PDF blue background, marker Multiply opacity, later text over a white cover.
   const exported = await context.newPage()
-  exported.on('pageerror', (e) => errors.push(String(e)))
+  collectErrors(exported, errors)
   for (const rotation of [0, 90, 180, 270]) {
     const doc = await PDFDocument.create(),
       sheet = doc.addPage([600, 800])
@@ -253,7 +249,7 @@ try {
     sheet.setRotation(degrees(rotation))
     sheet.node.set(PDFName.of('UserUnit'), PDFNumber.of(2))
     await exported.goto(base)
-    await exported.locator('input[accept="application/pdf"]').setInputFiles({
+    await pdfInput(exported).setInputFiles({
       name: 'cropped.pdf',
       mimeType: 'application/pdf',
       buffer: Buffer.from(await doc.save()),
@@ -267,10 +263,10 @@ try {
     await input.press('Enter')
     const placed = await geometry(exported)
     const downloaded = exported.waitForEvent('download')
-    await exported.getByRole('button', { name: 'Exportieren', exact: true }).click(); await confirmDefaultExport(exported)
+    await clickExport(exported); await confirmDefaultExport(exported)
     const path = join(artifacts, `shape-page-${rotation}.pdf`)
     await (await downloaded).saveAs(path)
-    await exported.locator('input[accept="application/pdf"]').setInputFiles({
+    await pdfInput(exported).setInputFiles({
       name: `baked-${rotation}.pdf`,
       mimeType: 'application/pdf',
       buffer: readFileSync(path),
@@ -311,7 +307,7 @@ try {
     font = await document.embedFont(StandardFonts.Helvetica)
   sheet.drawRectangle({ x: 100, y: 500, width: 220, height: 80, color: rgb(0, 0, 1) })
   sheet.drawText('Alter Text', { x: 110, y: 530, size: 20, font })
-  await exported.locator('input[accept="application/pdf"]').setInputFiles({
+  await pdfInput(exported).setInputFiles({
     name: 'correction.pdf',
     mimeType: 'application/pdf',
     buffer: Buffer.from(await document.save()),
@@ -344,7 +340,7 @@ try {
   await draw(exported, 'Textmarker', [100, 330], [300, 330])
   const markerR = await geometry(exported)
   const download2 = exported.waitForEvent('download')
-  await exported.getByRole('button', { name: 'Exportieren', exact: true }).click(); await confirmDefaultExport(exported)
+  await clickExport(exported); await confirmDefaultExport(exported)
   const baked = join(artifacts, 'correction-marker.pdf')
   await (await download2).saveAs(baked)
   await exported
@@ -378,7 +374,7 @@ try {
     isMobile: true,
     hasTouch: true,
   })
-  mobile.on('pageerror', (e) => errors.push(String(e)))
+  collectErrors(mobile, errors)
   await open(mobile)
   await mobile.getByRole('button', { name: 'Rechteck', exact: true }).click()
   const mobilePage = await mobile.locator('.page').first().boundingBox(),

@@ -1,8 +1,7 @@
 import { fileURLToPath } from 'node:url'
-import { chromiumPath } from './browser-helper.mjs'
+import { clickExport, collectErrors, launchBrowser, pdfInput } from './browser-helper.mjs'
 import { confirmDefaultExport } from './export-smoke-helper.mjs'
 // Approved rotation UI + draft/export/geometry regression checks in Chromium.
-import { chromium } from 'playwright'
 import assert from 'node:assert/strict'
 import { mkdirSync, mkdtempSync, readFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
@@ -12,17 +11,17 @@ import { PNG_DATA_URL } from '../tests/imageFixtures.js'
 const url = process.env.SMOKE_URL ?? 'http://localhost:5202'
 const artifacts = process.env.SMOKE_ARTIFACT_DIR ?? mkdtempSync(join(tmpdir(), 'pdf-editor-rotation-'))
 mkdirSync(artifacts, { recursive: true })
-const browser = await chromium.launch({ executablePath: chromiumPath(), args: ['--no-sandbox'] })
+const browser = await launchBrowser()
 const file = { name: 'angle.png', mimeType: 'image/png', buffer: Buffer.from(PNG_DATA_URL.split(',')[1], 'base64') }
 const errors = []
-const watch = page => page.on('pageerror', e => errors.push(String(e)))
+const watch = page => collectErrors(page, errors)
 const near = (a, b, tolerance = .05) => assert.ok(Math.abs(a - b) < tolerance, `${a} ≈ ${b}`)
 const geometry = page => page.locator('.image-overlay').evaluate(el => ({ x: parseFloat(el.style.left), y: parseFloat(el.style.top), w: parseFloat(el.style.width), h: parseFloat(el.style.height), angle: Number(/rotate\(([^d]+)deg/.exec(el.style.transform)[1]) }))
 const angleInput = page => page.getByRole('spinbutton', { name: 'Winkel in Grad', exact: true })
 async function setAngle(page, value) { await angleInput(page).fill(String(value)); await angleInput(page).press('Enter') }
 async function openAndInsert(page, pdf) {
   await page.goto(url)
-  await page.locator('input[accept="application/pdf"]').setInputFiles(pdf)
+  await pdfInput(page).setInputFiles(pdf)
   await page.waitForFunction(() => document.querySelector('.page canvas')?.width > 0)
   await page.locator('input[accept="image/png,image/jpeg"]').setInputFiles(file)
   await page.waitForSelector('.image-options', { state: 'visible' })
@@ -128,9 +127,9 @@ try {
     await setAngle(exportedPage, 37.5)
     const placed = await geometry(exportedPage)
     const download = exportedPage.waitForEvent('download')
-    await exportedPage.getByRole('button', { name: 'Exportieren', exact: true }).click(); await confirmDefaultExport(exportedPage)
+    await clickExport(exportedPage); await confirmDefaultExport(exportedPage)
     const output = join(artifacts, `angle-page-${rotation}.pdf`); await (await download).saveAs(output)
-    await exportedPage.locator('input[accept="application/pdf"]').setInputFiles({ name: `baked-${rotation}.pdf`, mimeType: 'application/pdf', buffer: readFileSync(output) })
+    await pdfInput(exportedPage).setInputFiles({ name: `baked-${rotation}.pdf`, mimeType: 'application/pdf', buffer: readFileSync(output) })
     await exportedPage.getByText(`baked-${rotation}.pdf · 1 Seite`, { exact: true }).waitFor()
     await exportedPage.waitForFunction(({ x, y, w, h, angle }) => {
       const canvas = document.querySelector('.page canvas'); if (!canvas?.width) return false

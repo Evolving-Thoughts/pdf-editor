@@ -3,6 +3,13 @@ import { existsSync } from 'node:fs'
 import { execFileSync } from 'node:child_process'
 import { chromium } from 'playwright'
 
+/** Everything a browser test does the same way, so a change in the app lands here once. */
+export const launchBrowser = () => chromium.launch({ executablePath: chromiumPath(), args: ['--no-sandbox'] })
+export const collectErrors = (page, errors) => page.on('pageerror', error => errors.push(String(error)))
+export const pdfInput = page => page.locator('input[accept="application/pdf"]')
+export const pageReady = page => page.locator('.page canvas[data-render-state="ready"]').first().waitFor()
+export const clickExport = page => page.getByRole('button', { name: 'Exportieren', exact: true }).click()
+
 /** Pages mount near the view only (T20): scroll until an overlay on a later page exists. */
 export async function revealInPages(page, selector) {
   await page.waitForSelector('.pages .page-slot')

@@ -1,10 +1,9 @@
-import { chromiumPath, revealInPages } from './browser-helper.mjs'
+import { collectErrors, launchBrowser, pdfInput, revealInPages } from './browser-helper.mjs'
 import {
   confirmDefaultExport,
   openProtectedExport,
 } from './export-smoke-helper.mjs'
 import { PNG_DATA_URL } from '../tests/imageFixtures.js'
-import { chromium } from 'playwright'
 import { PDFDocument, StandardFonts, degrees } from 'pdf-lib'
 import { readFileSync, mkdirSync, mkdtempSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
@@ -19,20 +18,17 @@ const fixtures = JSON.parse(
     'utf8',
   ),
 ).pdfs
-const browser = await chromium.launch({
-  executablePath: chromiumPath(),
-  args: ['--no-sandbox'],
-})
+const browser = await launchBrowser()
 const p = await browser.newPage({
     viewport: { width: 1280, height: 1100 },
     acceptDownloads: true,
   }),
   errors = []
-p.on('pageerror', (e) => errors.push(String(e)))
+collectErrors(p, errors)
 const btn = (name) => p.getByRole('button', { name, exact: true })
 const input = () => p.getByRole('textbox', { name: 'Suchtext', exact: true })
 async function open(bytes, name = 'search.pdf') {
-  await p.locator('input[accept="application/pdf"]').setInputFiles({
+  await pdfInput(p).setInputFiles({
     name,
     mimeType: 'application/pdf',
     buffer: Buffer.from(bytes),

@@ -1,7 +1,6 @@
-import { chromiumPath } from './browser-helper.mjs'
+import { collectErrors, launchBrowser, pdfInput } from './browser-helper.mjs'
 import { confirmDefaultExport } from './export-smoke-helper.mjs'
 // T9 variant C: real fields + overlay text, undo, drafts, page operations and live export.
-import { chromium } from 'playwright'
 import { PDFDocument, StandardFonts } from 'pdf-lib'
 import { mkdirSync, mkdtempSync, readFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
@@ -9,9 +8,9 @@ import { join } from 'node:path'
 import assert from 'node:assert/strict'
 const out = process.env.SMOKE_ARTIFACT_DIR ?? mkdtempSync(join(tmpdir(), 'pdf-acroform-'))
 mkdirSync(out, { recursive: true })
-const browser = await chromium.launch({ executablePath: chromiumPath(), args: ['--no-sandbox'] })
+const browser = await launchBrowser()
 const p = await browser.newPage({ viewport: { width: 1280, height: 1100 }, acceptDownloads: true }), errors = []
-p.on('pageerror', e => errors.push(String(e)))
+collectErrors(p, errors)
 const btn = name => p.getByRole('button', { name, exact: true })
 const name = () => p.locator('.pages').getByRole('textbox', { name: 'Name', exact: true }).first()
 const ready = () => p.waitForFunction(() => document.querySelector('.page-manager-preview canvas')?.width > 0 && !document.querySelector('.page-manager-message')?.textContent.includes('aktualisiert') && !document.querySelector('.page-manager-message')?.textContent.includes('verarbeitet'))
@@ -44,7 +43,7 @@ try {
   const unsupported = f.createButton('Button'); unsupported.addToPage('No script', a, { x: 40, y: 340, width: 100, height: 25 })
   const original = await doc.save()
   await p.goto(process.env.SMOKE_URL ?? 'http://localhost:5219')
-  await p.locator('input[accept="application/pdf"]').setInputFiles({ name: 'native.pdf', mimeType: 'application/pdf', buffer: Buffer.from(original) })
+  await pdfInput(p).setInputFiles({ name: 'native.pdf', mimeType: 'application/pdf', buffer: Buffer.from(original) })
   await name().waitFor(); assert.equal(await p.locator('.pages').getByRole('textbox', { name: 'Name', exact: true }).count(), 2)
   await name().fill('Grace'); assert.equal(await p.locator('.pages').getByRole('textbox', { name: 'Name', exact: true }).nth(1).inputValue(), 'Grace')
   await btn('Rückgängig').click(); assert.equal(await name().inputValue(), 'Ada'); await btn('Wiederholen').click(); assert.equal(await name().inputValue(), 'Grace')

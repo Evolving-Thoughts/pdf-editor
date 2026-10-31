@@ -4,10 +4,9 @@ import assert from 'node:assert/strict'
 import { createServer } from 'node:http'
 import { readFile, stat, mkdir } from 'node:fs/promises'
 import { resolve, extname, sep, join } from 'node:path'
-import { chromium } from 'playwright'
 import { PDFDocument, PDFName, PDFNumber, StandardFonts } from 'pdf-lib'
 import { PDFDocument as SecureDocument, PDFName as SecureName } from '@cantoo/pdf-lib'
-import { chromiumPath } from './browser-helper.mjs'
+import { collectErrors, launchBrowser, pdfInput } from './browser-helper.mjs'
 import { confirmDefaultExport, openProtectedExport } from './export-smoke-helper.mjs'
 
 const prefix = '/pdf-editor/'
@@ -38,16 +37,16 @@ try {
   const favicon = await fetch(`${origin}${prefix}favicon.svg`)
   assert.equal(favicon.status, 200)
   assert.equal(favicon.headers.get('content-type'), 'image/svg+xml')
-  browser = await chromium.launch({ executablePath: chromiumPath(), args: ['--no-sandbox'] })
+  browser = await launchBrowser()
   const page = await browser.newPage({ viewport: { width: 1440, height: 1000 }, acceptDownloads: true })
   page.setDefaultTimeout(15000)
   const errors = [], failed = [], requests = []
-  page.on('pageerror', error => errors.push(String(error)))
+  collectErrors(page, errors)
   page.on('response', response => { if (response.status() >= 400) failed.push(`${response.status()} ${response.url()}`) })
   page.on('request', request => requests.push(request.url()))
   page.on('requestfailed', request => failed.push(`${request.failure()?.errorText} ${request.url()}`))
   const button = name => page.getByRole('button', { name, exact: true })
-  const fileInput = () => page.locator('input[accept="application/pdf"]')
+  const fileInput = () => pdfInput(page)
   const upload = (bytes, name) => fileInput().setInputFiles({ name, mimeType: 'application/pdf', buffer: Buffer.from(bytes) })
   const ready = () => page.waitForFunction(() => document.querySelector('.pages .page canvas')?.width > 0 && !document.querySelector('header')?.inert)
   async function search(text) {

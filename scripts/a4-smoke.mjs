@@ -1,7 +1,6 @@
-import { chromiumPath, revealInPages } from './browser-helper.mjs'
+import { collectErrors, launchBrowser, pdfInput, revealInPages } from './browser-helper.mjs'
 import { confirmDefaultExport } from './export-smoke-helper.mjs'
 // Optional A4 via real UI, real PDF export, native fields, overlays and local drafts.
-import { chromium } from 'playwright'
 import { PDFDocument, StandardFonts, rgb } from 'pdf-lib'
 import { mkdtempSync, mkdirSync, readFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
@@ -12,9 +11,9 @@ const out = process.env.SMOKE_ARTIFACT_DIR ?? mkdtempSync(join(tmpdir(), 'pdf-a4
 mkdirSync(out, { recursive: true })
 const W = 210 * 72 / 25.4, H = 297 * 72 / 25.4
 const near = (a, b, tolerance = 0.05) => assert.ok(Math.abs(a - b) < tolerance, `${a} != ${b}`)
-const browser = await chromium.launch({ executablePath: chromiumPath(), args: ['--no-sandbox'] })
+const browser = await launchBrowser()
 const p = await browser.newPage({ viewport: { width: 1280, height: 1100 }, acceptDownloads: true })
-const errors = []; p.on('pageerror', e => errors.push(String(e)))
+const errors = []; collectErrors(p, errors)
 const btn = name => p.getByRole('button', { name, exact: true })
 const ready = () => p.waitForFunction(() => document.querySelector('.page-manager-preview canvas')?.width > 0 && !document.querySelector('.page-manager-message')?.textContent.includes('verarbeitet') && !document.querySelector('.page-manager-message')?.textContent.includes('aktualisiert'))
 const choose = async index => { await p.locator('.page-manager-select').nth(index).click(); await ready() }
@@ -35,7 +34,7 @@ try {
   first.drawText('Portrait fixture', { x: 30, y: 740, size: 18, font }); second.drawText('Landscape fixture', { x: 30, y: 340, size: 18, font })
   const field = source.getForm().createTextField('person.name'); field.setText('Ada'); field.addToPage(first, { x: 50, y: 650, width: 180, height: 24 })
   await p.goto(process.env.SMOKE_URL ?? 'http://localhost:5207')
-  await p.locator('input[accept="application/pdf"]').setInputFiles({ name: 'mixed.pdf', mimeType: 'application/pdf', buffer: Buffer.from(await source.save()) })
+  await pdfInput(p).setInputFiles({ name: 'mixed.pdf', mimeType: 'application/pdf', buffer: Buffer.from(await source.save()) })
   await p.waitForFunction(() => document.querySelector('.pages .page canvas')?.width > 0)
   await btn('T Text').click()
   const area = await p.locator('.pages .page').first().boundingBox()
@@ -103,7 +102,7 @@ try {
   const hidden = cropped.getForm().createTextField('hidden'); hidden.setText('Outside')
   hidden.addToPage(cropPage, { x: 10, y: 50, width: 100, height: 25, backgroundColor: rgb(1, 0, 0) })
   cropPage.setCropBox(80, 100, 300, 450)
-  await p.locator('input[accept="application/pdf"]').setInputFiles({ name: 'cropped.pdf', mimeType: 'application/pdf', buffer: Buffer.from(await cropped.save()) })
+  await pdfInput(p).setInputFiles({ name: 'cropped.pdf', mimeType: 'application/pdf', buffer: Buffer.from(await cropped.save()) })
   await btn('Seiten verwalten').click(); await ready()
   await btn('Alle Seiten auf A4 …').click(); await ready(); await btn('1 Seiten auf A4 setzen').click(); await ready()
   await download('Exportieren', 'cropped-a4.pdf')

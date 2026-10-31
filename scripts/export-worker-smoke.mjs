@@ -1,6 +1,5 @@
 // T21: export runs in its own worker, stops on cancel, and the page stays alive.
-import { chromiumPath } from './browser-helper.mjs'
-import { chromium } from 'playwright'
+import { clickExport, collectErrors, launchBrowser, pageReady, pdfInput } from './browser-helper.mjs'
 import { PDFDocument, StandardFonts } from 'pdf-lib'
 import { readFileSync } from 'node:fs'
 import assert from 'node:assert/strict'
@@ -13,10 +12,10 @@ async function long() {
   return doc.save()
 }
 
-const browser = await chromium.launch({ executablePath: chromiumPath(), args: ['--no-sandbox'] })
+const browser = await launchBrowser()
 const page = await browser.newPage({ viewport: { width: 1280, height: 1000 }, acceptDownloads: true })
 const errors = [], logged = []
-page.on('pageerror', error => errors.push(String(error)))
+collectErrors(page, errors)
 page.on('console', message => logged.push(message.text()))
 const exportWorkers = new Set()
 page.on('worker', worker => {
@@ -25,8 +24,8 @@ page.on('worker', worker => {
   worker.on('close', () => exportWorkers.delete(worker))
 })
 await page.goto(process.env.SMOKE_URL ?? 'http://localhost:5199')
-await page.locator('input[accept="application/pdf"]').setInputFiles({ name: 'lang.pdf', mimeType: 'application/pdf', buffer: Buffer.from(await long()) })
-await page.waitForSelector('.page canvas[data-render-state="ready"]')
+await pdfInput(page).setInputFiles({ name: 'lang.pdf', mimeType: 'application/pdf', buffer: Buffer.from(await long()) })
+await pageReady(page)
 
 // A heavy rebuild: every page is copied into a new document.
 await page.getByRole('button', { name: 'Seiten verwalten', exact: true }).click()
@@ -35,7 +34,7 @@ await page.getByRole('button', { name: 'Zur Dokumentbearbeitung', exact: true })
 
 const dialog = () => page.getByRole('dialog', { name: 'PDF exportieren', exact: true })
 const openExport = async () => {
-  await page.getByRole('button', { name: 'Exportieren', exact: true }).click()
+  await clickExport(page)
   await dialog().locator('.export-check .export-detail').first().waitFor()
 }
 const beat = () => page.evaluate(() => {

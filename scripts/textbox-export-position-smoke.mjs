@@ -1,7 +1,6 @@
-import { chromiumPath } from './browser-helper.mjs'
+import { clickExport, collectErrors, launchBrowser, pdfInput } from './browser-helper.mjs'
 import { confirmDefaultExport } from './export-smoke-helper.mjs'
 // Compare actual editor glyph pixels against exported PDF.js pixels after arrow nudges.
-import { chromium } from 'playwright'
 import assert from 'node:assert/strict'
 import { mkdirSync, mkdtempSync, readFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
@@ -10,10 +9,7 @@ import { PDFDocument, PDFArray, PDFRawStream, StandardFonts, decodePDFRawStream 
 const base = process.env.SMOKE_URL ?? 'http://localhost:5203'
 const artifacts = process.env.SMOKE_ARTIFACT_DIR ?? mkdtempSync(join(tmpdir(), 'pdf-editor-text-position-'))
 mkdirSync(artifacts, { recursive: true })
-const browser = await chromium.launch({
-  executablePath: chromiumPath(),
-  args: ['--no-sandbox'],
-})
+const browser = await launchBrowser()
 const errors = []
 async function glyphBounds(page, image) {
   return page.evaluate(async (encoded) => {
@@ -108,13 +104,13 @@ try {
   console.log(`Font regression group: ${group} (${chosenCases.length} cases)`)
   for (const test of chosenCases) {
     const page = await browser.newPage({ viewport: { width: 1600, height: 1400 }, acceptDownloads: true })
-    page.on('pageerror', (e) => errors.push(String(e)))
+    collectErrors(page, errors)
     const pdf = await PDFDocument.create()
     const sheet = pdf.addPage([600, 800]),
       font = await pdf.embedFont(StandardFonts.Helvetica)
     sheet.drawText('Originaltext', { x: 190, y: 400, size: 16, font })
     await page.goto(base)
-    await page.locator('input[accept="application/pdf"]').setInputFiles({
+    await pdfInput(page).setInputFiles({
       name: 'position.pdf',
       mimeType: 'application/pdf',
       buffer: Buffer.from(await pdf.save()),
@@ -209,7 +205,7 @@ try {
       : null
     if (test.second) await page.screenshot({ path: join(artifacts, test.name + '-scene.png') })
     const pending = page.waitForEvent('download')
-    await page.getByRole('button', { name: 'Exportieren', exact: true }).click(); await confirmDefaultExport(page)
+    await clickExport(page); await confirmDefaultExport(page)
     const output = join(artifacts, test.name + '-nudged.pdf')
     await (await pending).saveAs(output)
     const parsed = await PDFDocument.load(readFileSync(output)),
@@ -224,7 +220,7 @@ try {
       /1 0 0 1 210 405 Tm/,
       'export contains the nudged model baseline, not the old coordinates',
     )
-    await page.locator('input[accept="application/pdf"]').setInputFiles({
+    await pdfInput(page).setInputFiles({
       name: 'baked-position.pdf',
       mimeType: 'application/pdf',
       buffer: readFileSync(output),

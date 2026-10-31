@@ -1,8 +1,7 @@
 import { fileURLToPath } from 'node:url'
-import { chromiumPath } from './browser-helper.mjs'
+import { clickExport, collectErrors, launchBrowser, pdfInput } from './browser-helper.mjs'
 import { confirmDefaultExport } from './export-smoke-helper.mjs'
 // Real-browser integration checks for T6. Isolated contexts: no user data.
-import { chromium } from 'playwright'
 import assert from 'node:assert/strict'
 import { mkdirSync, mkdtempSync, readFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
@@ -12,15 +11,15 @@ import { PNG_DATA_URL, JPEG_DATA_URL, EXIF_JPEG_DATA_URL } from '../tests/imageF
 const base = process.env.SMOKE_URL ?? 'http://localhost:5202'
 const artifacts = process.env.SMOKE_ARTIFACT_DIR ?? mkdtempSync(join(tmpdir(), 'pdf-editor-t6-'))
 mkdirSync(artifacts, { recursive: true })
-const browser = await chromium.launch({ executablePath: chromiumPath(), args: ['--no-sandbox'] })
+const browser = await launchBrowser()
 const errors = []
 const fixture = fileURLToPath(new URL('../tests/fixtures/zweiseitig.pdf', import.meta.url))
 const png = { name: 'transparent.png', mimeType: 'image/png', buffer: Buffer.from(PNG_DATA_URL.split(',')[1], 'base64') }
 const jpg = { name: 'photo.jpg', mimeType: 'image/jpeg', buffer: Buffer.from(JPEG_DATA_URL.split(',')[1], 'base64') }
-const watch = page => { page.on('pageerror', error => errors.push(String(error))) }
+const watch = page => { collectErrors(page, errors) }
 async function openPdf(page) {
   await page.goto(base)
-  await page.locator('input[accept="application/pdf"]').setInputFiles(fixture)
+  await pdfInput(page).setInputFiles(fixture)
   await page.waitForSelector('.page canvas')
   await page.waitForFunction(() => document.querySelector('.page canvas').width > 0)
 }
@@ -94,7 +93,7 @@ try {
 
   // A real export includes the image once at the edited geometry.
   const downloadPromise = page.waitForEvent('download')
-  await page.getByRole('button', { name: 'Exportieren', exact: true }).click(); await confirmDefaultExport(page)
+  await clickExport(page); await confirmDefaultExport(page)
   const download = await downloadPromise; await download.saveAs(join(artifacts, 'images-export.pdf'))
   const exported = await PDFDocument.load(readFileSync(join(artifacts, 'images-export.pdf')))
   const value = exported.getPage(0).node.Contents()
@@ -161,7 +160,7 @@ try {
   await race.locator('input[accept="image/png,image/jpeg"]').setInputFiles(png)
   await race.waitForFunction(() => typeof window.releaseImageDecode === 'function')
   const replacement = await PDFDocument.create(); replacement.addPage([400, 500])
-  await race.locator('input[accept="application/pdf"]').setInputFiles({ name: 'new-document.pdf', mimeType: 'application/pdf', buffer: Buffer.from(await replacement.save()) })
+  await pdfInput(race).setInputFiles({ name: 'new-document.pdf', mimeType: 'application/pdf', buffer: Buffer.from(await replacement.save()) })
   await race.getByText('new-document.pdf · 1 Seite', { exact: true }).waitFor()
   await race.evaluate(() => window.releaseImageDecode())
   await race.waitForTimeout(400)
@@ -175,15 +174,15 @@ try {
     sheet.setCropBox(50, 70, 380, 370); sheet.setRotation(degrees(rotation))
     sheet.node.set(PDFName.of('UserUnit'), PDFNumber.of(2))
     await rotated.goto(base)
-    await rotated.locator('input[accept="application/pdf"]').setInputFiles({ name: `rotated-${rotation}.pdf`, mimeType: 'application/pdf', buffer: Buffer.from(await doc.save()) })
+    await pdfInput(rotated).setInputFiles({ name: `rotated-${rotation}.pdf`, mimeType: 'application/pdf', buffer: Buffer.from(await doc.save()) })
     await rotated.waitForSelector('.page canvas')
     await importFile(rotated, png)
     const placed = await imageRect(rotated)
     const downloadPromise = rotated.waitForEvent('download')
-    await rotated.getByRole('button', { name: 'Exportieren', exact: true }).click(); await confirmDefaultExport(rotated)
+    await clickExport(rotated); await confirmDefaultExport(rotated)
     const exported = await downloadPromise
     const output = join(artifacts, `rotated-${rotation}-export.pdf`); await exported.saveAs(output)
-    await rotated.locator('input[accept="application/pdf"]').setInputFiles({ name: `baked-${rotation}.pdf`, mimeType: 'application/pdf', buffer: readFileSync(output) })
+    await pdfInput(rotated).setInputFiles({ name: `baked-${rotation}.pdf`, mimeType: 'application/pdf', buffer: readFileSync(output) })
     await rotated.getByText(`baked-${rotation}.pdf · 1 Seite`, { exact: true }).waitFor()
     await rotated.waitForFunction(({ x, y, w, h }) => {
       const canvas = document.querySelector('.page canvas'); if (!canvas || !canvas.width) return false

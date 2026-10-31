@@ -1,7 +1,6 @@
 // T17: the export dialog reports risks, locks export until they are confirmed,
 // and leaves document and draft untouched when cancelled.
-import { chromiumPath } from './browser-helper.mjs'
-import { chromium } from 'playwright'
+import { clickExport, collectErrors, launchBrowser, pageReady, pdfInput } from './browser-helper.mjs'
 import { PDFDocument, PDFHexString, PDFName, PDFString, StandardFonts } from 'pdf-lib'
 import { readFileSync } from 'node:fs'
 import assert from 'node:assert/strict'
@@ -21,23 +20,23 @@ async function signed() {
   return doc.save()
 }
 
-const browser = await chromium.launch({ executablePath: chromiumPath(), args: ['--no-sandbox'] })
+const browser = await launchBrowser()
 const page = await browser.newPage({ viewport: { width: 1280, height: 1000 }, acceptDownloads: true })
 const errors = []
-page.on('pageerror', error => errors.push(String(error)))
+collectErrors(page, errors)
 await page.goto(process.env.SMOKE_URL ?? 'http://localhost:5199')
 
 let opened = 0
 const open = async bytes => {
   const name = `check-${++opened}.pdf`
-  await page.locator('input[accept="application/pdf"]').setInputFiles({ name, mimeType: 'application/pdf', buffer: Buffer.from(bytes) })
+  await pdfInput(page).setInputFiles({ name, mimeType: 'application/pdf', buffer: Buffer.from(bytes) })
   await page.waitForFunction(value => document.querySelector('.file-info')?.textContent.includes(value), name)
-  await page.waitForSelector('.page canvas[data-render-state="ready"]')
+  await pageReady(page)
 }
 const dialog = () => page.getByRole('dialog', { name: 'PDF exportieren', exact: true })
 const exportButton = () => dialog().locator('.export-primary')
 const openExport = async () => {
-  await page.getByRole('button', { name: 'Exportieren', exact: true }).click()
+  await clickExport(page)
   await dialog().locator('.export-check .export-detail').first().waitFor()
 }
 
@@ -114,7 +113,7 @@ await page.evaluate(() => {
     }
   }
 })
-await page.getByRole('button', { name: 'Exportieren', exact: true }).click()
+await clickExport(page)
 await dialog().getByRole('checkbox', { name: /Prüfung konnte nicht abgeschlossen/ }).check()
 const [fallback] = await Promise.all([page.waitForEvent('download', { timeout: 15_000 }), exportButton().click()])
 assert.ok(readFileSync(await fallback.path()).length > 0)

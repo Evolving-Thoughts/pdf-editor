@@ -1,8 +1,7 @@
 // T19: the text layer must match the page at any zoom, rotation and crop, and
 // must never get in the way of the other tools.
-import { chromiumPath } from './browser-helper.mjs'
+import { collectErrors, launchBrowser, pageReady, pdfInput } from './browser-helper.mjs'
 import { PNG_DATA_URL } from '../tests/imageFixtures.js'
-import { chromium } from 'playwright'
 import { PDFDocument, StandardFonts, degrees } from 'pdf-lib'
 import assert from 'node:assert/strict'
 
@@ -26,18 +25,18 @@ async function scanPdf() {
   return doc.save()
 }
 
-const browser = await chromium.launch({ executablePath: chromiumPath(), args: ['--no-sandbox'] })
+const browser = await launchBrowser()
 const page = await browser.newPage({ viewport: { width: 1280, height: 900 } })
 const errors = []
-page.on('pageerror', error => errors.push(String(error)))
+collectErrors(page, errors)
 await page.goto(process.env.SMOKE_URL ?? 'http://localhost:5199')
 
 let opened = 0
 const open = async bytes => {
   const name = `text-${++opened}.pdf`
-  await page.locator('input[accept="application/pdf"]').setInputFiles({ name, mimeType: 'application/pdf', buffer: Buffer.from(bytes) })
+  await pdfInput(page).setInputFiles({ name, mimeType: 'application/pdf', buffer: Buffer.from(bytes) })
   await page.waitForFunction(value => document.querySelector('.file-info')?.textContent.includes(value), name)
-  await page.waitForSelector('.page canvas[data-render-state="ready"]')
+  await pageReady(page)
 }
 const span = text => page.locator('.textLayer span', { hasText: text }).first()
 const selected = () => page.evaluate(() => window.getSelection().toString())

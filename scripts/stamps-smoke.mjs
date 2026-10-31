@@ -1,7 +1,6 @@
 // T23: stamps through the picker, as editable image overlays, with date stability.
-import { chromiumPath } from './browser-helper.mjs'
+import { clickExport, collectErrors, launchBrowser, pageReady, pdfInput } from './browser-helper.mjs'
 import { confirmDefaultExport } from './export-smoke-helper.mjs'
-import { chromium } from 'playwright'
 import { PDFDocument, PDFName, PDFRawStream } from 'pdf-lib'
 import { readFileSync } from 'node:fs'
 import assert from 'node:assert/strict'
@@ -13,14 +12,14 @@ async function source() {
   return doc.save()
 }
 
-const browser = await chromium.launch({ executablePath: chromiumPath(), args: ['--no-sandbox'] })
+const browser = await launchBrowser()
 const context = await browser.newContext({ viewport: { width: 1280, height: 1000 }, acceptDownloads: true })
 const page = await context.newPage()
 const errors = []
-page.on('pageerror', error => errors.push(String(error)))
+collectErrors(page, errors)
 await page.goto(process.env.SMOKE_URL ?? 'http://localhost:5199')
-await page.locator('input[accept="application/pdf"]').setInputFiles({ name: 'stempel.pdf', mimeType: 'application/pdf', buffer: Buffer.from(await source()) })
-await page.waitForSelector('.page canvas[data-render-state="ready"]')
+await pdfInput(page).setInputFiles({ name: 'stempel.pdf', mimeType: 'application/pdf', buffer: Buffer.from(await source()) })
+await pageReady(page)
 
 const openPicker = () => page.getByRole('button', { name: 'Stempel auswählen', exact: true }).click()
 const pick = async name => {
@@ -100,7 +99,7 @@ await page.keyboard.press('Escape')
 
 // The export contains the pictures.
 const [download] = await Promise.all([page.waitForEvent('download'), (async () => {
-  await page.getByRole('button', { name: 'Exportieren', exact: true }).click()
+  await clickExport(page)
   await confirmDefaultExport(page)
 })()])
 const output = await PDFDocument.load(new Uint8Array(readFileSync(await download.path())))

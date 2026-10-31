@@ -1,7 +1,6 @@
 // T25: real recognition of synthetic German and English scans in the browser.
-import { chromiumPath } from './browser-helper.mjs'
+import { clickExport, collectErrors, launchBrowser, pageReady, pdfInput } from './browser-helper.mjs'
 import { confirmDefaultExport } from './export-smoke-helper.mjs'
-import { chromium } from 'playwright'
 import { PDFDocument, StandardFonts, degrees } from 'pdf-lib'
 import { readFileSync } from 'node:fs'
 import assert from 'node:assert/strict'
@@ -10,10 +9,10 @@ import { getDocument } from 'pdfjs-dist/legacy/build/pdf.mjs'
 const GERMAN = ['Größe und Straße', 'Äpfel, Öl und Übung']
 const ENGLISH = ['The quick brown fox', 'jumps over the lazy dog']
 
-const browser = await chromium.launch({ executablePath: chromiumPath(), args: ['--no-sandbox'] })
+const browser = await launchBrowser()
 const page = await browser.newPage({ viewport: { width: 1280, height: 1000 }, acceptDownloads: true })
 const errors = [], requests = []
-page.on('pageerror', error => errors.push(String(error)))
+collectErrors(page, errors)
 page.on('request', request => requests.push(request.url()))
 const base = process.env.SMOKE_URL ?? 'http://localhost:5199'
 await page.goto(base)
@@ -49,9 +48,9 @@ async function scanPdf() {
 }
 
 const open = async (bytes, name) => {
-  await page.locator('input[accept="application/pdf"]').setInputFiles({ name, mimeType: 'application/pdf', buffer: Buffer.from(bytes) })
+  await pdfInput(page).setInputFiles({ name, mimeType: 'application/pdf', buffer: Buffer.from(bytes) })
   await page.waitForFunction(value => document.querySelector('.file-info')?.textContent.includes(value), name)
-  await page.waitForSelector('.page canvas[data-render-state="ready"]')
+  await pageReady(page)
 }
 const dialog = () => page.getByRole('dialog', { name: 'Text erkennen', exact: true })
 const openDialog = async () => {
@@ -150,7 +149,7 @@ await page.waitForFunction(() => [...document.querySelectorAll('.page[data-page-
 
 // Independent reading of the export: real text on the scanned pages, none on the skipped one.
 const [download] = await Promise.all([page.waitForEvent('download'), (async () => {
-  await page.getByRole('button', { name: 'Exportieren', exact: true }).click()
+  await clickExport(page)
   await confirmDefaultExport(page)
 })()])
 const task = getDocument({ data: new Uint8Array(readFileSync(await download.path())) })

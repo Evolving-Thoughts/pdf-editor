@@ -1,22 +1,18 @@
 // T14: observable grouped toolbar, responsive controls, and existing entry points.
 import { fileURLToPath } from 'node:url'
-import { chromium } from 'playwright'
 import assert from 'node:assert/strict'
 import { PDFDocument } from 'pdf-lib'
 import { mkdirSync } from 'node:fs'
 import { join } from 'node:path'
-import { chromiumPath } from './browser-helper.mjs'
+import { collectErrors, launchBrowser } from './browser-helper.mjs'
 
 const out = process.env.SMOKE_ARTIFACT_DIR
 if (out) mkdirSync(out, { recursive: true })
-const browser = await chromium.launch({
-  executablePath: chromiumPath(),
-  args: ['--no-sandbox'],
-})
+const browser = await launchBrowser()
 try {
   const page = await browser.newPage({ viewport: { width: 1440, height: 960 } })
   const errors = []
-  page.on('pageerror', (error) => errors.push(String(error)))
+  collectErrors(page, errors)
   await page.goto(process.env.SMOKE_URL ?? 'http://127.0.0.1:5240')
   await page
     .locator('input[type=file][accept="application/pdf"]')

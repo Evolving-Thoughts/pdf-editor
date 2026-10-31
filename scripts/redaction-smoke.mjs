@@ -1,15 +1,14 @@
-import { chromiumPath } from './browser-helper.mjs'
+import { collectErrors, launchBrowser, pdfInput } from './browser-helper.mjs'
 import { confirmDefaultExport } from './export-smoke-helper.mjs'
-import { chromium } from 'playwright'
 import { PDFDocument,StandardFonts } from 'pdf-lib'
 import { mkdirSync,readFileSync,mkdtempSync } from 'node:fs'
 import { join } from 'node:path'
 import { tmpdir } from 'node:os'
 import assert from 'node:assert/strict'
 const out=process.env.SMOKE_ARTIFACT_DIR??mkdtempSync(join(tmpdir(),'pdf-redaction-'));mkdirSync(out,{recursive:true})
-const browser=await chromium.launch({executablePath:chromiumPath(),args:['--no-sandbox']})
+const browser=await launchBrowser()
 const p=await browser.newPage({viewport:{width:1280,height:1100},acceptDownloads:true}),errors=[]
-p.on('pageerror',e=>errors.push(String(e)))
+collectErrors(p, errors)
 const btn=name=>p.getByRole('button',{name,exact:true})
 async function drag(pageIndex,x1,y1,x2,y2){const el=p.locator('.pages .page').nth(pageIndex);await el.scrollIntoViewIfNeeded();const r=await el.boundingBox();await p.mouse.move(r.x+x1,r.y+y1);await p.mouse.down();await p.mouse.move(r.x+x2,r.y+y2,{steps:4});await p.mouse.up()}
 async function exported(file){const event=p.waitForEvent('download');await btn('Exportieren').click(); await confirmDefaultExport(p);await (await event).saveAs(join(out,file));return new Uint8Array(readFileSync(join(out,file)))}
@@ -20,7 +19,7 @@ try{
  const field=doc.getForm().createTextField('Private');field.setText('SECRET-FIELD');field.addToPage(a,{x:40,y:520,width:250,height:26})
  const publicField=doc.getForm().createTextField('Public');publicField.setText('Keep editable');publicField.addToPage(b,{x:40,y:520,width:250,height:26})
  const bytes=await doc.save();await p.goto(process.env.SMOKE_URL??'http://localhost:5220')
- await p.locator('input[accept="application/pdf"]').setInputFiles({name:'redaction.pdf',mimeType:'application/pdf',buffer:Buffer.from(bytes)})
+ await pdfInput(p).setInputFiles({name:'redaction.pdf',mimeType:'application/pdf',buffer:Buffer.from(bytes)})
  await p.locator('.pages .page canvas').first().waitFor()
  await btn('T Text').click();await drag(0,50,230,50,230);await p.locator('.textbox textarea').fill('SECRET-OVERLAY');await p.locator('.textbox textarea').press('Escape')
  await btn('Schwärzen').click();await drag(0,30,160,390,310);await p.locator('.redaction-overlay.selected').waitFor();assert.equal(await btn('Exportieren').isDisabled(),true)
@@ -44,7 +43,7 @@ try{
  await btn('Speichern').click();await p.waitForFunction(()=>document.querySelector('.draft-save-status')?.textContent.includes('Entwurf gespeichert'));await p.reload();await p.getByRole('button',{name:/Entwürfe/}).click();await p.locator('.draft-open').first().click();await p.getByRole('textbox',{name:'Public',exact:true}).waitFor();assert.equal((await parsed(await exported('reopened.pdf')))[0].text,'')
  await p.screenshot({path:join(out,'desktop-black.png')})
  // White mask: uses the exact existing textbox implementation and PDF.js-derived starting size/baseline.
- await p.locator('input[accept="application/pdf"]').setInputFiles({name:'white.pdf',mimeType:'application/pdf',buffer:Buffer.from(bytes)})
+ await pdfInput(p).setInputFiles({name:'white.pdf',mimeType:'application/pdf',buffer:Buffer.from(bytes)})
  await p.getByRole('textbox',{name:'Private',exact:true}).waitFor();await btn('Schwärzen').click();await p.getByRole('combobox',{name:'Schwärzungsfarbe'}).selectOption('white');await drag(0,30,160,390,310)
  await btn('Schwärzung anwenden …').click();await btn('Jetzt wirklich schwärzen').click();await p.locator('.textbox textarea').waitFor();await p.locator('.textbox textarea').fill('REPLACEMENT-VISIBLE');await p.locator('.textbox textarea').press('Escape')
  const white=await parsed(await exported('white.pdf'));assert.ok(white[0].text.includes('REPLACEMENT-VISIBLE'));assert.ok(!white[0].text.includes('SECRET'));assert.deepEqual(white[0].pixel,[255,255,255,255]);assert.ok(white[1].text.includes('PUBLIC-VECTOR-PAGE'))

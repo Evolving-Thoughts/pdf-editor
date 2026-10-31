@@ -1,7 +1,6 @@
-import { chromiumPath } from './browser-helper.mjs'
+import { collectErrors, launchBrowser } from './browser-helper.mjs'
 // Real UI + IndexedDB regression: explicit save is durable, includes active text,
 // stays truthful during concurrent edits, handles failure/retry and document switches.
-import { chromium } from 'playwright'
 import assert from 'node:assert/strict'
 import { mkdirSync, mkdtempSync } from 'node:fs'
 import { tmpdir } from 'node:os'
@@ -10,14 +9,11 @@ import { PDFDocument } from 'pdf-lib'
 const base = process.env.SMOKE_URL ?? 'http://localhost:5203'
 const artifacts = process.env.SMOKE_ARTIFACT_DIR ?? mkdtempSync(join(tmpdir(), 'pdf-editor-save-'))
 mkdirSync(artifacts, { recursive: true })
-const browser = await chromium.launch({
-  executablePath: chromiumPath(),
-  args: ['--no-sandbox'],
-})
+const browser = await launchBrowser()
 const page = await browser.newPage({ viewport: { width: 1200, height: 1000 }, acceptDownloads: true })
 const errors = [],
   downloads = []
-page.on('pageerror', (e) => errors.push(String(e)))
+collectErrors(page, errors)
 page.on('console', (m) => {
   if (m.type() === 'error') errors.push(m.text())
 })
