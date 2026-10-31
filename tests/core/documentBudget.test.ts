@@ -21,6 +21,12 @@ test('counts every source that the document holds', () => {
   expect(() => assertSourceBudget(MAX_TOTAL_SOURCE_BYTES - 10, 11)).toThrow(/Gesamtgröße/)
 })
 
+test('the original counts toward the budget for all sources', () => {
+  const state = { overlays: [], pages: [page('a')], pageSources: [] }, added = { id: 's', bytes: new ArrayBuffer(4) }
+  expect(() => insertPages(state, 0, [page('neu')], added, [], MAX_TOTAL_SOURCE_BYTES - 4)).not.toThrow()
+  expect(() => insertPages(state, 0, [page('neu')], added, [], MAX_TOTAL_SOURCE_BYTES - 3)).toThrow(/Gesamtgröße/)
+})
+
 test('inserting pages cannot grow a document past the page budget', async () => {
   const pages = Array.from({ length: MAX_PAGE_COUNT }, (_, index) => page(`p${index}`))
   const state = { overlays: [], pages, pageSources: [] }

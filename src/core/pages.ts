@@ -128,6 +128,8 @@ export function insertPages(
   pages: DocumentPage[],
   source: PageSource,
   overlays: Overlay[] = [],
+  /** The document's own file, which the state does not hold. */
+  originalBytes = 0,
 ): Command {
   if (!Number.isInteger(index) || index < 0 || index > (state.pages?.length ?? 0) || pages.length === 0)
     throw new Error('Ungültige Einfügeposition.')
@@ -139,7 +141,7 @@ export function insertPages(
   if (pages.some(p => p.hasXfa)) throw new Error('XFA-Formulare werden bei Seitenoperationen noch nicht unterstützt.')
   assertPageBudget((state.pages?.length ?? 0) + pages.length)
   if (!state.pageSources?.some(existing => existing.id === source.id))
-    assertSourceBudget((state.pageSources ?? []).reduce((total, existing) => total + existing.bytes.byteLength, 0), source.bytes.byteLength)
+    assertSourceBudget((state.pageSources ?? []).reduce((total, existing) => total + existing.bytes.byteLength, originalBytes), source.bytes.byteLength)
   if (overlays.some((o) => !Number.isInteger(o.pageIndex) || o.pageIndex < 0 || o.pageIndex >= pages.length))
     throw new Error('Ungültige Overlay-Seite.')
   return pageCommand(state, 'Insert pages', (next) => {

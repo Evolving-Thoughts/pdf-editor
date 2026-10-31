@@ -217,7 +217,7 @@ export function PagesManager({ nativeWidgets = [], pdf, store, original, busy, o
       if (request.current !== token) return
       if (store.state.pages !== before)
         throw new Error('Die Seiten haben sich inzwischen geändert. Bitte erneut einfügen.')
-      store.dispatch(insertPages(store.state, gap, imported.pages, imported.source, imported.overlays))
+      store.dispatch(insertPages(store.state, gap, imported.pages, imported.source, imported.overlays, original.byteLength))
       setSelected(imported.pages[0].id)
       setCheckedIds([imported.pages[0].id]); anchor.current = imported.pages[0].id
       setInserting(false)
