@@ -102,6 +102,22 @@ await task.destroy()
 
 // Cancelling never touched the editor: the box still holds the original character.
 assert.equal(await page.locator('.textbox textarea').inputValue(), 'Widerstand 5 Ω gemessen')
+
+// A check that cannot finish hands the decision over. It must not block the export for good.
+// A new editing state first, so that no earlier check counts for this one.
+await page.getByRole('button', { name: 'Rückgängig', exact: true }).click()
+await page.evaluate(() => {
+  window.Worker = class extends window.Worker {
+    postMessage(job, ...options) {
+      if (job?.kind === 'preflight') this.onerror?.(new ErrorEvent('error'))
+      else super.postMessage(job, ...options)
+    }
+  }
+})
+await page.getByRole('button', { name: 'Exportieren', exact: true }).click()
+await dialog().getByRole('checkbox', { name: /Prüfung konnte nicht abgeschlossen/ }).check()
+const [fallback] = await Promise.all([page.waitForEvent('download', { timeout: 15_000 }), exportButton().click()])
+assert.ok(readFileSync(await fallback.path()).length > 0)
 assert.deepEqual(errors, [])
 console.log('PASS preflight: Signatur, Zeichen, Sprung zur Stelle, Bestätigung, Abbruch')
 await browser.close()

@@ -19,13 +19,16 @@ export function useExportFlow(store: EditorStore, draftRef: RefObject<ActiveDraf
     const draft = draftRef.current
     if (!draft || !store.state.pages?.length) throw new Error('Der Export ist gerade nicht verfügbar.')
     const version = store.getVersion()
-    const report = await preflightInWorker({
-      original: new Uint8Array(draft.bytes), sources: store.state.pageSources ?? [], pages: store.state.pages,
-      overlays: store.state.overlays.map(cloneOverlay),
-      secure: !!store.state.redactionApplied || store.state.pages.some(page => page.redacted),
-    }, { signal })
-    checkedVersionRef.current = version
-    return report
+    try {
+      return await preflightInWorker({
+        original: new Uint8Array(draft.bytes), sources: store.state.pageSources ?? [], pages: store.state.pages,
+        overlays: store.state.overlays.map(cloneOverlay),
+        secure: !!store.state.redactionApplied || store.state.pages.some(page => page.redacted),
+      }, { signal })
+    } finally {
+      // A failed check is confirmed in the dialog, and that answer is about this state too.
+      checkedVersionRef.current = version
+    }
   }, [store, draftRef])
   const prepareExport = useCallback(
     async (size: ExportSize, signal: AbortSignal, onProgress: (progress: ExportProgress) => void): Promise<PreparedExport> => {
