@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState, type RefObject } from 'react'
-import { removeShape, updateShape } from '../core/commands'
+import { removeOverlay, updateOverlay } from '../core/commands'
 import type { EditorStore } from '../core/editorStore'
 import type { ShapeOverlay } from '../core/model'
 import { shapeGeometry, rotateShape, type ShapeChanges } from '../core/shapes'
@@ -42,7 +42,7 @@ export function ShapeToolbar({
   const commit = (next: ShapeChanges) => {
     const before = shapeGeometry(shape)
     if (JSON.stringify(before) !== JSON.stringify(next)) {
-      store.dispatch(updateShape(shape.id, before, next))
+      store.dispatch(updateOverlay(shape.id, before, next))
       onStyle({ ...shape, ...next })
     }
   }
@@ -217,7 +217,7 @@ export function ShapeToolbar({
           <button
             type="button"
             onClick={() => {
-              store.dispatch(removeShape(shape))
+              store.dispatch(removeOverlay(shape))
               onSelect(null)
             }}
           >

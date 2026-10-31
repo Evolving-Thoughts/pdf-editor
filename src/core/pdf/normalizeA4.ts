@@ -1,17 +1,18 @@
-import type { FormValues } from '../forms'
 import { PDFArray, PDFDict, PDFDocument, PDFName, PDFNumber, PDFString, PDFHexString,
   clip, concatTransformationMatrix, endPath, popGraphicsState, pushGraphicsState, rectangle,
 } from 'pdf-lib'
-import { a4Size, pageSize, type DocumentPage, type PageSource } from '../pages'
-import { cloneOverlay, isShape, isStroke, isTextbox, type Overlay } from '../model'
+import { a4Size, pageSize } from '../pages'
+import { cloneOverlay, isShape, isStroke, isTextbox } from '../model'
 import { capturePageClip } from '../overlayClipping'
 import { clipAnnotation } from './clipAnnotation'
 import { composePages, preparePages } from './pageOperations'
+import { isSecure, type DocumentSnapshot } from './documentOutput'
 
 /** Normalize a derived source, never the user's original bytes or live state. */
-export async function normalizeA4(original: Uint8Array, sources: PageSource[], pages: DocumentPage[], overlays: Overlay[], formValues: FormValues = {}, secure = pages.some(page=>page.redacted)) {
+export async function normalizeA4({ original, state }: DocumentSnapshot) {
+  const pages = state.pages ?? [], overlays = state.overlays
   if (pages.some(page => page.hasXfa)) throw new Error('XFA-Formulare werden bei Seitenoperationen noch nicht unterstützt.')
-  const bytes = await composePages(original, sources, pages, formValues, secure)
+  const bytes = await composePages(original, state.pageSources ?? [], pages, state.formValues, isSecure(state))
   const doc = await PDFDocument.load(bytes)
   if (doc.catalog.lookupMaybe(PDFName.of('AcroForm'), PDFDict)?.has(PDFName.of('XFA')))
     throw new Error('XFA-Formulare werden bei Seitenoperationen noch nicht unterstützt.')
@@ -49,7 +50,7 @@ export async function normalizeA4(original: Uint8Array, sources: PageSource[], p
     page.setCropBox(0, 0, width, height)
     page.setBleedBox(0, 0, width, height); page.setTrimBox(0, 0, width, height); page.setArtBox(0, 0, width, height)
     page.node.set(PDFName.of('UserUnit'), PDFNumber.of(1))
-    for (const overlay of mapped.filter(o => o.pageIndex === index)) {
+    for (const overlay of mapped.filter(o => o.pageId === plan.id)) {
       capturePageClip(overlay, size)
       if (isStroke(overlay)) {
         overlay.points = overlay.points.map(p => ({ x: p.x * factor + dx, y: p.y * factor + dy }))

@@ -1,6 +1,5 @@
 // Direct native mouse selection must bind to proved source characters, not search text.
-import { chromium } from 'playwright'
-import { chromiumPath } from './browser-helper.mjs'
+import { collectErrors, launchBrowser, pageReady, pdfInput } from './browser-helper.mjs'
 import { confirmDefaultExport } from './export-smoke-helper.mjs'
 import { PDFDocument, StandardFonts } from 'pdf-lib'
 import { getDocument } from 'pdfjs-dist/legacy/build/pdf.mjs'
@@ -21,9 +20,9 @@ second.drawText('Safe fragment for correction.',{font,size:12,x:60,y:700})
 // This non-identity text matrix is displayed, but not editable by the adapter.
 second.drawText('Skewed unproved text.',{font,size:12,x:60,y:600,xSkew:{type:'degrees',angle:10}})
 const input=Buffer.from(await doc.save())
-const browser=await chromium.launch({executablePath:chromiumPath(),args:['--no-sandbox']})
+const browser=await launchBrowser()
 const page=await browser.newPage({viewport:{width:1440,height:1000},acceptDownloads:true})
-const errors=[];page.on('pageerror',e=>errors.push(String(e)))
+const errors=[];collectErrors(page, errors)
 const editor=()=>page.locator('.source-inline')
 const marked=async()=>{const [x,y]=await caret(page);return (await inlineInput(page).inputValue()).slice(x,y)}
 const ready=()=>page.locator('.source-selection-layer[data-analysis-state="ready"]').waitFor()
@@ -34,8 +33,8 @@ async function drag(run,from,to){
 }
 try{
  await page.goto(process.env.SMOKE_URL??'http://127.0.0.1:5237')
- await page.locator('input[accept="application/pdf"]').setInputFiles({name:'direct-selection.pdf',mimeType:'application/pdf',buffer:input})
- await page.locator('.page canvas[data-render-state="ready"]').first().waitFor()
+ await pdfInput(page).setInputFiles({name:'direct-selection.pdf',mimeType:'application/pdf',buffer:input})
+ await pageReady(page)
  await page.getByRole('button',{name:'Originaltext korrigieren',exact:true}).click();await ready()
  assert.equal(await editor().count(),0,'no automatic first run selection')
  const run=page.locator('.source-run-hit').filter({hasText:'Hallo Welt Grüße München.'})
@@ -102,7 +101,7 @@ try{
  await checkInPdf(page)
  assert.match(await page.locator('.source-editor [role="status"]').last().innerText(),/2 geänderten Absätzen auf 2 Seiten/,'both pages are checked together')
  await applyButton(page).click()
- await page.locator('.page canvas[data-render-state="ready"]').first().waitFor()
+ await pageReady(page)
  const pending=page.waitForEvent('download');await page.getByRole('button',{name:'Exportieren',exact:true}).click();await confirmDefaultExport(page)
  const dl=await pending,task=getDocument({data:Uint8Array.from(readFileSync(await dl.path())),standardFontDataUrl:resolve('node_modules/pdfjs-dist/standard_fonts')+'/'})
  try{const pdf=await task.promise,items=(await(await pdf.getPage(1)).getTextContent()).items.filter(i=>'str'in i);assert.equal(items.map(i=>i.str).filter(Boolean).join(' '),'Hallo Erde Grüße München. Following paragraph remains fixed.');assert.equal(items.at(-1).transform[5],640);const second=(await(await pdf.getPage(2)).getTextContent()).items.filter(i=>'str'in i).map(i=>i.str).join('');assert.match(second,/Safe fragment for correction\. ?Now/,'the page 2 correction is applied in the same step')}finally{await task.destroy()}

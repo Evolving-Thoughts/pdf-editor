@@ -5,7 +5,7 @@ import { CommandStack, replaceOverlays } from '../../src/core/commands'
 import { labelCollisions, labelOverlays, labelPosition, labelText, parsePageRange, planLabels, withoutLabelGroup, type LabelConfig, type MeasureText } from '../../src/core/pageLabels'
 import { exportPageDocument, inspectPages } from '../../src/core/pdf/pageOperations'
 import { cropPage, deletePages, movePage, rotatePages, type DocumentPage } from '../../src/core/pages'
-import type { EditorState, Textbox } from '../../src/core/model'
+import { overlayPageIndex, type EditorState, type Textbox } from '../../src/core/model'
 
 const fixedWidth: MeasureText = text => text.length * 6
 const config = (overrides: Partial<LabelConfig> = {}): LabelConfig => ({ template: 'Seite {n} von {gesamt}', range: '', start: 1, position: 'bottom-center', margin: 30, font: 'helvetica', fontSize: 10, ...overrides })
@@ -69,7 +69,7 @@ test('a label over page text or an overlay is reported with its page', () => {
   const pages = [page('a'), page('b'), page('c')]
   const labels = planLabels(pages, config({ template: 'xxxxxxxx' }), fixedWidth)
   const fragments = new Map([[0, [{ text: 'Fußnote', quad: [{ x: 250, y: 760 }, { x: 350, y: 760 }, { x: 350, y: 775 }, { x: 250, y: 775 }] }]]])
-  const shape: Textbox = { id: 'o', pageIndex: 1, x: 280, y: 30, text: 'Bestand', font: 'helvetica', fontSize: 12, bold: false, italic: false, underline: false }
+  const shape: Textbox = { id: 'o', pageId: 'b', x: 280, y: 30, text: 'Bestand', font: 'helvetica', fontSize: 12, bold: false, italic: false, underline: false }
   expect(labelCollisions(labels, 10, pages, [shape], fragments)).toEqual([0, 1])
 })
 
@@ -158,12 +158,12 @@ test('numbers applied after reordering follow the new order', async () => {
 test('moving a page renumbers the labels in the new order, as one undo step', () => {
   const pages = ['a', 'b', 'c'].map(id => page(id))
   const state: EditorState = { pages, overlays: labelOverlays(planLabels(pages, config(), fixedWidth), config()) }, stack = new CommandStack(state)
-  const onPage = (index: number) => (state.overlays.find(overlay => overlay.pageIndex === index) as Textbox).text
+  const onPage = (index: number) => (state.overlays.find(overlay => overlayPageIndex(state, overlay) === index) as Textbox).text
   stack.execute(movePage(state, 'c', 0))
   expect([onPage(0), onPage(1), onPage(2)]).toEqual(['Seite 1 von 3', 'Seite 2 von 3', 'Seite 3 von 3'])
   stack.undo()
   expect([onPage(0), onPage(1), onPage(2)]).toEqual(['Seite 1 von 3', 'Seite 2 von 3', 'Seite 3 von 3'])
-  expect((state.overlays[2] as Textbox).pageIndex).toBe(2)
+  expect(overlayPageIndex(state, state.overlays[2])).toBe(2)
 })
 
 test('deleting a page closes the gap and updates the total', () => {
@@ -179,7 +179,7 @@ test('a label edited by hand stays, the others keep counting', () => {
   ;(overlays[1] as Textbox).text = 'Anhang'
   const state: EditorState = { pages, overlays }
   movePage(state, 'c', 0).apply(state)
-  const text = (index: number) => (state.overlays.find(overlay => overlay.pageIndex === index) as Textbox).text
+  const text = (index: number) => (state.overlays.find(overlay => overlayPageIndex(state, overlay) === index) as Textbox).text
   expect(text(2)).toBe('Anhang')
   expect(text(0)).toBe('S. 1')
 })
@@ -189,7 +189,7 @@ test('labels on chosen pages keep counting from their start', () => {
   const settings = config({ template: '{n}', range: '2-4', start: 10 })
   const state: EditorState = { pages, overlays: labelOverlays(planLabels(pages, settings, fixedWidth), settings) }
   movePage(state, 'd', 1).apply(state)
-  expect(state.overlays.map(overlay => [overlay.pageIndex, (overlay as Textbox).text]).sort((a, b) => Number(a[0]) - Number(b[0]))).toEqual([[1, '10'], [2, '11'], [3, '12']])
+  expect(state.overlays.map(overlay => [overlayPageIndex(state, overlay), (overlay as Textbox).text]).sort((a, b) => Number(a[0]) - Number(b[0]))).toEqual([[1, '10'], [2, '11'], [3, '12']])
 })
 
 test('a centered label stays centered when its number gets a digit longer', () => {
@@ -200,7 +200,7 @@ test('a centered label stays centered when its number gets a digit longer', () =
   const first = state.overlays[0] as Textbox
   const center = first.x + measure(first.text, 'helvetica', 10) / 2
   movePage(state, 'p0', 11).apply(state)
-  const moved = state.overlays.find(overlay => overlay.pageIndex === 11) as Textbox
+  const moved = state.overlays.find(overlay => overlayPageIndex(state, overlay) === 11) as Textbox
   expect(moved.text).toBe('12')
   expect(moved.x + measure(moved.text, 'helvetica', 10) / 2).toBeCloseTo(center, 5)
 })
@@ -210,7 +210,7 @@ test('two label positions count independently', () => {
   const foot = config({ template: 'F{n}' }), head = config({ template: 'K{n}', position: 'top-left', start: 5 })
   const state: EditorState = { pages, overlays: [...labelOverlays(planLabels(pages, foot, fixedWidth), foot), ...labelOverlays(planLabels(pages, head, fixedWidth), head)] }
   movePage(state, 'b', 0).apply(state)
-  const on = (index: number) => state.overlays.filter(overlay => overlay.pageIndex === index).map(overlay => (overlay as Textbox).text).sort()
+  const on = (index: number) => state.overlays.filter(overlay => overlayPageIndex(state, overlay) === index).map(overlay => (overlay as Textbox).text).sort()
   expect(on(0)).toEqual(['F1', 'K5'])
   expect(on(1)).toEqual(['F2', 'K6'])
 })

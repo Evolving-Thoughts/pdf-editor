@@ -1,9 +1,8 @@
-import { chromiumPath } from './browser-helper.mjs'
-import { chromium } from 'playwright'
+import { collectErrors, launchBrowser } from './browser-helper.mjs'
 import { PDFDocument, PDFName, PDFNumber, degrees } from 'pdf-lib'
 import assert from 'node:assert/strict'
-const browser=await chromium.launch({executablePath:chromiumPath(),args:['--no-sandbox']})
-const page=await browser.newPage(),errors=[];page.on('pageerror',e=>errors.push(String(e)))
+const browser=await launchBrowser()
+const page=await browser.newPage(),errors=[];collectErrors(page, errors)
 try {
  await page.goto(process.env.SMOKE_URL??'http://localhost:5220')
  for(const rotation of [0,90,180,270]) {

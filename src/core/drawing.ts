@@ -139,22 +139,22 @@ function eraseStroke(stroke: Stroke, eraser: StrokePoint[], radius: number): Str
 }
 
 /** One eraser path splits vector strokes on this page; a miss returns the same array. */
-export function eraseStrokes(overlays: Overlay[], pageIndex: number, eraserPoints: StrokePoint[], radius: number): Overlay[] {
+export function eraseStrokes(overlays: Overlay[], pageId: string, eraserPoints: StrokePoint[], radius: number): Overlay[] {
   if (eraserPoints.length === 0 || !Number.isFinite(radius) || radius < 0) return overlays
   let changed = false
   const result: Overlay[] = []
   for (const overlay of overlays) {
-    if ((!isStroke(overlay) && !isMarker(overlay)) || overlay.pageIndex !== pageIndex) {
+    if ((!isStroke(overlay) && !isMarker(overlay)) || overlay.pageId !== pageId) {
       result.push(overlay)
       continue
     }
-    const remaining = eraseStroke(isMarker(overlay) ? { id: overlay.id, pageIndex, points: shapeWorldPoints(overlay),
+    const remaining = eraseStroke(isMarker(overlay) ? { id: overlay.id, pageId, points: shapeWorldPoints(overlay),
       color: overlay.strokeColor ?? '#ffff00', width: overlay.strokeWidth } : overlay, eraserPoints, radius)
     if (remaining === null) result.push(overlay)
     else {
       changed = true
       result.push(...(isMarker(overlay) ? remaining.flatMap(part => {
-        const shape = createShape('marker', part.points, pageIndex, { fill: null, strokeColor: part.color, strokeWidth: part.width }, part.id)
+        const shape = createShape('marker', part.points, pageId, { fill: null, strokeColor: part.color, strokeWidth: part.width }, part.id)
         if (shape && overlay.clips) shape.clips = resolvedOverlayClips(overlay).map(polygon => localizeOverlayClip(shape, polygon))
         return shape ? [shape] : []
       }) : remaining))

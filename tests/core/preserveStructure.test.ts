@@ -180,7 +180,7 @@ test('a removed page cannot return through the tag tree', async () => {
 test('the check and the export agree after a text correction', async () => {
   const { bytes, pages, state } = await fixture()
   sourceRevision(state, pages[0].id, bytes.slice().buffer).apply(state)
-  const input = { original: bytes, sources: state.pageSources!, pages: state.pages!, overlays: [], secure: false }
+  const input = { original: bytes, state: { pageSources: state.pageSources!, pages: state.pages!, overlays: [] } }
   const report = await preflightExport(input)
   expect(report.rebuilt).toBe(true)
   expect(report.assessments.filter(item => item.decision !== 'ok')).toEqual([])
@@ -190,7 +190,7 @@ test('the check and the export agree after a text correction', async () => {
 
 test('the check and the export agree for a redacted document', async () => {
   const { bytes, pages } = await fixture()
-  const report = await preflightExport({ original: bytes, sources: [], pages, overlays: [], secure: true })
+  const report = await preflightExport({ original: bytes, state: { pages, overlays: [], redactionApplied: true } })
   expect(report.assessments.filter(item => item.decision === 'confirm').map(item => item.kind).sort()).toEqual(['outline', 'tags'])
 })
 

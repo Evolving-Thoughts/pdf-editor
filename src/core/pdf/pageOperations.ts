@@ -217,7 +217,7 @@ export async function importPageFile(file: File, size = { width: 595.28, height:
     return preparePages(new Uint8Array(await file.arrayBuffer()), file.name)
   const image = await importImage(file)
   const imported = await preparePages(await imagePageBytes(size), file.name)
-  const overlay: Overlay = { kind: 'image', id: createId(), pageIndex: 0, ...image,
+  const overlay: Overlay = { kind: 'image', id: createId(), pageId: imported.pages[0].id, ...image,
     ...initialImageGeometry(image.pixelWidth, image.pixelHeight, size, { x: size.width / 2, y: size.height / 2 }) }
   return { ...imported, overlays: [overlay] }
 }
@@ -228,6 +228,15 @@ export async function preparePages(bytes: Uint8Array, name: string) {
   return { pages, source: { id, bytes: bytes.slice().buffer as ArrayBuffer }, overlays: [] as Overlay[] }
 }
 export { pageSize }
+
+/** Chosen pages in document order, with their overlays. */
+export function selectPages(pages: DocumentPage[], overlays: Overlay[], pageId: string | readonly string[]) {
+  const ids = new Set(typeof pageId === 'string' ? [pageId] : pageId), available = new Set(pages.map(page => page.id))
+  if (!ids.size || [...ids].some(id => !available.has(id)))
+    throw new Error('Bitte gültige Seiten zum Extrahieren auswählen.')
+  const chosen = pages.filter(page => ids.has(page.id))
+  return { pages: chosen, overlays: overlays.filter(overlay => ids.has(overlay.pageId)).map(cloneOverlay) }
+}
 
 export async function exportPageDocument(
   original: Uint8Array,
@@ -240,14 +249,8 @@ export async function exportPageDocument(
   keptTree?: boolean,
 ) {
   if (pageId !== undefined) {
-    const ids = new Set(typeof pageId === 'string' ? [pageId] : pageId), available = new Set(pages.map(page => page.id))
-    if (!ids.size || [...ids].some(id => !available.has(id)))
-      throw new Error('Bitte gültige Seiten zum Extrahieren auswählen.')
-    const chosen = pages.filter(page => ids.has(page.id))
-    const indices = new Map(chosen.map((page, index) => [page.id, index]))
-    const mapped = overlays.filter(overlay => indices.has(pages[overlay.pageIndex]?.id))
-      .map(overlay => ({ ...cloneOverlay(overlay), pageIndex: indices.get(pages[overlay.pageIndex].id)! }))
-    return exportPdf(await composePages(original, sources, chosen, formValues, secure), mapped)
+    const chosen = selectPages(pages, overlays, pageId)
+    return exportPdf(await composePages(original, sources, chosen.pages, formValues, secure), chosen.overlays, chosen.pages.map(page => page.id))
   }
-  return exportPdf(await composePages(original, sources, pages, formValues, secure, keptTree), overlays)
+  return exportPdf(await composePages(original, sources, pages, formValues, secure, keptTree), overlays, pages.map(page => page.id))
 }

@@ -1,8 +1,7 @@
 // Word-like source: every fragment is its own clipped BT/ET with absolute Tm,
 // one marked-content sequence per paragraph. The paragraph must behave as one
 // automatic block: one click selects it, shortening pulls the period along.
-import { chromium } from 'playwright'
-import { chromiumPath } from './browser-helper.mjs'
+import { clickExport, collectErrors, launchBrowser, pageReady, pdfInput } from './browser-helper.mjs'
 import { confirmDefaultExport } from './export-smoke-helper.mjs'
 import { PDFDocument, PDFName, StandardFonts } from 'pdf-lib'
 import { getDocument } from 'pdfjs-dist/legacy/build/pdf.mjs'
@@ -36,13 +35,13 @@ d.catalog.set(n('StructTreeRoot'), d.context.obj({ Type: 'StructTreeRoot', K: []
 p.node.set(n('StructParents'), d.context.obj(0))
 const bytes = Buffer.from(await d.save())
 const paragraph = paragraphs[0].lines.flat().join('')
-const browser = await chromium.launch({ executablePath: chromiumPath(), args: ['--no-sandbox'] })
+const browser = await launchBrowser()
 const page = await browser.newPage({ viewport: { width: 1440, height: 1000 }, acceptDownloads: true }), errors = []
-page.on('pageerror', (e) => errors.push(String(e)))
+collectErrors(page, errors)
 try {
   await page.goto(process.env.SMOKE_URL ?? 'http://127.0.0.1:5237')
-  await page.locator('input[accept="application/pdf"]').setInputFiles({ name: 'word-like.pdf', mimeType: 'application/pdf', buffer: bytes })
-  await page.locator('.page canvas[data-render-state="ready"]').first().waitFor()
+  await pdfInput(page).setInputFiles({ name: 'word-like.pdf', mimeType: 'application/pdf', buffer: bytes })
+  await pageReady(page)
   await page.getByRole('button', { name: 'Originaltext korrigieren', exact: true }).click()
   await page.locator('.source-run-hit').first().waitFor()
   assert.equal(await page.locator('.source-block-outline').count(), 2, 'one outline per paragraph, not per fragment')
@@ -63,9 +62,9 @@ try {
   await checkInPdf(page)
   await page.screenshot({ path: artifacts + '/blocks-preview.png', fullPage: true })
   await applyButton(page).click()
-  await page.locator('.page canvas[data-render-state="ready"]').first().waitFor()
+  await pageReady(page)
   const pending = page.waitForEvent('download')
-  await page.getByRole('button', { name: 'Exportieren', exact: true }).click(); await confirmDefaultExport(page)
+  await clickExport(page); await confirmDefaultExport(page)
   const output = readFileSync(await (await pending).path())
   const task = getDocument({ data: Uint8Array.from(output), standardFontDataUrl: resolve('node_modules/pdfjs-dist/standard_fonts') + '/' })
   try {

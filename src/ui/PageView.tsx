@@ -5,7 +5,7 @@ import type { NativeWidget } from '../core/forms'
 import { NativeFormLayer } from './NativeFormLayer'
 import { useEffect, useRef, useState, type ReactNode, type Dispatch, type SetStateAction } from 'react'
 import { resolvedOverlayClips } from '../core/overlayClipping'
-import { addShape, addStroke, addTextbox, replaceOverlays } from '../core/commands'
+import { addOverlay, replaceOverlays } from '../core/commands'
 import { eraseStrokes, strokeToSvgPath } from '../core/drawing'
 import type { EditorStore } from '../core/editorStore'
 import { createId, isImage, isShape, isStroke, type Overlay, type StrokePoint, type Textbox } from '../core/model'
@@ -28,6 +28,7 @@ interface PageViewProps {
   pdf: PdfHandle
   readOnly?: boolean
   pageIndex: number
+  pageId: string
   zoom: number
   tool: Tool
   symbol: string
@@ -38,7 +39,7 @@ interface PageViewProps {
   strokeColor?: string
   strokeWidth?: number
   onImageDrop: (file: File, pageIndex: number, point: StrokePoint) => void
-  onPlaceStamp?: (pageIndex: number, point: StrokePoint, page: PageSize) => void
+  onPlaceStamp?: (pageId: string, point: StrokePoint, page: PageSize) => void
   shapeStyle: ShapeStyle
   markerStyle: ShapeStyle
   eraserRadius?: number
@@ -59,7 +60,7 @@ interface DrawingGesture {
 
 export function PageView({
   searchHits = [], activeSearchHit, redactionFill = 'black', nativeWidgets = [], highlightFields = false, onFormError,
-  pdf, readOnly = false, pageIndex, zoom, tool, symbol, overlays, store, selectedId, onSelect,
+  pdf, readOnly = false, pageIndex, pageId, zoom, tool, symbol, overlays, store, selectedId, onSelect,
   shapeStyle, markerStyle, onImageDrop, onPlaceStamp, strokeColor = '#111111', strokeWidth = 3, eraserRadius = 8,
 }: PageViewProps) {
   const canvasRef = useRef<HTMLCanvasElement>(null)
@@ -170,13 +171,13 @@ export function PageView({
       return
     }
     if (tool === 'stamp') {
-      onPlaceStamp?.(pageIndex, pointFrom(event.clientX, event.clientY), pageSize)
+      onPlaceStamp?.(pageId, pointFrom(event.clientX, event.clientY), pageSize)
       return
     }
     const placingSymbol = tool === 'symbol'
     const box: Textbox = {
       id: createId(),
-      pageIndex,
+      pageId,
       x: cssX / zoom,
       y: pageSize.height - cssY / zoom,
       text: placingSymbol ? symbol : '',
@@ -186,7 +187,7 @@ export function PageView({
       italic: false,
       underline: false,
     }
-    store.dispatch(addTextbox(box))
+    store.dispatch(addOverlay(box))
     onSelect(box.id)
   }
 
@@ -230,24 +231,24 @@ export function PageView({
     setPreview(null)
     if (event.currentTarget.hasPointerCapture(event.pointerId)) event.currentTarget.releasePointerCapture(event.pointerId)
     if (gesture.tool === 'pen') {
-      store.dispatch(addStroke({
-        id: createId(), pageIndex, points: gesture.points, color: gesture.color, width: gesture.width,
+      store.dispatch(addOverlay({
+        id: createId(), pageId, points: gesture.points, color: gesture.color, width: gesture.width,
       }))
     } else if (gesture.tool === 'redact') {
-      const mark = createRedaction(store.state.pages![pageIndex].id,gesture.points[0],gesture.points.at(-1)!,pageSize!,redactionFill)
+      const mark = createRedaction(pageId,gesture.points[0],gesture.points.at(-1)!,pageSize!,redactionFill)
       if(mark){store.dispatch(replaceRedactions(store.state,[...(store.state.redactions??[]),mark]));onSelect(mark.id)}
     } else if (isShapeTool(gesture.tool)) {
-      const shape = createShape(gesture.tool, gesture.points, pageIndex, gesture.style)
-      if (shape) { store.dispatch(addShape(shape)); onSelect(shape.id) }
+      const shape = createShape(gesture.tool, gesture.points, pageId, gesture.style)
+      if (shape) { store.dispatch(addOverlay(shape)); onSelect(shape.id) }
     } else {
       const before = store.state.overlays
-      const after = eraseStrokes(before, pageIndex, gesture.points, gesture.radius)
+      const after = eraseStrokes(before, pageId, gesture.points, gesture.radius)
       if (after !== before) store.dispatch(replaceOverlays(before, after))
     }
   }
 
-  const redactionPreview = tool==='redact'&&previewPoints.length?createRedaction(store.state.pages![pageIndex].id,previewPoints[0],previewPoints.at(-1)!,pageSize!,redactionFill):null
-  const shapePreview = isShapeTool(tool) && previewPoints.length > 0 ? createShape(tool, previewPoints, pageIndex, preview!.style) : null
+  const redactionPreview = tool==='redact'&&previewPoints.length?createRedaction(pageId,previewPoints[0],previewPoints.at(-1)!,pageSize!,redactionFill):null
+  const shapePreview = isShapeTool(tool) && previewPoints.length > 0 ? createShape(tool, previewPoints, pageId, preview!.style) : null
   return (
     <div
       className={`page${tool==='redact'?' redact-tool':''}${tool === 'text' ? ' text-tool' : ''}${tool === 'symbol' || tool === 'stamp' ? ' symbol-tool' : ''}${drawing ? ' drawing-tool' : ''}`}
@@ -297,7 +298,7 @@ export function PageView({
       {pageSize && nativeWidgets.some(field => field.pageIndex === pageIndex) && <NativeFormLayer fields={nativeWidgets.filter(field => field.pageIndex === pageIndex)} store={store} interactive={!readOnly && (tool === 'select' || tool === 'text')} highlight={highlightFields} zoom={zoom} onSelect={onSelect} onError={onFormError} />}
       {pageSize &&
         overlays
-          .filter((overlay) => overlay.pageIndex === pageIndex)
+          .filter((overlay) => overlay.pageId === pageId)
           .map((overlay) => {
             const element: ReactNode = isStroke(overlay) ? (
             <svg key={overlay.id} className="stroke-layer" viewBox={`0 0 ${pageSize.width} ${pageSize.height}`} aria-hidden="true">
@@ -326,7 +327,7 @@ export function PageView({
             opacity={tool === 'eraser' ? 0.25 : 1} strokeLinecap="round" strokeLinejoin="round" />
         </svg>
       )}
-      {pageSize && (store.state.redactions??[]).filter(mark=>mark.pageId===store.state.pages?.[pageIndex]?.id).map(mark=><RedactionView key={mark.id} mark={mark} zoom={zoom} pageSize={pageSize} selected={selectedId===mark.id} tool={tool} store={store} onSelect={onSelect} readOnly={readOnly}/>)}
+      {pageSize && (store.state.redactions??[]).filter(mark=>mark.pageId===pageId).map(mark=><RedactionView key={mark.id} mark={mark} zoom={zoom} pageSize={pageSize} selected={selectedId===mark.id} tool={tool} store={store} onSelect={onSelect} readOnly={readOnly}/>)}
       {pageSize && redactionPreview && <div className={`redaction-overlay preview ${redactionPreview.fill}`} style={{left:redactionPreview.x*zoom,top:(pageSize.height-redactionPreview.y-redactionPreview.height)*zoom,width:redactionPreview.width*zoom,height:redactionPreview.height*zoom,pointerEvents:'none'}}/>}
       {pageSize && shapePreview && <svg className="stroke-layer" viewBox={`0 0 ${pageSize.width} ${pageSize.height}`} aria-hidden="true"
         style={tool === 'marker' ? {mixBlendMode:'multiply'} : undefined}>

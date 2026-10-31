@@ -8,12 +8,12 @@ import {
   openDraftDb,
   saveDraft,
 } from '../../../src/core/persistence/drafts'
-import type { Textbox } from '../../../src/core/model'
+import { copyEditorState, type EditorState, type Textbox } from '../../../src/core/model'
 
 function sampleOverlays(): Textbox[] {
   return [
-    { id: 'a', pageIndex: 0, x: 50, y: 700, text: 'Hallo', font: 'helvetica', fontSize: 14, bold: false, italic: false, underline: false },
-    { id: 'b', pageIndex: 1, x: 100, y: 400, text: '✓', font: 'zapfdingbats', fontSize: 20, bold: false, italic: false, underline: false },
+    { id: 'a', pageId: 'p0', x: 50, y: 700, text: 'Hallo', font: 'helvetica', fontSize: 14, bold: false, italic: false, underline: false },
+    { id: 'b', pageId: 'p1', x: 100, y: 400, text: '✓', font: 'zapfdingbats', fontSize: 20, bold: false, italic: false, underline: false },
   ]
 }
 
@@ -46,6 +46,36 @@ function sampleDraft(id: string) {
     overlays: sampleOverlays(),
   }
 }
+
+/** Required: a new state field fails to compile here until the test covers it. */
+function fullState(): Required<EditorState> {
+  return {
+    redactionApplied: true,
+    redactions: [{ id: 'mark', pageId: 'p', x: 1, y: 2, width: 3, height: 4, fill: 'black' }] as Required<EditorState>['redactions'],
+    formValues: { field: 'Wert' },
+    pages: [{ id: 'p', name: 'Seite', sourceId: 'extra', sourceIndex: 0, box: { x: 0, y: 0, width: 10, height: 20 }, unit: 1, rotation: 0, ocr: [{ text: 'Wort', x: 1, y: 2, dx: 3, dy: 0, height: 4 }] }] as Required<EditorState>['pages'],
+    pageSources: [{ id: 'extra', bytes: new TextEncoder().encode('%PDF-extra').buffer as ArrayBuffer }],
+    overlays: sampleOverlays(),
+    metadata: { fields: { author: null }, removeTechnical: true },
+  }
+}
+
+test('the whole editing state survives a copy, a draft and a restore', async () => {
+  const state = fullState(), db = await openDb()
+  expect(copyEditorState(state)).toEqual(state)
+  await saveDraft(db, { id: 'full', name: 'a.pdf', createdAt: 1, pdfBytes: new ArrayBuffer(1), ...copyEditorState(state) })
+  const store = new EditorStore()
+  store.restore((await loadDraft(db, 'full'))!)
+  expect(store.state).toEqual(state)
+})
+
+test('a copied state shares nothing that can be edited', () => {
+  const state = fullState(), copy = copyEditorState(state)
+  copy.overlays[0].x = 999
+  copy.pages[0].rotation = 90
+  copy.metadata!.fields.title = 'Neu'
+  expect(state).toEqual(fullState())
+})
 
 test('a saved draft round-trips with pdf bytes and overlays intact', async () => {
   const db = await openDb()
@@ -115,34 +145,31 @@ test('listDrafts summarizes multiple drafts newest first, without loading bytes'
   expect('pdfBytes' in list[0]).toBe(false)
 })
 
-test('openDraftDb migrates v1 records by splitting PDF bytes from metadata', async () => {
+test('drafts from before page identity are dropped, and the store works afterwards', async () => {
   await new Promise<void>((resolve, reject) => {
-    const request = indexedDB.open('pdf-editor-drafts', 1)
+    const request = indexedDB.open('pdf-editor-drafts', 3)
     request.onupgradeneeded = () => {
       request.result.createObjectStore('drafts', { keyPath: 'id' })
+      request.result.createObjectStore('draft-bytes')
+      request.result.createObjectStore('image-assets', { keyPath: 'key' }).createIndex('draftId', 'draftId')
     }
     request.onsuccess = () => {
       const db = request.result
-      const transaction = db.transaction('drafts', 'readwrite')
-      transaction.objectStore('drafts').put({ ...sampleDraft('legacy'), updatedAt: 1234 })
-      transaction.oncomplete = () => {
-        db.close()
-        resolve()
-      }
-      transaction.onerror = () => reject(transaction.error)
+      const tx = db.transaction(['drafts', 'draft-bytes'], 'readwrite')
+      const { pdfBytes, ...metadata } = sampleDraft('old')
+      tx.objectStore('drafts').put({ ...metadata, updatedAt: 1, sizeBytes: pdfBytes.byteLength })
+      tx.objectStore('draft-bytes').put(pdfBytes, 'old')
+      tx.oncomplete = () => { db.close(); resolve() }
+      tx.onerror = () => reject(tx.error)
     }
     request.onerror = () => reject(request.error)
   })
-
   const db = await openDb()
-  expect(db.objectStoreNames.contains('draft-bytes')).toBe(true)
-  const loaded = await loadDraft(db, 'legacy')
-  expect(loaded).not.toBeNull()
-  expect(new TextDecoder().decode(loaded!.pdfBytes)).toBe('%PDF-fake-legacy')
-  expect(loaded!.overlays).toEqual(sampleOverlays())
-  const list = await listDrafts(db)
-  expect(list).toHaveLength(1)
-  expect(list[0].sizeBytes).toBeGreaterThan(0)
+  expect(db.version).toBe(4)
+  expect(await listDrafts(db)).toEqual([])
+  expect(await loadDraft(db, 'old')).toBeNull()
+  await saveDraft(db, sampleDraft('new'))
+  expect((await loadDraft(db, 'new'))!.overlays).toEqual(sampleOverlays())
 })
 
 test('loadDraft returns null and deleteDraft removes for unknown ids', async () => {
@@ -160,7 +187,7 @@ test('the size warning threshold is 50 MB', () => {
 
 import type { ImageOverlay } from '../../../src/core/model'
 import { PNG_DATA_URL } from '../../imageFixtures.js'
-const image: ImageOverlay = { kind: 'image', id: 'image', pageIndex: 1, x: 40, y: 50, width: 120, height: 60,
+const image: ImageOverlay = { kind: 'image', id: 'image', pageId: 'p1', x: 40, y: 50, width: 120, height: 60,
   lockAspectRatio: true, name: 'logo.png', pixelWidth: 120, pixelHeight: 60, dataUrl: PNG_DATA_URL }
 
 test('image source is stored outside draft listing metadata and restored after reopening', async () => {
@@ -195,34 +222,6 @@ test('deleting one draft deletes only its image assets; missing assets fail rath
   await expect(loadDraft(db, 'two')).rejects.toThrow('Bilddaten')
 })
 
-test('v2 text/stroke drafts migrate to v3 without data loss', async () => {
-  const legacy = { ...sampleDraft('v2'), updatedAt: 123 }
-  const stroke = { id: 'line', pageIndex: 1, color: '#111111', width: 3, points: [{ x: 1, y: 2 }, { x: 3, y: 4 }] }
-  await new Promise<void>((resolve, reject) => {
-    const request = indexedDB.open('pdf-editor-drafts', 2)
-    request.onupgradeneeded = () => {
-      request.result.createObjectStore('drafts', { keyPath: 'id' })
-      request.result.createObjectStore('draft-bytes')
-    }
-    request.onsuccess = () => {
-      const db = request.result
-      const tx = db.transaction(['drafts', 'draft-bytes'], 'readwrite')
-      const { pdfBytes, ...metadata } = legacy
-      tx.objectStore('drafts').put({ ...metadata, sizeBytes: pdfBytes.byteLength, overlays: [...legacy.overlays, stroke] })
-      tx.objectStore('draft-bytes').put(pdfBytes, 'v2')
-      tx.oncomplete = () => { db.close(); resolve() }
-      tx.onerror = () => reject(tx.error)
-    }
-    request.onerror = () => reject(request.error)
-  })
-  const db = await openDb()
-  expect(db.version).toBe(3)
-  expect((await loadDraft(db, 'v2'))!.overlays).toEqual([...legacy.overlays, stroke])
-  expect((await loadDraft(db, 'v2'))!.pdfBytes).toEqual(legacy.pdfBytes)
-  await saveDraft(db, { ...legacy, overlays: [...legacy.overlays, stroke, image] })
-  expect((await loadDraft(db, 'v2'))!.overlays).toEqual([...legacy.overlays, stroke, image])
-})
-
 test('arbitrary image angles survive draft save, reopen and geometry edits', async () => {
   const db = await openDb()
   const rotated = { ...image, rotation: 37.5 }
@@ -255,13 +254,13 @@ test('autosave prunes deleted image assets only in this draft, retaining referen
 })
 
 import { EditorStore } from '../../../src/core/editorStore'
-import { removeImage } from '../../../src/core/commands'
+import { removeOverlay } from '../../../src/core/commands'
 test('undo after a persisted deletion rewrites the pruned source and restores exact image geometry', async () => {
   const db = await openDb(), store = new EditorStore()
   const original = { ...image, rotation: 37.5 }
-  store.restore([original])
+  store.restore({ overlays: [original] })
   await saveDraft(db, { ...sampleDraft('undo'), overlays: store.state.overlays })
-  store.dispatch(removeImage(original))
+  store.dispatch(removeOverlay(original))
   await saveDraft(db, { ...sampleDraft('undo'), overlays: store.state.overlays })
   expect(await imageAssetKeys(db)).toEqual([])
   store.undo()
@@ -284,9 +283,9 @@ test('repeated add/delete/save cycles cannot accumulate orphaned image asset row
 
 test('shape drafts retain styles, rotation and independent normalized marker samples', async () => {
   const { createShape } = await import('../../../src/core/shapes')
-  const marker = createShape('marker',[{x:40,y:50},{x:80,y:90}],0,{fill:null,strokeColor:'#ffe34d',strokeWidth:24},'marker')!
+  const marker = createShape('marker',[{x:40,y:50},{x:80,y:90}],'p0',{fill:null,strokeColor:'#ffe34d',strokeWidth:24},'marker')!
   marker.rotation=37.5
-  const shape = createShape('ellipse',[{x:100,y:100},{x:200,y:250}],1,{fill:'#ffffff',strokeColor:null,strokeWidth:3},'ellipse')!
+  const shape = createShape('ellipse',[{x:100,y:100},{x:200,y:250}],'p1',{fill:'#ffffff',strokeColor:null,strokeWidth:3},'ellipse')!
   const db=await openDb(); const expected=structuredClone([marker,shape])
   await saveDraft(db,{...sampleDraft('shapes'),overlays:[marker,shape]})
   marker.markerPoints![0].x=.9

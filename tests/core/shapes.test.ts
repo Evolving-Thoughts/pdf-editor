@@ -1,6 +1,6 @@
 import { expect, test, vi } from 'vitest'
 import { createShape } from '../../src/core/shapes'
-import { addShape, addTextbox, removeShape, updateShape } from '../../src/core/commands'
+import { addOverlay, removeOverlay, updateOverlay } from '../../src/core/commands'
 import { EditorStore } from '../../src/core/editorStore'
 import { shapeGeometry } from '../../src/core/shapes'
 import type { Textbox } from '../../src/core/model'
@@ -15,7 +15,7 @@ test('drawing a rectangle in reverse direction retains the exact visible bounds 
         { x: 300, y: 300 },
         { x: 100, y: 200 },
       ],
-      0,
+      'p0',
       { fill: '#ffffff', strokeColor: null, strokeWidth: 3 },
       'cover',
     ),
@@ -23,7 +23,7 @@ test('drawing a rectangle in reverse direction retains the exact visible bounds 
     kind: 'shape',
     shape: 'rect',
     id: 'cover',
-    pageIndex: 0,
+    pageId: 'p0',
     x: 100,
     y: 200,
     width: 200,
@@ -42,13 +42,13 @@ test('shape commands keep a cover before later text and restore its exact order 
       { x: 100, y: 200 },
       { x: 300, y: 300 },
     ],
-    0,
+    'p0',
     { fill: '#ffffff', strokeColor: null, strokeWidth: 3 },
     'cover',
   )!
   const text: Textbox = {
     id: 'text',
-    pageIndex: 0,
+    pageId: 'p0',
     x: 120,
     y: 220,
     text: 'Korrektur',
@@ -59,15 +59,15 @@ test('shape commands keep a cover before later text and restore its exact order 
     underline: false,
   }
   const store = new EditorStore()
-  store.dispatch(addShape(cover))
-  store.dispatch(addTextbox(text))
+  store.dispatch(addOverlay(cover))
+  store.dispatch(addOverlay(text))
   expect(store.state.overlays.map((o) => o.id)).toEqual(['cover', 'text'])
   const before = shapeGeometry(cover),
     after = { ...before, x: 150, fill: null, strokeColor: '#111111' }
-  store.dispatch(updateShape(cover.id, before, after))
+  store.dispatch(updateOverlay(cover.id, before, after))
   after.x = 999
   expect(store.state.overlays[0]).toMatchObject({ x: 150, fill: null, strokeColor: '#111111' })
-  store.dispatch(removeShape(store.state.overlays[0] as typeof cover))
+  store.dispatch(removeOverlay(store.state.overlays[0] as typeof cover))
   store.undo()
   expect(store.state.overlays.map((o) => o.id)).toEqual(['cover', 'text'])
   store.undo()
@@ -119,7 +119,7 @@ test('vertical lines and reverse horizontal arrows retain endpoints without inve
         { x: 100, y: 300 },
         { x: 100, y: 200 },
       ],
-      0,
+      'p0',
       { fill: '#ffffff', strokeColor: '#111111', strokeWidth: 3 },
       'line',
     ),
@@ -139,7 +139,7 @@ test('vertical lines and reverse horizontal arrows retain endpoints without inve
         { x: 300, y: 200 },
         { x: 100, y: 200 },
       ],
-      0,
+      'p0',
       { fill: null, strokeColor: '#111111', strokeWidth: 3 },
       'arrow',
     ),
@@ -160,7 +160,7 @@ test('a freehand marker keeps every sampled point in immutable local fractions',
       { x: 180, y: 230 },
       { x: 200, y: 200 },
     ],
-    1,
+    'p1',
     { fill: null, strokeColor: '#ffe34b', strokeWidth: 24 },
     'marker',
   )!
@@ -184,7 +184,7 @@ test('rotated line endpoint editing fixes the other endpoint and retains its ang
       { x: 100, y: 100 },
       { x: 300, y: 200 },
     ],
-    0,
+    'p0',
     { fill: null, strokeColor: '#111111', strokeWidth: 3 },
     'line',
   )!
@@ -212,7 +212,7 @@ test('local marker and rectangle paths match independently known SVG coordinates
       { x: 180, y: 230 },
       { x: 200, y: 200 },
     ],
-    0,
+    'p0',
     { fill: null, strokeColor: '#ffe34b', strokeWidth: 24 },
     'mark',
   )!
@@ -225,7 +225,7 @@ test('local marker and rectangle paths match independently known SVG coordinates
 const style = { fill: null, strokeColor: '#111111', strokeWidth: 3 }
 
 test('rapid shape nudges merge but changing the action starts a new undo step', async () => {
-  const { nudgeShape } = await import('../../src/core/commands')
+  const { nudgeOverlay } = await import('../../src/core/commands')
   const store = new EditorStore()
   const shape = createShape(
     'rect',
@@ -233,17 +233,17 @@ test('rapid shape nudges merge but changing the action starts a new undo step', 
       { x: 100, y: 100 },
       { x: 200, y: 160 },
     ],
-    0,
+    'p0',
     style,
     'nudge',
   )!
-  store.dispatch(addShape(shape))
+  store.dispatch(addOverlay(shape))
   const a = shapeGeometry(shape),
     b = { ...a, x: 101 },
     c = { ...a, x: 102 }
-  store.dispatch(nudgeShape(shape.id, a, b, 'move'))
-  store.dispatch(nudgeShape(shape.id, b, c, 'move'))
-  store.dispatch(nudgeShape(shape.id, c, { ...c, rotation: 1 }, 'rotate'))
+  store.dispatch(nudgeOverlay(shape.id, a, b, 'move'))
+  store.dispatch(nudgeOverlay(shape.id, b, c, 'move'))
+  store.dispatch(nudgeOverlay(shape.id, c, { ...c, rotation: 1 }, 'rotate'))
   store.undo()
   expect(store.state.overlays[0]).toMatchObject({ x: 102, rotation: 0 })
   store.undo()
@@ -253,11 +253,11 @@ test('long markers and single-point markers have drawable paths without argument
   const long = createShape(
     'marker',
     Array.from({ length: 200000 }, (_, i) => ({ x: i % 300, y: i % 200 })),
-    0,
+    'p0',
     style,
   )!
   expect(long.width).toBe(299)
-  const dot = createShape('marker', [{ x: 100, y: 100 }], 0, style)!
+  const dot = createShape('marker', [{ x: 100, y: 100 }], 'p0', style)!
   expect(shapeToSvgPath(dot)).toBe('M 2 2 L 2.01 2')
 })
 
@@ -270,7 +270,7 @@ test('eraser splits markers but retains forms; clearing drawing removes markers 
       { x: 100, y: 200 },
       { x: 300, y: 200 },
     ],
-    0,
+    'p0',
     { ...style, strokeWidth: 12 },
     'marker',
   )!
@@ -280,13 +280,13 @@ test('eraser splits markers but retains forms; clearing drawing removes markers 
       { x: 100, y: 100 },
       { x: 200, y: 160 },
     ],
-    0,
+    'p0',
     style,
     'form',
   )!
   const store = new EditorStore()
-  store.restore([marker, form])
-  const after = eraseStrokes(store.state.overlays, 0, [{ x: 200, y: 200 }], 8)
+  store.restore({ overlays: [marker, form] })
+  const after = eraseStrokes(store.state.overlays, 'p0', [{ x: 200, y: 200 }], 8)
   expect(after).toHaveLength(3)
   expect(after[2]).toEqual(form)
   expect(after[0]).toMatchObject({ shape: 'marker', strokeWidth: 12, strokeColor: '#111111' })
@@ -307,7 +307,7 @@ test('style objects cannot overwrite the calculated shape geometry', () => {
       { x: 100, y: 100 },
       { x: 200, y: 160 },
     ],
-    0,
+    'p0',
     supplied,
   )!
   expect(rect).toMatchObject({ x: 100, y: 100, width: 100, height: 60 })
@@ -335,7 +335,7 @@ test.each(['nw', 'ne', 'sw', 'se'] as const)(
 )
 
 test('a pause or a different element breaks shape keyboard undo grouping', async () => {
-  const { nudgeShape } = await import('../../src/core/commands')
+  const { nudgeOverlay } = await import('../../src/core/commands')
   const clock = vi.spyOn(Date, 'now').mockReturnValue(1000)
   try {
     const store = new EditorStore(),
@@ -345,19 +345,19 @@ test('a pause or a different element breaks shape keyboard undo grouping', async
           { x: 100, y: 100 },
           { x: 200, y: 160 },
         ],
-        0,
+        'p0',
         style,
         'first',
       )!
     const second = { ...first, id: 'second' }
-    store.restore([first, second])
+    store.restore({ overlays: [first, second] })
     const a = shapeGeometry(first),
       b = { ...a, x: 101 },
       c = { ...a, x: 102 }
-    store.dispatch(nudgeShape(first.id, a, b))
+    store.dispatch(nudgeOverlay(first.id, a, b))
     clock.mockReturnValue(2101)
-    store.dispatch(nudgeShape(first.id, b, c))
-    store.dispatch(nudgeShape(second.id, a, b))
+    store.dispatch(nudgeOverlay(first.id, b, c))
+    store.dispatch(nudgeOverlay(second.id, a, b))
     store.undo()
     expect((store.state.overlays[1] as typeof first).x).toBe(100)
     store.undo()

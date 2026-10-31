@@ -1,7 +1,6 @@
-import { chromiumPath } from './browser-helper.mjs'
+import { collectErrors, launchBrowser, pdfInput } from './browser-helper.mjs'
 import { confirmDefaultExport } from './export-smoke-helper.mjs'
 // Approved sidebar: independently scrollable list + checkbox/Shift/Ctrl selection.
-import { chromium } from 'playwright'
 import { PDFDocument, StandardFonts } from 'pdf-lib'
 import { mkdirSync, mkdtempSync, readFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
@@ -9,9 +8,9 @@ import { join } from 'node:path'
 import assert from 'node:assert/strict'
 const out = process.env.SMOKE_ARTIFACT_DIR ?? mkdtempSync(join(tmpdir(), 'pdf-selection-'))
 mkdirSync(out, { recursive: true })
-const browser = await chromium.launch({ executablePath: chromiumPath(), args: ['--no-sandbox'] })
+const browser = await launchBrowser()
 const p = await browser.newPage({ viewport: { width: 1280, height: 1100 }, acceptDownloads: true }), errors = []
-p.on('pageerror', e => errors.push(String(e)))
+collectErrors(p, errors)
 const btn = name => p.getByRole('button', { name, exact: true })
 const ready = () => p.waitForFunction(() => document.querySelector('.page-manager-preview canvas')?.width > 0 && !document.querySelector('.page-manager-message')?.textContent.includes('aktualisiert') && !document.querySelector('.page-manager-message')?.textContent.includes('verarbeitet'))
 const title = (index, modifiers = []) => p.locator('.page-manager-select').nth(index - 1).click({ modifiers })
@@ -39,7 +38,7 @@ try {
   field.setText('Ada')
   for (let i = 1; i <= 32; i++) { const page = doc.addPage([612, 792]); page.drawText(`Fixture page ${i}`, { x: 30, y: 740, size: 18, font }); if ([2, 4, 32].includes(i)) field.addToPage(page, { x: 50, y: 600, width: 180, height: 24 }) }
   await p.goto(process.env.SMOKE_URL ?? 'http://localhost:5207')
-  await p.locator('input[accept="application/pdf"]').setInputFiles({ name: 'many.pdf', mimeType: 'application/pdf', buffer: Buffer.from(await doc.save()) })
+  await pdfInput(p).setInputFiles({ name: 'many.pdf', mimeType: 'application/pdf', buffer: Buffer.from(await doc.save()) })
   await p.waitForFunction(() => document.querySelector('.pages .page canvas')?.width > 0)
   await btn('Seiten verwalten').click(); await ready(); assert.equal(await p.locator('.page-manager-row').count(), 32)
   // T14 sidebar A: all nine actions remain; at least half the panel is list.

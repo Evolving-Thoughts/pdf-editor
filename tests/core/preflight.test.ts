@@ -18,7 +18,7 @@ async function blank(pages = 1) {
 }
 const save = (doc: PDFDocument) => doc.save({ useObjectStreams: false, updateFieldAppearances: false })
 const find = (findings: StructureFinding[], kind: StructureKind) => findings.find(item => item.kind === kind)!
-const box = (overrides: Partial<Textbox>): Textbox => ({ id: 't', pageIndex: 0, x: 20, y: 200, text: 'Text', font: 'helvetica', fontSize: 12, bold: false, italic: false, underline: false, ...overrides })
+const box = (overrides: Partial<Textbox>): Textbox => ({ id: 't', pageId: 'p0', x: 20, y: 200, text: 'Text', font: 'helvetica', fontSize: 12, bold: false, italic: false, underline: false, ...overrides })
 
 async function withForm() {
   const doc = await blank()
@@ -146,10 +146,10 @@ test('report on an unchanged document: structures stay, and they really are stil
   await doc.attach(new Uint8Array([1]), 'a.txt', { mimeType: 'text/plain' })
   const bytes = await doc.save()
   const pages = await inspectPages(bytes, 'a.pdf')
-  const report = await preflightExport({ original: bytes, sources: [], pages, overlays: [], secure: false })
+  const report = await preflightExport({ original: bytes, state: { pageSources: [], pages, overlays: [] } })
   expect(report.rebuilt).toBe(false)
   expect(needsConfirmation(report)).toEqual([])
-  const output = await inspectStructures(await exportPageDocument(bytes, [], pages, [box({ text: 'Neu' })]))
+  const output = await inspectStructures(await exportPageDocument(bytes, [], pages, [box({ text: 'Neu', pageId: pages[0].id })]))
   for (const kind of ['forms', 'outline', 'tags', 'attachments'] as const) expect(find(output, kind).state).toBe('present')
 })
 
@@ -160,7 +160,7 @@ test('report on reordered pages names the lost tags, keeps the outline, and the 
   addTags(doc)
   const bytes = await doc.save()
   const pages = (await inspectPages(bytes, 'a.pdf')).reverse()
-  const report = await preflightExport({ original: bytes, sources: [], pages, overlays: [], secure: false })
+  const report = await preflightExport({ original: bytes, state: { pageSources: [], pages, overlays: [] } })
   expect(report.rebuilt).toBe(true)
   expect(needsConfirmation(report).map(item => item.kind)).toEqual(['tags'])
   const output = await inspectStructures(await exportPageDocument(bytes, [], pages, []))
@@ -175,7 +175,7 @@ test('an appended source counts: its signature needs confirmation even when the 
   const appended = await preparePages(await save(signed), 'b.pdf')
   const bytes = await save(await blank())
   const pages = [...await inspectPages(bytes, 'a.pdf'), ...appended.pages]
-  const report = await preflightExport({ original: bytes, sources: [appended.source], pages, overlays: [], secure: false })
+  const report = await preflightExport({ original: bytes, state: { pageSources: [appended.source], pages, overlays: [] } })
   expect(needsConfirmation(report).map(item => item.kind)).toContain('signature')
 })
 
@@ -184,7 +184,7 @@ test('XFA with page changes is rejected', async () => {
   doc.catalog.set(key('AcroForm'), doc.context.obj({ Fields: [], XFA: PDFString.of('<xdp/>') }))
   const bytes = await save(doc)
   const pages = await inspectPages(bytes, 'a.pdf')
-  const report = await preflightExport({ original: bytes, sources: [], pages: [pages[1], pages[0]], overlays: [], secure: false })
+  const report = await preflightExport({ original: bytes, state: { pageSources: [], pages: [pages[1], pages[0]], overlays: [] } })
   expect(rejection(report)?.message).toMatch(/nicht möglich/)
 })
 
@@ -192,37 +192,37 @@ test('the check never changes its input', async () => {
   const doc = await withForm()
   addSignature(doc)
   const bytes = await save(doc), before = bytes.slice()
-  await preflightExport({ original: bytes, sources: [], pages: await inspectPages(bytes, 'a.pdf'), overlays: [box({ text: 'Ω' })], secure: false })
+  await preflightExport({ original: bytes, state: { pageSources: [], pages: await inspectPages(bytes, 'a.pdf'), overlays: [box({ text: 'Ω' })] } })
   expect(bytes).toEqual(before)
 })
 
 test('names the unsupported character, its text and its font', async () => {
-  const issues = await findTextIssues([box({ id: 'a', pageIndex: 3, text: 'Gewicht 5 Ω und Rest' })])
-  expect(issues).toEqual([{ overlayId: 'a', pageIndex: 3, characters: ['Ω'], font: StandardFonts.Helvetica, excerpt: 'Gewicht 5 Ω und Rest' }])
+  const issues = await findTextIssues([box({ id: 'a', pageId: 'p3', text: 'Gewicht 5 Ω und Rest' })], [{ id: 'p0' }, { id: 'p3' }])
+  expect(issues).toEqual([{ overlayId: 'a', pageIndex: 1, characters: ['Ω'], font: StandardFonts.Helvetica, excerpt: 'Gewicht 5 Ω und Rest' }])
 })
 
 test('German text in a standard font and line breaks are fine, and empty boxes do not count', async () => {
-  expect(await findTextIssues([box({ text: 'Größe\nÄpfel Öl Übung ß €' }), box({ id: 'leer', text: '   ' })])).toEqual([])
+  expect(await findTextIssues([box({ text: 'Größe\nÄpfel Öl Übung ß €' }), box({ id: 'leer', text: '   ' })], [])).toEqual([])
 })
 
 test('a bundled font reports characters outside its glyph set instead of drawing an empty box', async () => {
   stubFontFetch()
-  const issues = await findTextIssues([box({ font: 'lato', text: 'Hallo 漢' })])
+  const issues = await findTextIssues([box({ font: 'lato', text: 'Hallo 漢' })], [])
   expect(issues[0]).toMatchObject({ characters: ['漢'] })
 })
 
 test('a bundled font accepts German text', async () => {
   stubFontFetch()
-  expect(await findTextIssues([box({ font: 'noto-sans', text: 'Größe prüfen: Äpfel, Öl, Straße' })])).toEqual([])
+  expect(await findTextIssues([box({ font: 'noto-sans', text: 'Größe prüfen: Äpfel, Öl, Straße' })], [])).toEqual([])
 })
 
 test('symbol boxes report letters that ZapfDingbats cannot show', async () => {
-  const issues = await findTextIssues([box({ font: 'zapfdingbats', text: '✓A' })])
+  const issues = await findTextIssues([box({ font: 'zapfdingbats', text: '✓A' })], [])
   expect(issues[0].characters).toEqual(['A'])
 })
 
 test('each character is listed once', async () => {
-  expect((await findTextIssues([box({ text: 'ΩΩ α Ω' })]))[0].characters).toEqual(['Ω', 'α'])
+  expect((await findTextIssues([box({ text: 'ΩΩ α Ω' })], []))[0].characters).toEqual(['Ω', 'α'])
 })
 
 test('a report does not touch overlays', async () => {
@@ -230,6 +230,6 @@ test('a report does not touch overlays', async () => {
   const doc = await PDFDocument.create()
   doc.addPage()
   const bytes = await doc.save()
-  await preflightExport({ original: bytes, sources: [], pages: await inspectPages(bytes, 'a.pdf'), overlays: [overlay], secure: false })
+  await preflightExport({ original: bytes, state: { pageSources: [], pages: await inspectPages(bytes, 'a.pdf'), overlays: [overlay] } })
   expect(overlay).toEqual(copy)
 })

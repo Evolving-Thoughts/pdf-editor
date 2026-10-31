@@ -1,6 +1,6 @@
 import { expect, test } from 'vitest'
 import { PDFDocument } from 'pdf-lib'
-import { exportPdf } from '../../src/core/pdf/exportPdf'
+import { exportPdf } from './exportFixture'
 
 test('exportPdf preserves page count and page sizes', async () => {
   const doc = await PDFDocument.create()

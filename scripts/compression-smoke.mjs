@@ -1,6 +1,5 @@
-import { chromiumPath } from './browser-helper.mjs'
+import { collectErrors, launchBrowser, pdfInput } from './browser-helper.mjs'
 // T12 approved A: real image optimization, preservation and combined encryption.
-import { chromium } from 'playwright'
 import { PDFDocument, PDFRawStream, PDFName, PDFNumber } from 'pdf-lib'
 import { readFileSync, writeFileSync, mkdirSync, mkdtempSync } from 'node:fs'
 import { tmpdir } from 'node:os'
@@ -10,22 +9,19 @@ const out =
   process.env.SMOKE_ARTIFACT_DIR ??
   mkdtempSync(join(tmpdir(), 'pdf-compression-'))
 mkdirSync(out, { recursive: true })
-const browser = await chromium.launch({
-  executablePath: chromiumPath(),
-  args: ['--no-sandbox'],
-})
+const browser = await launchBrowser()
 const p = await browser.newPage({
     viewport: { width: 1280, height: 1100 },
     acceptDownloads: true,
   }),
   errors = []
-p.on('pageerror', (e) => errors.push(String(e)))
+collectErrors(p, errors)
 const btn = (name) => p.getByRole('button', { name, exact: true })
 const comp = () => p.getByRole('radio', { name: /Bilddaten komprimieren/ })
 const protect = () => p.getByRole('checkbox', { name: /Mit Passwort schützen/ })
 const dialog = () => p.getByRole('dialog')
 async function open(bytes, name = 'compression.pdf') {
-  await p.locator('input[accept="application/pdf"]').setInputFiles({
+  await pdfInput(p).setInputFiles({
     name,
     mimeType: 'application/pdf',
     buffer: Buffer.from(bytes),

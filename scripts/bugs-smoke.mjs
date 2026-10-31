@@ -1,16 +1,15 @@
 // Regression coverage for the Notion Bugs ticket: normal row selection and crop fit/scale.
-import { chromium } from 'playwright'
 import { PDFDocument } from 'pdf-lib'
-import { chromiumPath } from './browser-helper.mjs'
+import { collectErrors, launchBrowser, pdfInput } from './browser-helper.mjs'
 import assert from 'node:assert/strict'
 import { mkdirSync, mkdtempSync, readFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 const out = process.env.SMOKE_ARTIFACT_DIR ?? mkdtempSync(join(tmpdir(), 'pdf-bugs-'))
 mkdirSync(out, { recursive: true })
-const browser = await chromium.launch({ executablePath: chromiumPath(), args: ['--no-sandbox'] })
+const browser = await launchBrowser()
 const p = await browser.newPage({ acceptDownloads: true }), errors = []
-p.on('pageerror', e => errors.push(String(e)))
+collectErrors(p, errors)
 const button = name => p.getByRole('button', { name, exact: true })
 const mm = 72 / 25.4
 async function ready() {
@@ -52,7 +51,7 @@ try {
   const doc = await PDFDocument.create()
   doc.addPage([210 * mm, 297 * mm]); doc.addPage([210 * mm, 297 * mm])
   await p.goto(process.env.SMOKE_URL ?? 'http://localhost:5207')
-  await p.locator('input[accept="application/pdf"]').setInputFiles({ name: 'a4.pdf', mimeType: 'application/pdf', buffer: Buffer.from(await doc.save()) })
+  await pdfInput(p).setInputFiles({ name: 'a4.pdf', mimeType: 'application/pdf', buffer: Buffer.from(await doc.save()) })
   await p.waitForFunction(() => document.querySelector('.pages .page canvas')?.width > 0)
   await button('Seiten verwalten').click(); await ready()
   await p.locator('.page-manager-select').nth(1).click()

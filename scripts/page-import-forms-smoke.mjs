@@ -1,7 +1,6 @@
-import { chromiumPath } from './browser-helper.mjs'
+import { collectErrors, launchBrowser, pdfInput } from './browser-helper.mjs'
 import { confirmDefaultExport } from './export-smoke-helper.mjs'
 // Real local files and UI: matching sheet sizes, editable image overlay, native PDF widgets.
-import { chromium } from 'playwright'
 import { PDFDocument, PDFArray, PDFName, PDFRawStream, decodePDFRawStream } from 'pdf-lib'
 import { mkdtempSync, readFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
@@ -9,10 +8,10 @@ import { join } from 'node:path'
 import assert from 'node:assert/strict'
 import { PNG_DATA_URL } from '../tests/imageFixtures.js'
 const out = process.env.SMOKE_ARTIFACT_DIR ?? mkdtempSync(join(tmpdir(), 'pdf-page-import-'))
-const browser = await chromium.launch({ executablePath: chromiumPath(), args: ['--no-sandbox'] })
+const browser = await launchBrowser()
 const p = await browser.newPage({ viewport: { width: 1280, height: 1000 }, acceptDownloads: true })
 const errors = []
-p.on('pageerror', e => errors.push(String(e)))
+collectErrors(p, errors)
 p.on('dialog', d => void d.accept())
 const btn = name => p.getByRole('button', { name, exact: true })
 const settled = () => p.waitForFunction(() => !document.querySelector('.page-manager-message')?.textContent.includes('aktualisiert') && document.querySelector('.page-manager-preview canvas')?.width > 0)
@@ -26,7 +25,7 @@ try {
   doc.addPage([612, 792])
   const field = doc.getForm().createTextField('person.name'); field.setText('Ada Lovelace'); field.addToPage(first, { x: 30, y: 600, width: 180, height: 24 })
   await p.goto(process.env.SMOKE_URL ?? 'http://localhost:5207')
-  await p.locator('input[accept="application/pdf"]').setInputFiles({ name: 'letter.pdf', mimeType: 'application/pdf', buffer: Buffer.from(await doc.save()) })
+  await pdfInput(p).setInputFiles({ name: 'letter.pdf', mimeType: 'application/pdf', buffer: Buffer.from(await doc.save()) })
   await p.waitForFunction(() => document.querySelector('.pages .page canvas')?.width > 0)
   await btn('Seiten verwalten').click(); await settled()
   await btn('＋ Seiten einfügen').click()

@@ -1,5 +1,5 @@
 import { useRef, useState } from 'react'
-import { nudgeShape, updateShape, type ShapeKeyboardAction } from '../core/commands'
+import { nudgeOverlay, updateOverlay, type ShapeKeyboardAction } from '../core/commands'
 import type { EditorStore } from '../core/editorStore'
 import type { Bounds, Corner } from '../core/images/geometry'
 import {
@@ -71,8 +71,8 @@ export function ShapeView({ shape, zoom, pageSize, selected, tool, store, onSele
     if (JSON.stringify(before) !== JSON.stringify(next))
       store.dispatch(
         keyboardAction
-          ? nudgeShape(shape.id, before, next, keyboardAction)
-          : updateShape(shape.id, before, next),
+          ? nudgeOverlay(shape.id, before, next, keyboardAction)
+          : updateOverlay(shape.id, before, next),
       )
   }
   const cancel = () => {

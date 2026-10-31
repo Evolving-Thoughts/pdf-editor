@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
-import { nudgeImage, removeImage, updateImage, type ImageChanges, type ImageKeyboardAction } from '../core/commands'
+import { nudgeOverlay, removeOverlay, updateOverlay, type ImageChanges, type ImageKeyboardAction } from '../core/commands'
 import type { EditorStore } from '../core/editorStore'
 import { imageGeometry, mmToPts, moveImage, ptsToMm, resizeImage, rotateImage, setImageSize, type Bounds, type Corner } from '../core/images/geometry'
 import type { ImageOverlay } from '../core/model'
@@ -39,7 +39,7 @@ export function ImageView({ image, zoom, pageSize, selected, tool, store, onSele
   const geometry = validGesture && preview ? preview.geometry : imageGeometry(image)
   const commit = (next: ImageChanges, keyboardAction?: ImageKeyboardAction) => {
     const before = imageGeometry(image)
-    if (JSON.stringify(before) !== JSON.stringify(next)) store.dispatch(keyboardAction ? nudgeImage(image.id, before, next, keyboardAction) : updateImage(image.id, before, next))
+    if (JSON.stringify(before) !== JSON.stringify(next)) store.dispatch(keyboardAction ? nudgeOverlay(image.id, before, next, keyboardAction) : updateOverlay(image.id, before, next))
   }
   const cancel = () => { gesture.current = null; setPreview(null) }
   const onImagePointerDown = (event: React.PointerEvent<HTMLElement>) => {
@@ -116,7 +116,7 @@ export function ImageView({ image, zoom, pageSize, selected, tool, store, onSele
           commit(rotateImage(imageGeometry(image), (image.rotation ?? 0) + direction * (event.shiftKey ? 15 : 1), pageSize), 'rotate')
         }}><span><RotationIcon clockwise /></span></button>}
       {active && <ImageOptions image={image} geometry={geometry} anchor={anchor} pageSize={pageSize}
-        onChange={commit} onDelete={() => { store.dispatch(removeImage(image)); onSelect(null) }} />}
+        onChange={commit} onDelete={() => { store.dispatch(removeOverlay(image)); onSelect(null) }} />}
     </div>
   )
 }

@@ -2,7 +2,7 @@ import { expect, test, vi } from 'vitest'
 import { PDFDict, PDFDocument, PDFName, PDFNumber, PDFString, StandardFonts, degrees } from 'pdf-lib'
 import { composePages, imagePageBytes, inspectPages, pageSize, preparePages, textPageBytes } from '../../src/core/pdf/pageOperations'
 import { formKey } from '../../src/core/forms'
-import { exportPdf } from '../../src/core/pdf/exportPdf'
+import { exportPdf } from './exportFixture'
 const original = async () => {
   const doc = await PDFDocument.create()
   doc.addPage([200, 300])
@@ -39,7 +39,7 @@ test('single-page extraction is a valid PDF with text overlays and does not modi
   const exported = await exportPdf(single, [
     {
       id: 't',
-      pageIndex: 0,
+      pageId: 'p0',
       x: 30,
       y: 60,
       text: 'Korrektur',

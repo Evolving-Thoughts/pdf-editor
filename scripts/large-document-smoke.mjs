@@ -1,6 +1,5 @@
 // T20: long documents must hold only a few canvases, whatever the page count.
-import { chromiumPath } from './browser-helper.mjs'
-import { chromium } from 'playwright'
+import { collectErrors, launchBrowser, pdfInput } from './browser-helper.mjs'
 import { PDFDocument, StandardFonts } from 'pdf-lib'
 import { mkdirSync, mkdtempSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
@@ -18,15 +17,15 @@ async function makePdf(pages, marker) {
   return doc.save()
 }
 
-const browser = await chromium.launch({ executablePath: chromiumPath(), args: ['--no-sandbox'] })
+const browser = await launchBrowser()
 const page = await browser.newPage({ viewport: { width: 1280, height: 900 } })
 const errors = []
-page.on('pageerror', error => errors.push(String(error)))
+collectErrors(page, errors)
 page.on('console', message => { if (message.type() === 'error') errors.push(message.text()) })
 await page.goto(process.env.SMOKE_URL ?? 'http://localhost:5199')
 
 const open = async (bytes, name) => {
-  await page.locator('input[accept="application/pdf"]').setInputFiles({ name, mimeType: 'application/pdf', buffer: Buffer.from(bytes) })
+  await pdfInput(page).setInputFiles({ name, mimeType: 'application/pdf', buffer: Buffer.from(bytes) })
   await page.waitForFunction(() => document.querySelector('.page canvas[data-render-state="ready"]'))
 }
 const metrics = () => page.evaluate(() => ({
@@ -95,7 +94,7 @@ await page.waitForFunction(() => document.querySelectorAll('.pages .page-slot').
 assert.equal(await page.locator('.page[data-page-index="399"]').count(), 0)
 
 // An oversized page count is refused and keeps the open document.
-await page.locator('input[accept="application/pdf"]').setInputFiles({ name: 'zu-lang.pdf', mimeType: 'application/pdf', buffer: Buffer.from(await makePdf(5001, 'Zu')) })
+await pdfInput(page).setInputFiles({ name: 'zu-lang.pdf', mimeType: 'application/pdf', buffer: Buffer.from(await makePdf(5001, 'Zu')) })
 await page.waitForSelector('[role="alert"].error', { timeout: 60000 })
 const message = await page.locator('[role="alert"].error').textContent()
 assert.match(message, /5\.001 Seiten/)

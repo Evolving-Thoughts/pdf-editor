@@ -17,9 +17,9 @@ test('A4 fits all visible page orientations, retains live fields and maps displa
   const field = source.getForm().createTextField('name'); field.setText('Ada')
   field.addToPage(first, { x: 40, y: 600, width: 180, height: 25 })
   const bytes = await source.save(), pages = await inspectPages(bytes, 'base')
-  const textbox = { id: 'text', pageIndex: 0, text: 'Correction', x: 100, y: 300, font: 'helvetica' as const, fontSize: 12, bold: false, italic: false, underline: false }
+  const textbox = { id: 'text', pageId: pages[0].id, text: 'Correction', x: 100, y: 300, font: 'helvetica' as const, fontSize: 12, bold: false, italic: false, underline: false }
   const untouched = bytes.slice()
-  const normalized = await normalizeA4(bytes, [], pages, [textbox])
+  const normalized = await normalizeA4({ original: bytes, state: { pages: pages, overlays: [textbox] } })
   expect(normalized.pages.map(pageSize)).toEqual([{ width: A4_WIDTH, height: A4_HEIGHT }, { width: A4_HEIGHT, height: A4_WIDTH }, { width: A4_HEIGHT, height: A4_WIDTH }])
   expect(normalized.pages.map(p => p.id)).toEqual(pages.map(p => p.id))
   const output = await PDFDocument.load(normalized.source.bytes)
@@ -42,7 +42,7 @@ test('A4 keeps cropped native widgets hidden or clipped, without flattening fiel
   hidden.addToPage(page, { x: 10, y: 50, width: 100, height: 25 })
   page.setCropBox(80, 100, 300, 450)
   const bytes = await source.save(), pages = await inspectPages(bytes, 'base')
-  const result = await normalizeA4(bytes, [], pages, [])
+  const result = await normalizeA4({ original: bytes, state: { pages: pages, overlays: [] } })
   const doc = await PDFDocument.load(result.source.bytes), form = doc.getForm()
   const clipped = form.getTextField('partial').acroField.getWidgets()[0]
   expect(clipped.getRectangle().x).toBeCloseTo((A4_WIDTH - 300 * (A4_HEIGHT / 450)) / 2)
@@ -57,12 +57,12 @@ test('A4 replacement is one undoable operation and retains editable overlay type
   const source = await PDFDocument.create(); source.addPage([612, 792])
   const bytes = await source.save(), pages = await inspectPages(bytes, 'base')
   const overlays = [
-    { kind: 'image' as const, id: 'image', pageIndex: 0, x: -20, y: 100, width: 120, height: 60, rotation: 30, lockAspectRatio: true, name: 'photo', pixelWidth: 120, pixelHeight: 60, dataUrl: PNG_DATA_URL },
-    { kind: 'shape' as const, shape: 'rect' as const, id: 'shape', pageIndex: 0, x: 30, y: 40, width: 100, height: 50, rotation: 30, fill: '#ffffff', strokeColor: '#111111', strokeWidth: 2 },
-    { id: 'pen', pageIndex: 0, points: [{ x: 20, y: 50 }, { x: 200, y: 60 }], color: '#111111', width: 3 },
+    { kind: 'image' as const, id: 'image', pageId: pages[0].id, x: -20, y: 100, width: 120, height: 60, rotation: 30, lockAspectRatio: true, name: 'photo', pixelWidth: 120, pixelHeight: 60, dataUrl: PNG_DATA_URL },
+    { kind: 'shape' as const, shape: 'rect' as const, id: 'shape', pageId: pages[0].id, x: 30, y: 40, width: 100, height: 50, rotation: 30, fill: '#ffffff', strokeColor: '#111111', strokeWidth: 2 },
+    { id: 'pen', pageId: pages[0].id, points: [{ x: 20, y: 50 }, { x: 200, y: 60 }], color: '#111111', width: 3 },
   ]
-  const before = structuredClone(overlays), store = new EditorStore(); store.restore(overlays, pages, [])
-  const prepared = await normalizeA4(bytes, [], pages, overlays)
+  const before = structuredClone(overlays), store = new EditorStore(); store.restore({ overlays: overlays, pages: pages, pageSources: [] })
+  const prepared = await normalizeA4({ original: bytes, state: { pages: pages, overlays: overlays } })
   expect(overlays).toEqual(before)
   const factor = A4_WIDTH / 612, dy = (A4_HEIGHT - 792 * factor) / 2
   expect(prepared.overlays[0]).toMatchObject({ kind: 'image', rotation: 30, width: 120 * factor, height: 60 * factor, dataUrl: PNG_DATA_URL })
@@ -101,16 +101,16 @@ test('A4 rejects XFA and empty documents without modifying original bytes', asyn
   source.getForm().acroForm.dict.set(PDFName.of('XFA'), source.context.obj('unsupported'))
   const bytes = await source.save({ updateFieldAppearances: false }), untouched = bytes.slice()
   const pages = await inspectPages(bytes, 'base')
-  await expect(normalizeA4(bytes, [], pages, [])).rejects.toThrow(/XFA/)
+  await expect(normalizeA4({ original: bytes, state: { pages: pages, overlays: [] } })).rejects.toThrow(/XFA/)
   expect(bytes).toEqual(untouched)
-  await expect(normalizeA4(bytes, [], [], [])).rejects.toThrow(/mindestens eine Seite/)
+  await expect(normalizeA4({ original: bytes, state: { pages: [], overlays: [] } })).rejects.toThrow(/mindestens eine Seite/)
 })
 
 test('erasing a normalized textmarker preserves its visible-page clipping on all fragments', async () => {
-  const marker = createShape('marker', [{ x: -10, y: 100 }, { x: 200, y: 100 }], 0, { fill: null, strokeColor: '#ffff00', strokeWidth: 12 })!
+  const marker = createShape('marker', [{ x: -10, y: 100 }, { x: 200, y: 100 }], 'p0', { fill: null, strokeColor: '#ffff00', strokeWidth: 12 })!
   capturePageClip(marker, { width: 612, height: 792 })
   const expected = resolvedOverlayClips(marker)
-  const fragments = eraseStrokes([marker], 0, [{ x: 100, y: 100 }], 5)
+  const fragments = eraseStrokes([marker], 'p0', [{ x: 100, y: 100 }], 5)
   expect(fragments).toHaveLength(2)
   for (const fragment of fragments) {
     const polygons = resolvedOverlayClips(fragment)
@@ -128,7 +128,7 @@ test('A4 retains cropped checkbox appearance states and shared fields on differe
   const checkbox = source.getForm().createCheckBox('checked'); checkbox.addToPage(first, { x: 20, y: 300, width: 20, height: 20 }); checkbox.check()
   first.setCropBox(30, 0, 582, 792)
   const bytes = await source.save(), pages = await inspectPages(bytes, 'base')
-  const normalized = await normalizeA4(bytes, [], pages, []), output = await PDFDocument.load(normalized.source.bytes)
+  const normalized = await normalizeA4({ original: bytes, state: { pages: pages, overlays: [] } }), output = await PDFDocument.load(normalized.source.bytes)
   const field = output.getForm().getTextField('shared')
   expect(field.acroField.getWidgets()).toHaveLength(2)
   expect(field.acroField.getDefaultAppearance()).toMatch(/0 Tf/)
@@ -143,9 +143,9 @@ test('A4 clipping scales correctly for exactly horizontal and vertical lines', a
   const source = await PDFDocument.create(); source.addPage([612, 792])
   const bytes = await source.save(), pages = await inspectPages(bytes, 'base')
   const style = { fill: null, strokeColor: '#111111', strokeWidth: 2 }
-  const horizontal = createShape('line', [{ x: 20, y: 100 }, { x: 200, y: 100 }], 0, style)!
-  const vertical = createShape('arrow', [{ x: 300, y: 50 }, { x: 300, y: 200 }], 0, style)!
-  const prepared = await normalizeA4(bytes, [], pages, [horizontal, vertical])
+  const horizontal = createShape('line', [{ x: 20, y: 100 }, { x: 200, y: 100 }], pages[0].id, style)!
+  const vertical = createShape('arrow', [{ x: 300, y: 50 }, { x: 300, y: 200 }], pages[0].id, style)!
+  const prepared = await normalizeA4({ original: bytes, state: { pages: pages, overlays: [horizontal, vertical] } })
   const factor = A4_WIDTH / 612, dy = (A4_HEIGHT - 792 * factor) / 2
   for (const overlay of prepared.overlays) {
     const clip = resolvedOverlayClips(overlay)[0]

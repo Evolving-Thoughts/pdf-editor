@@ -1,7 +1,6 @@
 // Optional local real fixture: SOURCE_TEXT_PDF, SOURCE_TEXT_FIND and
 // SOURCE_TEXT_REPLACE. No supplied document or extracted fonts enter the repo.
-import { chromium } from 'playwright'
-import { chromiumPath } from './browser-helper.mjs'
+import { clickExport, collectErrors, launchBrowser } from './browser-helper.mjs'
 import { confirmDefaultExport } from './export-smoke-helper.mjs'
 import { PDFDocument, PDFName, StandardFonts } from 'pdf-lib'
 import { getDocument } from 'pdfjs-dist/legacy/build/pdf.mjs'
@@ -43,16 +42,13 @@ async function fixture() {
 const bytes = real ? readFileSync(real) : await fixture(),
   sourceDoc = await PDFDocument.load(bytes),
   index = real ? sourceDoc.getPageCount() - 1 : 0
-const browser = await chromium.launch({
-    executablePath: chromiumPath(),
-    args: ['--no-sandbox'],
-  }),
+const browser = await launchBrowser(),
   page = await browser.newPage({
     viewport: { width: 1440, height: 1000 },
     acceptDownloads: true,
   }),
   errors = []
-page.on('pageerror', (e) => errors.push(String(e)))
+collectErrors(page, errors)
 try {
   await page.goto(process.env.SMOKE_URL ?? 'http://127.0.0.1:5237')
   await page
@@ -95,7 +91,7 @@ try {
     .first()
     .waitFor()
   const pending = page.waitForEvent('download')
-  await page.getByRole('button', { name: 'Exportieren', exact: true }).click()
+  await clickExport(page)
   await confirmDefaultExport(page)
   const download = await pending,
     output = readFileSync(await download.path())

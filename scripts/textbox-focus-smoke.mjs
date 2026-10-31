@@ -1,10 +1,9 @@
-import { chromium } from 'playwright'
 import { PDFDocument } from 'pdf-lib'
 import assert from 'node:assert/strict'
-import { chromiumPath } from './browser-helper.mjs'
-const browser = await chromium.launch({ executablePath: chromiumPath(), args: ['--no-sandbox'] })
+import { collectErrors, launchBrowser, pdfInput } from './browser-helper.mjs'
+const browser = await launchBrowser()
 const p = await browser.newPage({ viewport: { width: 1440, height: 1100 }, hasTouch: true }), errors = []
-p.on('pageerror', error => errors.push(String(error)))
+collectErrors(p, errors)
 const button = name => p.getByRole('button', { name, exact: true })
 async function place(pageIndex, x, y) {
   await p.locator('.pages .page').nth(pageIndex).click({ position: { x, y } })
@@ -19,7 +18,7 @@ async function activeBox() {
 try {
   const doc = await PDFDocument.create(); doc.addPage([600, 800]); doc.addPage([600, 800])
   await p.goto(process.env.SMOKE_URL ?? 'http://localhost:5208')
-  await p.locator('input[accept="application/pdf"]').setInputFiles({ name: 'focus.pdf', mimeType: 'application/pdf', buffer: Buffer.from(await doc.save()) })
+  await pdfInput(p).setInputFiles({ name: 'focus.pdf', mimeType: 'application/pdf', buffer: Buffer.from(await doc.save()) })
   await p.waitForFunction(() => document.querySelector('.page canvas')?.dataset.renderState === 'ready')
   await button('T Text').click()
   await place(0, 120, 200); await activeBox()

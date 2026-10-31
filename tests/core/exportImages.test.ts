@@ -1,9 +1,9 @@
 import { expect, test } from 'vitest'
 import { degrees, PDFArray, PDFDict, PDFDocument, PDFName, PDFNumber, PDFRawStream, decodePDFRawStream } from 'pdf-lib'
-import { exportPdf } from '../../src/core/pdf/exportPdf'
+import { exportPdf } from './exportFixture'
 import type { ImageOverlay } from '../../src/core/model'
 import { PNG_DATA_URL, JPEG_DATA_URL } from '../imageFixtures.js'
-const image: ImageOverlay = { kind: 'image', id: 'logo', pageIndex: 0, x: 40, y: 60, width: 120, height: 80,
+const image: ImageOverlay = { kind: 'image', id: 'logo', pageId: 'p0', x: 40, y: 60, width: 120, height: 80,
   lockAspectRatio: false, name: 'logo.png', pixelWidth: 120, pixelHeight: 60, dataUrl: PNG_DATA_URL }
 function contents(doc: PDFDocument, index: number) {
   const value = doc.getPage(index).node.Contents()!
@@ -12,7 +12,7 @@ function contents(doc: PDFDocument, index: number) {
 }
 test('PNG and JPG are embedded as images at exact rectangle size, on the specified page', async () => {
   const doc = await PDFDocument.create(); doc.addPage([600, 800]); doc.addPage([600, 800])
-  const result = await PDFDocument.load(await exportPdf(await doc.save(), [image, { ...image, id: 'jpg', pageIndex: 1, dataUrl: JPEG_DATA_URL }]))
+  const result = await PDFDocument.load(await exportPdf(await doc.save(), [image, { ...image, id: 'jpg', pageId: 'p1', dataUrl: JPEG_DATA_URL }]))
   for (const index of [0, 1]) {
     const stream = contents(result, index)
     expect(stream).toContain('1 0 0 1 40 60 cm')

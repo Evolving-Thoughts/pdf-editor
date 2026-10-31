@@ -1,17 +1,17 @@
 import { expect, test } from 'vitest'
 import { PDFDocument } from 'pdf-lib'
 import { getDocument, OPS } from 'pdfjs-dist/legacy/build/pdf.mjs'
-import { exportPdf } from '../../src/core/pdf/exportPdf'
+import { exportPdf } from './exportFixture'
 import type { Stroke, Textbox } from '../../src/core/model'
 
 function box(overrides: Partial<Textbox>): Textbox {
-  return { id: 'x', pageIndex: 0, x: 50, y: 700, text: '', font: 'helvetica', fontSize: 14, bold: false, italic: false, underline: false, ...overrides }
+  return { id: 'x', pageId: 'p0', x: 50, y: 700, text: '', font: 'helvetica', fontSize: 14, bold: false, italic: false, underline: false, ...overrides }
 }
 
 function stroke(overrides: Partial<Stroke> = {}): Stroke {
   return {
     id: 'stroke-1',
-    pageIndex: 0,
+    pageId: 'p0',
     points: [
       { x: 10, y: 700 },
       { x: 100, y: 650 },
@@ -64,7 +64,7 @@ test('overlays respect page index and font choice', async () => {
   doc.addPage([595, 842])
   doc.addPage([595, 842])
   const bytes = await exportPdf(await doc.save(), [
-    box({ text: 'Seite zwei', pageIndex: 1, font: 'times', fontSize: 24 }),
+    box({ text: 'Seite zwei', pageId: 'p1', font: 'times', fontSize: 24 }),
   ])
   expect(await extractItems(bytes, 1)).toEqual([])
   const pageTwo = await extractItems(bytes, 2)

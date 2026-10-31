@@ -1,7 +1,6 @@
 // Real public blank forms; scan/encryption are explicitly labelled derivatives.
-import { chromiumPath } from './browser-helper.mjs'
+import { collectErrors, launchBrowser, pdfInput } from './browser-helper.mjs'
 import { confirmDefaultExport } from './export-smoke-helper.mjs'
-import { chromium } from 'playwright'
 import { PDFDocument, PDFDict, PDFName } from 'pdf-lib'
 import { getDocument } from 'pdfjs-dist/legacy/build/pdf.mjs'
 import { PDFDocument as ProtectedDocument } from '@cantoo/pdf-lib'
@@ -14,17 +13,14 @@ mkdirSync(out, { recursive: true })
 const fixtures = JSON.parse(
   readFileSync(new URL('./real-fixtures.json', import.meta.url), 'utf8'),
 ).fixtures
-const browser = await chromium.launch({
-  executablePath: chromiumPath(),
-  args: ['--no-sandbox'],
-})
+const browser = await launchBrowser()
 const context = await browser.newContext({
   viewport: { width: 1280, height: 1100 },
   acceptDownloads: true,
 })
 let p = await context.newPage()
 const errors = []
-const listen = (page) => page.on('pageerror', (e) => errors.push(String(e)))
+const listen = (page) => collectErrors(page, errors)
 listen(p)
 const url = process.env.SMOKE_URL ?? 'http://127.0.0.1:5234'
 const btn = (name) => p.getByRole('button', { name, exact: true })
@@ -33,7 +29,7 @@ async function open(bytes, name) {
     // Playwright forbids >50 MiB inline payloads; exercise an actual local file.
     const file = join(out, name)
     writeFileSync(file, bytes)
-    await p.locator('input[accept="application/pdf"]').setInputFiles(file)
+    await pdfInput(p).setInputFiles(file)
   } else {
     await p
       .locator('input[accept="application/pdf"]')
@@ -239,7 +235,7 @@ try {
     updateFieldAppearances: false,
   })
   writeFileSync(join(out, 'derived-character-encrypted.pdf'), protectedBytes)
-  await p.locator('input[accept="application/pdf"]').setInputFiles({
+  await pdfInput(p).setInputFiles({
     name: 'derived-character-encrypted.pdf',
     mimeType: 'application/pdf',
     buffer: Buffer.from(protectedBytes),
@@ -257,7 +253,7 @@ try {
   assert.ok(
     await p.getByText('large-valid.pdf · 1 Seite', { exact: true }).count(),
   )
-  await p.locator('input[accept="application/pdf"]').setInputFiles({
+  await pdfInput(p).setInputFiles({
     name: 'derived-character-encrypted.pdf',
     mimeType: 'application/pdf',
     buffer: Buffer.from(protectedBytes),

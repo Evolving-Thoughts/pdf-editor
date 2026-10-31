@@ -18,7 +18,9 @@ import {
   type CropMargins,
 } from '../core/pages'
 import { importPageFile, preparePages, textPageBytes } from '../core/pdf/pageOperations'
-import { extractPages } from '../core/pdf/exportPipeline'
+import { extractInWorker, preflightInWorker } from '../core/pdf/exportJob'
+import { selectDocument, snapshotDocument } from '../core/pdf/documentOutput'
+import { needsConfirmation, rejection } from '../core/pdf/preflight'
 import { loadPdf, type PdfHandle } from '../core/pdf/loadPdf'
 import { normalizeA4 } from '../core/pdf/normalizeA4'
 import { PageView } from './PageView'
@@ -85,6 +87,7 @@ export function PagesManager({ nativeWidgets = [], pdf, store, original, busy, o
   const [file, setFile] = useState<File | null>(null)
   const [text, setText] = useState('')
   const [working, setWorking] = useState(false)
+  const [extractCheck, setExtractCheck] = useState<{ ids: string[]; version: number; messages: string[] } | null>(null)
   const dialogRef = useRef<HTMLDialogElement>(null)
   const previewRef = useRef<HTMLDivElement>(null)
   const [available, setAvailable] = useState({ width: 600, height: 700 })
@@ -99,7 +102,7 @@ export function PagesManager({ nativeWidgets = [], pdf, store, original, busy, o
     size.width - m.left - m.right >= 20 * MM - 1e-6 &&
     size.height - m.top - m.bottom >= 20 * MM - 1e-6
   const frameMargins = activeCrop && marginsFit(activeCrop.margins) ? activeCrop.margins : zero()
-  const locked = busy || working || !!activeCrop || a4Open || !!deletePending
+  const locked = busy || working || !!activeCrop || a4Open || !!deletePending || !!extractCheck
   useEffect(() => {
     onCropActive(!!activeCrop || a4Open || !!deletePending)
     return () => onCropActive(false)
@@ -178,13 +181,13 @@ export function PagesManager({ nativeWidgets = [], pdf, store, original, busy, o
     const token = ++request.current, version = store.getVersion()
     setA4Open(true); setWorking(true); setProblem(null)
     try {
-      const prepared = await normalizeA4(new Uint8Array(original), store.state.pageSources ?? [], pages, store.state.overlays, store.state.formValues, store.state.redactionApplied||pages.some(page=>page.redacted))
+      const prepared = await normalizeA4(snapshotDocument(new Uint8Array(original), store.state))
       if (request.current !== token) return
       const previewPdf = await loadPdf('A4-Vorschau', new Uint8Array(prepared.source.bytes))
       if (request.current !== token) { await previewPdf.destroy(); return }
       if (store.getVersion() !== version) { await previewPdf.destroy(); throw new Error('Der Arbeitsstand hat sich geändert. Bitte erneut öffnen.') }
       const previewStore = new EditorStore()
-      previewStore.restore(prepared.overlays, prepared.pages, [prepared.source])
+      previewStore.restore({ overlays: prepared.overlays, pages: prepared.pages, pageSources: [prepared.source] })
       setA4Preview({ pdf: previewPdf, prepared, store: previewStore, version })
       setMessage('A4-Vorschau: Erst Anwenden verändert die Seiten.')
     } catch (error) {
@@ -233,20 +236,39 @@ export function PagesManager({ nativeWidgets = [], pdf, store, original, busy, o
   }
   async function extract() {
     if (!selection.length || locked) return
-    const ids = [...selection]
+    const ids = [...selection], version = store.getVersion()
+    const token = ++request.current
+    setWorking(true)
+    setProblem(null)
+    let messages: string[]
+    try {
+      const report = await preflightInWorker(selectDocument(snapshotDocument(new Uint8Array(original), store.state), ids))
+      if (token !== request.current) return
+      const rejected = rejection(report)
+      if (rejected) {
+        setProblem(rejected.message)
+        setWorking(false)
+        return
+      }
+      messages = needsConfirmation(report).map(item => item.message)
+      if (report.textIssues.length) messages.push('Nicht darstellbare Zeichen werden durch „?“ ersetzt.')
+    } catch {
+      if (token !== request.current) return
+      messages = ['Die Prüfung konnte nicht abgeschlossen werden. Bitte das Ergebnis selbst kontrollieren.']
+    }
+    if (messages.length) {
+      setExtractCheck({ ids, version, messages })
+      setWorking(false)
+    } else await saveExtract(ids, version)
+  }
+  async function saveExtract(ids: string[], version: number) {
+    setExtractCheck(null)
     const token = ++request.current
     setWorking(true)
     setProblem(null)
     try {
-      const bytes = await extractPages({
-        original: new Uint8Array(original),
-        sources: store.state.pageSources ?? [],
-        pages,
-        overlays: store.state.overlays,
-        formValues: store.state.formValues,
-        secure: !!store.state.redactionApplied || pages.some(page => page.redacted),
-        metadata: store.state.metadata,
-      }, ids)
+      if (store.getVersion() !== version) throw new Error('Der Arbeitsstand hat sich geändert. Bitte erneut auswählen.')
+      const bytes = await extractInWorker(snapshotDocument(new Uint8Array(original), store.state), ids)
       if (token !== request.current) return
       downloadPdf(bytes, ids.length === 1 ? `Seite-${pages.findIndex(p => p.id === ids[0]) + 1}.pdf` : `Auswahl-${ids.length}-Seiten.pdf`)
       setMessage(ids.length === 1 ? 'Die ausgewählte Seite wurde als eigenes PDF gespeichert.' : `${ids.length} ausgewählte Seiten wurden als eigenes PDF gespeichert.`)
@@ -301,7 +323,15 @@ export function PagesManager({ nativeWidgets = [], pdf, store, original, busy, o
             <p>Vorhandene Felder können in der Dokumentbearbeitung direkt ausgefüllt werden. Die Originaldatei bleibt unverändert.</p>
           </details>
         )}
-        {deletePending ? (
+        {extractCheck ? (
+          <div className="page-delete-confirm" role="group" aria-label="Extrahieren bestätigen">
+            {extractCheck.messages.map(message => <p key={message}>{message}</p>)}
+            <div className="page-manager-actions">
+              <button onClick={() => { setExtractCheck(null); setMessage('Extrahieren abgebrochen.') }}>Abbrechen</button>
+              <button onClick={() => void saveExtract(extractCheck.ids, extractCheck.version)}>Trotzdem speichern</button>
+            </div>
+          </div>
+        ) : deletePending ? (
           <div className="page-delete-confirm">
             <p>{deletePending.ids.length} ausgewählte {deletePending.ids.length === 1 ? 'Seite' : 'Seiten'} mit allen Inhalten löschen?</p>
             <div className="page-manager-actions">
@@ -500,6 +530,7 @@ export function PagesManager({ nativeWidgets = [], pdf, store, original, busy, o
                     <PageView
                       {...pageProps}
                       pageIndex={i}
+                      pageId={p.id}
                       zoom={Math.min(42 / pageSize(p).width, 54 / pageSize(p).height)}
                     />
                   )}
@@ -550,7 +581,7 @@ export function PagesManager({ nativeWidgets = [], pdf, store, original, busy, o
               className="page-preview-paper"
               style={{ width: shownSize.width * scale, height: shownSize.height * scale }}
             >
-              <PageView {...pageProps} nativeWidgets={a4Preview ? [] : nativeWidgets} pdf={a4Preview?.pdf ?? pdf} store={a4Preview?.store ?? store} overlays={a4Preview?.prepared.overlays ?? store.state.overlays} pageIndex={index} zoom={scale} />
+              <PageView {...pageProps} nativeWidgets={a4Preview ? [] : nativeWidgets} pdf={a4Preview?.pdf ?? pdf} store={a4Preview?.store ?? store} overlays={a4Preview?.prepared.overlays ?? store.state.overlays} pageIndex={index} pageId={pages[index].id} zoom={scale} />
               {activeCrop && (
                 <div className="page-crop-layer">
                   <div

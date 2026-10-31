@@ -1,8 +1,7 @@
 // T24: document info through the real menu, undo, draft restore and an
 // independently read export.
-import { chromiumPath } from './browser-helper.mjs'
+import { clickExport, collectErrors, launchBrowser, pageReady, pdfInput } from './browser-helper.mjs'
 import { confirmDefaultExport } from './export-smoke-helper.mjs'
-import { chromium } from 'playwright'
 import { PDFDocument, PDFName, PDFRawStream } from 'pdf-lib'
 import { readFileSync } from 'node:fs'
 import assert from 'node:assert/strict'
@@ -27,13 +26,13 @@ const read = async bytes => {
   return { info, xmp: metadata?.getRaw() ?? '', raw: new TextDecoder('latin1').decode(bytes) }
 }
 
-const browser = await chromium.launch({ executablePath: chromiumPath(), args: ['--no-sandbox'] })
+const browser = await launchBrowser()
 const page = await browser.newPage({ viewport: { width: 1280, height: 1000 }, acceptDownloads: true })
 const errors = []
-page.on('pageerror', error => errors.push(String(error)))
+collectErrors(page, errors)
 await page.goto(process.env.SMOKE_URL ?? 'http://localhost:5199')
-await page.locator('input[accept="application/pdf"]').setInputFiles({ name: 'info.pdf', mimeType: 'application/pdf', buffer: Buffer.from(await source()) })
-await page.waitForSelector('.page canvas[data-render-state="ready"]')
+await pdfInput(page).setInputFiles({ name: 'info.pdf', mimeType: 'application/pdf', buffer: Buffer.from(await source()) })
+await pageReady(page)
 
 const info = () => page.getByRole('dialog', { name: 'Dokumentinfo', exact: true })
 const openInfo = async () => {
@@ -42,7 +41,7 @@ const openInfo = async () => {
   await info().getByLabel('Titel').waitFor()
 }
 const exported = async () => {
-  await page.getByRole('button', { name: 'Exportieren', exact: true }).click()
+  await clickExport(page)
   const [download] = await Promise.all([page.waitForEvent('download'), confirmDefaultExport(page)])
   return new Uint8Array(readFileSync(await download.path()))
 }
@@ -75,7 +74,7 @@ await page.waitForFunction(() => document.querySelector('.draft-save-status')?.t
 await page.reload()
 await page.locator('.drafts-menu button, button:has-text("Entwürfe")').first().click()
 await page.getByRole('button', { name: /info\.pdf/ }).first().click()
-await page.waitForSelector('.page canvas[data-render-state="ready"]')
+await pageReady(page)
 await openInfo()
 assert.equal(await info().getByLabel('Titel').inputValue(), 'Neuer Titel äöü')
 await info().getByRole('button', { name: 'Abbrechen', exact: true }).click()

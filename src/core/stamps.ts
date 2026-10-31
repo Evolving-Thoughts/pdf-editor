@@ -82,9 +82,9 @@ export function stampGeometry(pixelWidth: number, pixelHeight: number, point: { 
   }
 }
 
-export function stampOverlay(picture: { dataUrl: string; pixelWidth: number; pixelHeight: number }, text: string, pageIndex: number, point: { x: number; y: number }, page: { width: number; height: number }): ImageOverlay {
+export function stampOverlay(picture: { dataUrl: string; pixelWidth: number; pixelHeight: number }, text: string, pageId: string, point: { x: number; y: number }, page: { width: number; height: number }): ImageOverlay {
   return {
-    kind: 'image', id: createId(), pageIndex, name: `Stempel: ${text}`, lockAspectRatio: true, rotation: 0,
+    kind: 'image', id: createId(), pageId, name: `Stempel: ${text}`, lockAspectRatio: true, rotation: 0,
     ...picture, ...stampGeometry(picture.pixelWidth, picture.pixelHeight, point, page),
   }
 }

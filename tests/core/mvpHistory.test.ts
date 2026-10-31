@@ -1,12 +1,6 @@
 import 'fake-indexeddb/auto'
 import { expect, test } from 'vitest'
-import {
-  addImage,
-  addShape,
-  addStroke,
-  addTextbox,
-  updateTextbox,
-} from '../../src/core/commands'
+import { addOverlay, updateOverlay } from '../../src/core/commands'
 import { EditorStore } from '../../src/core/editorStore'
 import {
   formKey,
@@ -34,9 +28,9 @@ test('40 mixed actions undo and redo every exact state, including page order, fo
     unit: 1,
     rotation: 0,
   }))
-  store.restore([], pages, [
+  store.restore({ overlays: [], pages: pages, pageSources: [
     { id: 'source', bytes: new Uint8Array([1, 2, 3]).buffer },
-  ])
+  ] })
   const field: NativeWidget = {
     id: 'field',
     key: formKey('source', 'Name'),
@@ -64,7 +58,7 @@ test('40 mixed actions undo and redo every exact state, including page order, fo
   for (let i = 0; i < 4; i++) {
     const box: Textbox = {
       id: `text${i}`,
-      pageIndex: 0,
+      pageId: 'p0',
       x: 40,
       y: 700,
       text: 'before',
@@ -74,12 +68,12 @@ test('40 mixed actions undo and redo every exact state, including page order, fo
       italic: false,
       underline: false,
     }
-    execute(addTextbox(box))
-    execute(updateTextbox(box.id, { text: 'before' }, { text: `after${i}` }))
+    execute(addOverlay(box))
+    execute(updateOverlay(box.id, { text: 'before' }, { text: `after${i}` }))
     execute(
-      addStroke({
+      addOverlay({
         id: `stroke${i}`,
-        pageIndex: 1,
+        pageId: 'p1',
         points: [
           { x: 20, y: 30 },
           { x: 40, y: 50 },
@@ -89,11 +83,11 @@ test('40 mixed actions undo and redo every exact state, including page order, fo
       }),
     )
     execute(
-      addShape({
+      addOverlay({
         id: `shape${i}`,
         kind: 'shape',
         shape: 'rect',
-        pageIndex: 1,
+        pageId: 'p1',
         x: 50,
         y: 60,
         width: 100,
@@ -105,10 +99,10 @@ test('40 mixed actions undo and redo every exact state, including page order, fo
       }),
     )
     execute(
-      addImage({
+      addOverlay({
         id: `image${i}`,
         kind: 'image',
-        pageIndex: 2,
+        pageId: 'p2',
         x: 10,
         y: 10,
         width: 50,
@@ -169,13 +163,7 @@ test('40 mixed actions undo and redo every exact state, including page order, fo
       const draft = await loadDraft(reopened, 'mvp-combined')
       expect(draft).not.toBeNull()
       const fresh = new EditorStore()
-      fresh.restore(
-        draft!.overlays,
-        draft!.pages,
-        draft!.pageSources,
-        draft!.formValues,
-        draft!.redactions,
-      )
+      fresh.restore({ overlays: draft!.overlays, pages: draft!.pages, pageSources: draft!.pageSources, formValues: draft!.formValues, redactions: draft!.redactions })
       expect(fresh.state).toEqual(expected)
       expect(fresh.canUndo).toBe(false) // history is session-local, not persisted
     } finally {

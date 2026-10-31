@@ -14,8 +14,8 @@ import {
   A4_HEIGHT,
   type DocumentPage,
 } from '../../src/core/pages'
-import { addTextbox } from '../../src/core/commands'
-import type { Textbox } from '../../src/core/model'
+import { addOverlay } from '../../src/core/commands'
+import { overlayPageIndex, type Textbox } from '../../src/core/model'
 const pages = (): DocumentPage[] =>
   ['a', 'b', 'c'].map((id) => ({
     id,
@@ -26,9 +26,9 @@ const pages = (): DocumentPage[] =>
     unit: 1,
     rotation: 0,
   }))
-const textbox = (id: string, pageIndex: number): Textbox => ({
+const textbox = (id: string, pageId: string): Textbox => ({
   id,
-  pageIndex,
+  pageId,
   x: 30,
   y: 250,
   text: id,
@@ -41,32 +41,32 @@ const textbox = (id: string, pageIndex: number): Textbox => ({
 test('reordering keeps overlays attached to their page across undo and later text edits', () => {
   const store = new EditorStore()
   store.state.pages = pages()
-  store.state.overlays = [textbox('on-a', 0), textbox('on-c', 2)]
+  store.state.overlays = [textbox('on-a', 'a'), textbox('on-c', 'c')]
   store.dispatch(movePage(store.state, 'a', 2))
   expect(store.state.pages?.map((p) => p.id)).toEqual(['b', 'c', 'a'])
-  expect(store.state.overlays.map((o) => o.pageIndex)).toEqual([2, 1])
-  store.dispatch(addTextbox(textbox('new', 2)))
+  expect(store.state.overlays.map((o) => overlayPageIndex(store.state, o))).toEqual([2, 1])
+  store.dispatch(addOverlay(textbox('new', 'a')))
   store.undo()
   store.undo()
   expect(store.state.pages?.map((p) => p.id)).toEqual(['a', 'b', 'c'])
-  expect(store.state.overlays.map((o) => o.pageIndex)).toEqual([0, 2])
+  expect(store.state.overlays.map((o) => overlayPageIndex(store.state, o))).toEqual([0, 2])
   store.redo()
   store.redo()
-  expect(store.state.overlays.map((o) => o.pageIndex)).toEqual([2, 1, 2])
+  expect(store.state.overlays.map((o) => overlayPageIndex(store.state, o))).toEqual([2, 1, 2])
 })
 
 test('deleting a page removes only its overlays and undo restores exact paint order', () => {
   const store = new EditorStore()
   store.state.pages = pages()
-  store.state.overlays = [textbox('c1', 2), textbox('b1', 1), textbox('a1', 0), textbox('b2', 1)]
+  store.state.overlays = [textbox('c1', 'c'), textbox('b1', 'b'), textbox('a1', 'a'), textbox('b2', 'b')]
   store.dispatch(deletePage(store.state, 'b'))
   expect(store.state.pages?.map((p) => p.id)).toEqual(['a', 'c'])
-  expect(store.state.overlays.map((o) => [o.id, o.pageIndex])).toEqual([
+  expect(store.state.overlays.map((o) => [o.id, overlayPageIndex(store.state, o)])).toEqual([
     ['c1', 1],
     ['a1', 0],
   ])
   store.undo()
-  expect(store.state.overlays.map((o) => [o.id, o.pageIndex])).toEqual([
+  expect(store.state.overlays.map((o) => [o.id, overlayPageIndex(store.state, o)])).toEqual([
     ['c1', 2],
     ['b1', 1],
     ['a1', 0],
@@ -76,7 +76,7 @@ test('deleting a page removes only its overlays and undo restores exact paint or
 test('inserting multiple pages at a gap shifts overlays and is one undo step', () => {
   const store = new EditorStore()
   store.state.pages = pages()
-  store.state.overlays = [textbox('c1', 2)]
+  store.state.overlays = [textbox('c1', 'c')]
   store.dispatch(
     insertPages(store.state, 1, [{ ...pages()[0], id: 'new', sourceId: 'extra' }], {
       id: 'extra',
@@ -84,10 +84,10 @@ test('inserting multiple pages at a gap shifts overlays and is one undo step', (
     }),
   )
   expect(store.state.pages?.map((p) => p.id)).toEqual(['a', 'new', 'b', 'c'])
-  expect(store.state.overlays[0].pageIndex).toBe(3)
+  expect(overlayPageIndex(store.state, store.state.overlays[0])).toBe(3)
   store.undo()
   expect(store.state.pageSources).toEqual([])
-  expect(store.state.overlays[0].pageIndex).toBe(2)
+  expect(overlayPageIndex(store.state, store.state.overlays[0])).toBe(2)
   store.redo()
   expect(store.state.pageSources?.[0].bytes.byteLength).toBe(3)
 })
@@ -95,11 +95,11 @@ test('clockwise page rotation rotates textbox baselines, shape centers and strok
   const store = new EditorStore()
   store.state.pages = pages()
   store.state.overlays = [
-    textbox('text', 0),
+    textbox('text', 'a'),
     {
       kind: 'image',
       id: 'im',
-      pageIndex: 0,
+      pageId: 'a',
       x: 20,
       y: 40,
       width: 60,
@@ -113,7 +113,7 @@ test('clockwise page rotation rotates textbox baselines, shape centers and strok
     },
     {
       id: 'stroke',
-      pageIndex: 0,
+      pageId: 'a',
       points: [
         { x: 10, y: 20 },
         { x: 80, y: 50 },
@@ -143,7 +143,7 @@ test('crop translates overlay origins and maps margins into rotated, offset, sca
   store.state.pages = [
     { ...pages()[0], box: { x: 10, y: 20, width: 100, height: 150 }, unit: 2, rotation: 90 },
   ]
-  store.state.overlays = [textbox('t', 0)]
+  store.state.overlays = [textbox('t', 'a')]
   store.dispatch(cropPage(store.state, 'a', { left: 20, top: 40, right: 60, bottom: 10 }))
   expect(store.state.pages![0].box).toEqual({ x: 30, y: 30, width: 75, height: 110 })
   expect(pageSize(store.state.pages![0])).toEqual({ width: 220, height: 150 })
@@ -156,16 +156,16 @@ test('crop translates overlay origins and maps margins into rotated, offset, sca
 test('image page insertion adds editable overlays atomically and undo/redo preserves their geometry', () => {
   const store = new EditorStore()
   store.state.pages = pages()
-  store.state.overlays = [textbox('existing', 2)]
-  const image = { kind: 'image' as const, id: 'photo', pageIndex: 0, x: 20, y: 50, width: 100, height: 80,
+  store.state.overlays = [textbox('existing', 'c')]
+  const image = { kind: 'image' as const, id: 'photo', pageId: 'photo-page', x: 20, y: 50, width: 100, height: 80,
     lockAspectRatio: true, name: 'photo.png', dataUrl: 'png', pixelWidth: 100, pixelHeight: 80 }
   store.dispatch(insertPages(store.state, 1, [{ ...pages()[0], id: 'photo-page', sourceId: 'photo-source' }],
     { id: 'photo-source', bytes: new ArrayBuffer(1) }, [image]))
-  expect(store.state.overlays).toEqual([{ ...textbox('existing', 2), pageIndex: 3 }, { ...image, pageIndex: 1 }])
+  expect(store.state.overlays).toEqual([textbox('existing', 'c'), image])
   store.undo()
-  expect(store.state.overlays).toEqual([textbox('existing', 2)])
+  expect(store.state.overlays).toEqual([textbox('existing', 'c')])
   store.redo()
-  expect(store.state.overlays[1]).toEqual({ ...image, pageIndex: 1 })
+  expect(store.state.overlays[1]).toEqual(image)
 })
 
 test('page insertion references displayed rotation/crop/UserUnit and defaults to A4 only when empty', () => {

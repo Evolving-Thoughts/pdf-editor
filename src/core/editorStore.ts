@@ -1,11 +1,7 @@
-import type { Redaction } from './redactions'
-import type { FormValues } from './forms'
-import type { DocumentPage, PageSource } from './pages'
 // Central editor store: holds the document overlay state and the command
 // stack (ADR-002). Framework-free; the UI subscribes and re-renders.
 import { CommandStack, type Command } from './commands'
-import { cloneOverlay, type EditorState, type Overlay } from './model'
-import type { MetadataEdit } from './pdf/metadata'
+import { assignEditorState, type EditorState } from './model'
 
 export class EditorStore {
   readonly state: EditorState = { overlays: [] }
@@ -51,26 +47,14 @@ export class EditorStore {
 
   /** Clears all overlays and history, e.g. when a new document is loaded. */
   reset(): void {
-    this.state.redactionApplied = undefined
-    this.state.redactions = undefined
-    this.state.formValues = undefined
-    this.state.overlays = []
-    this.state.pages = undefined
-    this.state.pageSources = undefined
-    this.state.metadata = undefined
+    assignEditorState(this.state, { overlays: [] })
     this.stack = new CommandStack(this.state)
     this.notify()
   }
 
-  /** Replaces overlays with a stored draft's state and clears history. */
-  restore(overlays: Overlay[], pages?: DocumentPage[], sources?: PageSource[], formValues?: FormValues, redactions?: Redaction[], redactionApplied?: boolean, metadata?: MetadataEdit): void {
-    this.state.redactionApplied = redactionApplied
-    this.state.redactions = redactions ? structuredClone(redactions) : undefined
-    this.state.formValues = formValues ? structuredClone(formValues) : undefined
-    this.state.overlays = overlays.map(cloneOverlay)
-    this.state.pages = pages ? structuredClone(pages) : undefined
-    this.state.pageSources = sources ? [...sources] : undefined
-    this.state.metadata = metadata ? structuredClone(metadata) : undefined
+  /** Replaces everything with a stored draft's state and clears history. */
+  restore(state: EditorState): void {
+    assignEditorState(this.state, state)
     this.stack = new CommandStack(this.state)
     this.notify()
   }

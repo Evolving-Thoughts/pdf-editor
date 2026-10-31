@@ -24,7 +24,7 @@ export interface LabelConfig {
 
 export interface Box { left: number; right: number; bottom: number; top: number }
 export type MeasureText = (text: string, font: LabelConfig['font'], fontSize: number) => number
-export interface PlannedLabel { pageIndex: number; number: number; text: string; x: number; y: number; width: number }
+export interface PlannedLabel { pageIndex: number; pageId: string; number: number; text: string; x: number; y: number; width: number }
 
 /** Sorted, unique 0-based pages. Rejects anything it cannot read instead of guessing. */
 export function parsePageRange(text: string, total: number): number[] {
@@ -62,13 +62,13 @@ export function planLabels(pages: DocumentPage[], config: LabelConfig, measure: 
     const { x, y } = labelPosition(size, width, config)
     if (x < 0 || x + width > size.width || y < 0 || y + config.fontSize > size.height)
       throw new Error(`Der Text passt auf Seite ${pageIndex + 1} nicht zwischen die Ränder.`)
-    return { pageIndex, number, text, x, y, width }
+    return { pageIndex, pageId: pages[pageIndex].id, number, text, x, y, width }
   })
 }
 
 export function labelOverlays(labels: PlannedLabel[], config: LabelConfig): Textbox[] {
   return labels.map(label => ({
-    id: createId(), pageIndex: label.pageIndex, x: label.x, y: label.y, text: label.text, font: config.font,
+    id: createId(), pageId: label.pageId, x: label.x, y: label.y, text: label.text, font: config.font,
     fontSize: config.fontSize, bold: false, italic: false, underline: false, labelGroup: config.position,
     label: { template: config.template, start: config.start, text: label.text },
   }))
@@ -101,7 +101,7 @@ export function labelCollisions(labels: PlannedLabel[], fontSize: number, pages:
       return overlap(box, { left: Math.min(...xs), right: Math.max(...xs), bottom: Math.min(...ys), top: Math.max(...ys) })
     })
     const hitsOverlay = overlays.some(overlay => {
-      if (overlay.pageIndex !== label.pageIndex) return false
+      if (overlay.pageId !== label.pageId) return false
       const other = overlayBox(overlay)
       return !!other && overlap(box, other)
     })

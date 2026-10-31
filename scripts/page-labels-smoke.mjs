@@ -1,7 +1,6 @@
 // T22: page labels through the dialog, on mixed pages, with undo, draft and export.
-import { chromiumPath } from './browser-helper.mjs'
+import { clickExport, collectErrors, launchBrowser, pageReady, pdfInput } from './browser-helper.mjs'
 import { confirmDefaultExport } from './export-smoke-helper.mjs'
-import { chromium } from 'playwright'
 import { PDFDocument, StandardFonts, degrees } from 'pdf-lib'
 import { readFileSync } from 'node:fs'
 import assert from 'node:assert/strict'
@@ -32,13 +31,13 @@ const labels = async bytes => {
   return found
 }
 
-const browser = await chromium.launch({ executablePath: chromiumPath(), args: ['--no-sandbox'] })
+const browser = await launchBrowser()
 const page = await browser.newPage({ viewport: { width: 1280, height: 1000 }, acceptDownloads: true })
 const errors = []
-page.on('pageerror', error => errors.push(String(error)))
+collectErrors(page, errors)
 await page.goto(process.env.SMOKE_URL ?? 'http://localhost:5199')
-await page.locator('input[accept="application/pdf"]').setInputFiles({ name: 'labels.pdf', mimeType: 'application/pdf', buffer: Buffer.from(await source()) })
-await page.waitForSelector('.page canvas[data-render-state="ready"]')
+await pdfInput(page).setInputFiles({ name: 'labels.pdf', mimeType: 'application/pdf', buffer: Buffer.from(await source()) })
+await pageReady(page)
 
 const dialog = () => page.getByRole('dialog', { name: 'Seitenzahlen, Kopf- und Fußzeile', exact: true })
 const openDialog = async () => {
@@ -85,7 +84,7 @@ await apply('Auf 2 Seiten anwenden').click()
 await page.waitForFunction(() => !document.querySelector('dialog[open]'))
 
 const [download] = await Promise.all([page.waitForEvent('download'), (async () => {
-  await page.getByRole('button', { name: 'Exportieren', exact: true }).click()
+  await clickExport(page)
   await confirmDefaultExport(page)
 })()])
 const found = await labels(new Uint8Array(readFileSync(await download.path())))
@@ -101,7 +100,7 @@ await page.waitForTimeout(600)
 await page.getByRole('button', { name: 'Zur Dokumentbearbeitung', exact: true }).click()
 await page.waitForSelector('.pages .page canvas')
 const [second] = await Promise.all([page.waitForEvent('download'), (async () => {
-  await page.getByRole('button', { name: 'Exportieren', exact: true }).click()
+  await clickExport(page)
   await confirmDefaultExport(page)
 })()])
 const moved = await labels(new Uint8Array(readFileSync(await second.path())))

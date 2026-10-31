@@ -34,7 +34,7 @@ export function validateRedactions(marks: Redaction[], pages: DocumentPage[]) {
 }
 export function applyRedactionResult(state: EditorState, source: PageSource, replacements: DocumentPage[], newText: Overlay[]): Command {
   const affected = new Set(replacements.map(p => p.id)), before = { applied: state.redactionApplied, pages: structuredClone(state.pages), sources: [...(state.pageSources ?? [])], overlays: state.overlays.map(cloneOverlay), marks: structuredClone(state.redactions ?? []) }
-  const after = { applied: true, pages: state.pages!.map(p => replacements.find(r => r.id === p.id) ?? p), sources: [...before.sources, source], overlays: [...state.overlays.filter(o => !affected.has(state.pages![o.pageIndex].id)).map(cloneOverlay), ...newText.map(cloneOverlay)], marks: [] }
+  const after = { applied: true, pages: state.pages!.map(p => replacements.find(r => r.id === p.id) ?? p), sources: [...before.sources, source], overlays: [...state.overlays.filter(o => !affected.has(o.pageId)).map(cloneOverlay), ...newText.map(cloneOverlay)], marks: [] }
   const assign = (s: EditorState, v: typeof before) => { s.redactionApplied = v.applied; s.pages = structuredClone(v.pages); s.pageSources = [...v.sources]; s.overlays = v.overlays.map(cloneOverlay); s.redactions = structuredClone(v.marks) }
   return { label: 'Apply true redaction', apply: s => assign(s, after), revert: s => assign(s, before) }
 }

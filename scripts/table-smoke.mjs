@@ -1,7 +1,6 @@
 // T26: from a PDF table to reviewed XLSX and ODS files. The saved files stay in
 // SMOKE_ARTIFACT_DIR for scripts/verify-table-export.py.
-import { chromiumPath } from './browser-helper.mjs'
-import { chromium } from 'playwright'
+import { collectErrors, launchBrowser, pageReady, pdfInput } from './browser-helper.mjs'
 import { PDFDocument, StandardFonts } from 'pdf-lib'
 import { mkdirSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
@@ -27,14 +26,14 @@ async function source() {
   return doc.save()
 }
 
-const browser = await chromium.launch({ executablePath: chromiumPath(), args: ['--no-sandbox'] })
+const browser = await launchBrowser()
 const page = await browser.newPage({ viewport: { width: 1500, height: 1000 }, acceptDownloads: true })
 const errors = []
-page.on('pageerror', error => errors.push(String(error)))
+collectErrors(page, errors)
 await page.goto(process.env.SMOKE_URL ?? 'http://localhost:5199')
 const original = await source()
-await page.locator('input[accept="application/pdf"]').setInputFiles({ name: 'rechnung.pdf', mimeType: 'application/pdf', buffer: Buffer.from(original) })
-await page.waitForSelector('.page canvas[data-render-state="ready"]')
+await pdfInput(page).setInputFiles({ name: 'rechnung.pdf', mimeType: 'application/pdf', buffer: Buffer.from(original) })
+await pageReady(page)
 
 await page.getByRole('button', { name: 'Dokument', exact: true }).click()
 await page.getByRole('menuitem', { name: 'Tabelle exportieren …' }).click()

@@ -113,7 +113,7 @@ test('source revision supports undo/redo, stored drafts and real page export wit
   const bytes = await paragraphFixture(), analysis = await inspectSimpleSourceText(bytes)
   const candidate = await previewSimpleSourceCorrection(bytes, paragraphSelection(analysis), 'This paragraph contains short words.')
   const pages = await inspectPages(bytes, 'original.pdf'), store = new EditorStore()
-  store.restore([], pages, [])
+  store.restore({ overlays: [], pages: pages, pageSources: [] })
   const originalSource = store.state.pages![0].sourceId
   store.dispatch(sourceRevision(store.state, pages[0].id, Uint8Array.from(candidate).buffer))
   const source = store.state.pageSources![0]
@@ -146,8 +146,8 @@ test('worker request terminates on abort and deadline; original bytes stay avail
 
 test('source revision refuses overlays and leaves duplicate page copies and original bytes untouched', async () => {
   const bytes = await paragraphFixture(), pages = await inspectPages(bytes, 'original.pdf'), store = new EditorStore()
-  store.restore([], [...pages, { ...pages[0], id: 'another-copy' }], [])
-  store.state.overlays.push({ id: 'overlay', pageIndex: 0, x: 50, y: 700, text: 'overlay', font: 'helvetica', fontSize: 12, bold: false, italic: false, underline: false })
+  store.restore({ overlays: [], pages: [...pages, { ...pages[0], id: 'another-copy' }], pageSources: [] })
+  store.state.overlays.push({ id: 'overlay', pageId: pages[0].id, x: 50, y: 700, text: 'overlay', font: 'helvetica', fontSize: 12, bold: false, italic: false, underline: false })
   const before = store.state.pages
   expect(() => sourceRevision(store.state, pages[0].id, Uint8Array.from(bytes).buffer)).toThrow(/Overlays/)
   expect(store.state.pages).toBe(before); expect(store.canUndo).toBe(false)
@@ -200,7 +200,7 @@ test('corrections of several pages are one undoable command', async () => {
   const doc = await PDFDocument.create(), font = await doc.embedFont(StandardFonts.Helvetica)
   for (const label of ['One', 'Two', 'Three']) doc.addPage().drawText(label, { font, size: 12, x: 50, y: 700 })
   const bytes = await doc.save(), pages = await inspectPages(bytes, 'three.pdf'), store = new EditorStore()
-  store.restore([], pages, [])
+  store.restore({ overlays: [], pages: pages, pageSources: [] })
   const before = store.state.pages!.map(p => p.sourceId)
   store.dispatch(sourceRevisions(store.state, [{ pageId: pages[0].id, bytes: Uint8Array.from(bytes).buffer }, { pageId: pages[2].id, bytes: Uint8Array.from(bytes).buffer }]))
   const after = store.state.pages!.map(p => p.sourceId)

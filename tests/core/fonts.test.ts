@@ -3,7 +3,7 @@ import { readFileSync } from 'node:fs'
 import { resolve } from 'node:path'
 import { PDFDict, PDFDocument, PDFName } from 'pdf-lib'
 import { BUNDLED_FONTS, bundledFontUrl, fontSupportsItalic, loadBundledFont } from '../../src/core/fonts'
-import { exportPdf } from '../../src/core/pdf/exportPdf'
+import { exportPdf } from './exportFixture'
 import type { Textbox } from '../../src/core/model'
 
 afterEach(() => vi.unstubAllGlobals())
@@ -20,7 +20,7 @@ test('each bundled family/style embeds a real font program and preserves searcha
     for (const [bold, italic] of [[false, false], [true, false], [false, true], [true, true]]) {
       if (italic && !fontSupportsItalic(font)) continue
       overlays.push({ id: `${font}-${bold}-${italic}`, font, bold, italic, text: 'Grüße aus Würzburg – ÄÖÜ ß',
-        pageIndex: 0, x: 30, y: 800 - overlays.length * 27, fontSize: 12, underline: true })
+        pageId: 'p0', x: 30, y: 800 - overlays.length * 27, fontSize: 12, underline: true })
     }
   }
   expect(new Set(overlays.map(bundledFontUrl)).size).toBe(26)

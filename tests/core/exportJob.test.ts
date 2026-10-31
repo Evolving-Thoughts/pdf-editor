@@ -3,6 +3,7 @@ import { PDFDocument, StandardFonts } from 'pdf-lib'
 import { getDocument } from 'pdfjs-dist/legacy/build/pdf.mjs'
 import { encryptInWorker, exportInWorker, type ExportJob, type ExportJobMessage, type JobWorker } from '../../src/core/pdf/exportJob'
 import { executeJob } from '../../src/core/pdf/exportWorkerCore'
+import { isSecure, selectDocument } from '../../src/core/pdf/documentOutput'
 import type { ExportRequest } from '../../src/core/pdf/exportPipeline'
 import { inspectPages } from '../../src/core/pdf/pageOperations'
 import type { Textbox } from '../../src/core/model'
@@ -20,7 +21,7 @@ class FakeWorker implements JobWorker {
   emit(message: ExportJobMessage) { this.onmessage?.({ data: message } as MessageEvent<ExportJobMessage>) }
 }
 
-const request = { original: new Uint8Array([1]), sources: [], pages: [], overlays: [], secure: false, size: { mode: 'none' } } satisfies ExportRequest
+const request = { original: new Uint8Array([1]), state: { pages: [], overlays: [] }, size: { mode: 'none' } } satisfies ExportRequest
 
 test('a finished job hands over its result and ends the worker', async () => {
   const worker = new FakeWorker()
@@ -119,11 +120,12 @@ async function source() {
   doc.getForm().createTextField('name').addToPage(page, { x: 20, y: 20, width: 100, height: 20 })
   return doc.save()
 }
-const box: Textbox = { id: 't', pageIndex: 0, x: 20, y: 200, text: 'Zusatz', font: 'helvetica', fontSize: 12, bold: false, italic: false, underline: false }
+const box: Textbox = { id: 't', pageId: 'p0', x: 20, y: 200, text: 'Zusatz', font: 'helvetica', fontSize: 12, bold: false, italic: false, underline: false }
 
 test('the worker side writes a real export and reports its stages', async () => {
   const original = await source(), messages: ExportJobMessage[] = [], before = original.slice()
-  const job: ExportJob = { jobId: 'j', kind: 'export', request: { ...request, original, pages: await inspectPages(original, 'a.pdf'), overlays: [box], size: { mode: 'structure' } } }
+  const pages = await inspectPages(original, 'a.pdf')
+  const job: ExportJob = { jobId: 'j', kind: 'export', request: { original, state: { pages, overlays: [{ ...box, pageId: pages[0].id }] }, size: { mode: 'structure' } } }
   await executeJob(job, message => messages.push(message))
   expect(messages.map(message => message.type === 'progress' ? message.progress.stage : message.type)).toEqual(['compose', 'structure', 'done'])
   const done = messages.at(-1)
@@ -139,13 +141,13 @@ test('the worker side writes a real export and reports its stages', async () => 
 
 test('the result buffers are handed over, not copied', async () => {
   const original = await source(), transfers: (ArrayBuffer[] | undefined)[] = []
-  await executeJob({ jobId: 'j', kind: 'export', request: { ...request, original, pages: await inspectPages(original, 'a.pdf') } }, (_, transfer) => { transfers.push(transfer) })
+  await executeJob({ jobId: 'j', kind: 'export', request: { ...request, original, state: { pages: await inspectPages(original, 'a.pdf'), overlays: [] } } }, (_, transfer) => { transfers.push(transfer) })
   expect(transfers.at(-1)).toHaveLength(1)
 })
 
 test('a failing export reports only its message, never document content', async () => {
   const messages: ExportJobMessage[] = []
-  await executeJob({ jobId: 'j', kind: 'export', request: { ...request, original: new TextEncoder().encode('geheimer Inhalt'), pages: [{ id: 'p', name: 'a', sourceId: 'original', sourceIndex: 0, box: { x: 0, y: 0, width: 10, height: 10 }, unit: 1, rotation: 0 }] } }, message => messages.push(message))
+  await executeJob({ jobId: 'j', kind: 'export', request: { ...request, original: new TextEncoder().encode('geheimer Inhalt'), state: { overlays: [], pages: [{ id: 'p', name: 'a', sourceId: 'original', sourceIndex: 0, box: { x: 0, y: 0, width: 10, height: 10 }, unit: 1, rotation: 0 }] } } }, message => messages.push(message))
   const last = messages.at(-1)!
   expect(last.type).toBe('error')
   expect(JSON.stringify(last)).not.toContain('geheimer Inhalt')
@@ -153,7 +155,7 @@ test('a failing export reports only its message, never document content', async 
 
 test('the worker side answers a check with a plain report', async () => {
   const messages: ExportJobMessage[] = [], transfers: (ArrayBuffer[] | undefined)[] = [], original = await source()
-  await executeJob({ jobId: 'j', kind: 'preflight', input: { original, sources: [], pages: await inspectPages(original, 'a.pdf'), overlays: [{ ...box, text: 'Ω' }], secure: false } }, (message, transfer) => { messages.push(message); transfers.push(transfer) })
+  await executeJob({ jobId: 'j', kind: 'preflight', input: { original, state: { pages: await inspectPages(original, 'a.pdf'), overlays: [{ ...box, text: 'Ω' }] } } }, (message, transfer) => { messages.push(message); transfers.push(transfer) })
   const done = messages.at(-1)
   if (done?.type !== 'done' || !('assessments' in done.result)) throw new Error('Kein Bericht')
   expect(done.result.textIssues[0].characters).toEqual(['Ω'])
@@ -166,4 +168,24 @@ test('the worker side encrypts', async () => {
   const done = messages.at(-1)
   if (done?.type !== 'done' || !(done.result instanceof Uint8Array)) throw new Error('Kein Ergebnis')
   await expect(getDocument({ data: done.result.slice() }).promise).rejects.toMatchObject({ name: 'PasswordException' })
+})
+
+test('the worker side extracts the chosen pages', async () => {
+  const doc = await PDFDocument.create()
+  doc.addPage([100, 100])
+  doc.addPage([200, 200])
+  const original = await doc.save(), pages = await inspectPages(original, 'a.pdf')
+  const document = { original, state: { pages, overlays: [] } }, messages: ExportJobMessage[] = []
+  await executeJob({ jobId: 'j', kind: 'extract', document, ids: [pages[1].id] }, message => messages.push(message))
+  const done = messages.at(-1)
+  if (done?.type !== 'done') throw new Error('extract failed')
+  const output = await PDFDocument.load(done.result as Uint8Array)
+  expect(output.getPages().map(page => page.getWidth())).toEqual([200])
+})
+
+test('a selection of a redacted document stays secure', () => {
+  const page = { id: 'a', name: 'a', sourceId: 'original', sourceIndex: 0, box: { x: 0, y: 0, width: 1, height: 1 }, unit: 1, rotation: 0 }
+  const chosen = selectDocument({ original: new Uint8Array(), state: { overlays: [], pages: [page, { ...page, id: 'b', redacted: true }] } }, ['a'])
+  expect(isSecure(chosen.state)).toBe(true)
+  expect(chosen.state.pages?.map(item => item.id)).toEqual(['a'])
 })

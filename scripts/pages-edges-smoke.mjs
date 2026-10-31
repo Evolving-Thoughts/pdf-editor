@@ -1,18 +1,14 @@
-import { chromiumPath } from './browser-helper.mjs'
+import { collectErrors, launchBrowser, pdfInput } from './browser-helper.mjs'
 import { mkdtempSync, readFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { chromium } from 'playwright'
 import { PDFDocument } from 'pdf-lib'
 import { execFileSync } from 'node:child_process'
 import assert from 'node:assert/strict'
-const browser = await chromium.launch({
-  executablePath: chromiumPath(),
-  args: ['--no-sandbox'],
-})
+const browser = await launchBrowser()
 const p = await browser.newPage({ viewport: { width: 1200, height: 1000 } }),
   errors = []
-p.on('pageerror', (e) => errors.push(String(e)))
+collectErrors(p, errors)
 p.on('dialog', (d) => void d.accept())
 const btn = (name) => p.getByRole('button', { name, exact: true })
 const settled = () =>
@@ -23,7 +19,7 @@ try {
   const doc = await PDFDocument.create()
   doc.addPage([600, 800])
   await p.goto(process.env.SMOKE_URL ?? 'http://localhost:5207')
-  await p.locator('input[accept="application/pdf"]').setInputFiles({
+  await pdfInput(p).setInputFiles({
     name: 'empty-test.pdf',
     mimeType: 'application/pdf',
     buffer: Buffer.from(await doc.save()),

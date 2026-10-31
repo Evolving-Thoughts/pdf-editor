@@ -1,5 +1,4 @@
-import { chromium } from 'playwright'
-import { chromiumPath } from './browser-helper.mjs'
+import { clickExport, collectErrors, launchBrowser, pageReady, pdfInput } from './browser-helper.mjs'
 import { confirmDefaultExport } from './export-smoke-helper.mjs'
 import fontkit from '@pdf-lib/fontkit'
 import { PDFDocument, StandardFonts } from 'pdf-lib'
@@ -20,12 +19,12 @@ lines.push(line)
 doc.addPage([595, 842]).drawText(lines.join('\n'), { x: 50, y: 700, size: 12, font, lineHeight: 20 })
 doc.getPages()[0].drawText('Following paragraph stays here.', { x: 50, y: 540, font, size: 12 })
 const input = Buffer.from(await doc.save())
-const browser = await chromium.launch({ executablePath: chromiumPath(), args: ['--no-sandbox'] })
+const browser = await launchBrowser()
 const page = await browser.newPage({ viewport: { width: 1440, height: 1000 }, acceptDownloads: true })
-const errors = []; page.on('pageerror', error => errors.push(String(error)))
+const errors = []; collectErrors(page, errors)
 async function load(name = 'source-text.pdf', buffer = input) {
-  await page.locator('input[accept="application/pdf"]').setInputFiles({ name, mimeType: 'application/pdf', buffer })
-  await page.locator('.page canvas[data-render-state="ready"]').first().waitFor()
+  await pdfInput(page).setInputFiles({ name, mimeType: 'application/pdf', buffer })
+  await pageReady(page)
 }
 async function openPanel() {
   await page.getByRole('button', { name: 'Originaltext korrigieren', exact: true }).click()
@@ -39,7 +38,7 @@ async function edit(text) {
 }
 async function downloadText() {
   const pending = page.waitForEvent('download')
-  await page.getByRole('button', { name: 'Exportieren', exact: true }).click(); await confirmDefaultExport(page)
+  await clickExport(page); await confirmDefaultExport(page)
   const download = await pending, path = await download.path()
   const task = getDocument({ data: Uint8Array.from(readFileSync(path)), standardFontDataUrl: resolve('node_modules/pdfjs-dist/standard_fonts') + '/' })
   try { const pdf = await task.promise; const items = (await (await pdf.getPage(1)).getTextContent()).items.filter(item => 'str' in item && item.str); return items }
@@ -97,15 +96,15 @@ try {
   await page.setViewportSize({ width: 1440, height: 1000 })
   await page.getByText('Ergebnis in der echten PDF bereit. Absatz und Übergang zum Folgeinhalt ansehen.', { exact: true }).waitFor()
   await applyButton(page).click()
-  await page.locator('.page canvas[data-render-state="ready"]').first().waitFor()
+  await pageReady(page)
   let items = await downloadText()
   assert.equal(items.map(item => item.str).join(' '), 'This paragraph contains short words. Following paragraph stays here.')
   assert.equal(items.at(-1).transform[5], 540, 'following paragraph stays in position')
   await page.getByRole('button', { name: 'Rückgängig', exact: true }).click()
-  await page.locator('.page canvas[data-render-state="ready"]').first().waitFor()
+  await pageReady(page)
   items = await downloadText(); assert.equal(items.map(item => item.str).join(' '), originalText + ' Following paragraph stays here.')
   await page.getByRole('button', { name: 'Wiederholen', exact: true }).click()
-  await page.locator('.page canvas[data-render-state="ready"]').first().waitFor()
+  await pageReady(page)
   await page.getByRole('button', { name: 'Speichern', exact: true }).click()
   await page.getByText('✓ Entwurf gespeichert · Nur auf diesem Gerät.', { exact: true }).waitFor()
   await openPanel(); await edit('This paragraph has short words.')
@@ -123,7 +122,7 @@ try {
   assert.equal(await page.locator('.source-correction').count(), 0, 'document switch cancels panel/request')
   await page.getByRole('button', { name: 'Entwürfe', exact: true }).click()
   await page.locator('.draft-open').filter({ hasText: 'source-text.pdf' }).click()
-  await page.locator('.page canvas[data-render-state="ready"]').first().waitFor()
+  await pageReady(page)
   items = await downloadText(); assert.equal(items.map(item => item.str).join(' '), 'This paragraph contains short words. Following paragraph stays here.', 'saved source revision reopens correctly')
   const embedded = await PDFDocument.create(); embedded.registerFontkit(fontkit)
   const embeddedFont = await embedded.embedFont(readFileSync('node_modules/@fontsource/noto-sans/files/noto-sans-latin-400-normal.woff'), { subset: true })
@@ -134,7 +133,7 @@ try {
   await setInlineText(page, 'Hallo München Grüße Welt äöüÄÖÜß')
   await checkInPdf(page)
   await applyButton(page).click()
-  await page.locator('.page canvas[data-render-state="ready"]').first().waitFor()
+  await pageReady(page)
   items = await downloadText(); assert.equal(items.map(item => item.str).join(''), 'Hallo München Grüße Welt äöüÄÖÜß', 'real embedded subset works through worker and UI')
 
   assert.deepEqual(errors, [])

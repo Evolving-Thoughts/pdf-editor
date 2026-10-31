@@ -1,9 +1,9 @@
 // Command stack for unlimited undo/redo (ADR-002).
 // Every state change goes through a reversible Command; no direct mutations
 // from the UI except store.preview() for transient gestures.
-import type { EditorState, ImageOverlay, Overlay, ShapeOverlay, Stroke, Textbox } from './model'
+import type { EditorState, ImageOverlay, Overlay, Textbox } from './model'
 import type { ShapeChanges } from './shapes'
-import { cloneOverlay, isImage, isMarker, isShape, isStroke, patchOverlay } from './model'
+import { cloneOverlay, isMarker, isStroke } from './model'
 
 export interface Command {
   readonly label: string
@@ -60,28 +60,15 @@ export class CommandStack {
   }
 }
 
-export function addTextbox(box: Textbox): Command {
-  const snapshot = { ...box }
+export function addOverlay(overlay: Overlay): Command {
+  const snapshot = cloneOverlay(overlay)
   return {
-    label: 'Add textbox',
-    apply: (s) => {
-      s.overlays.push({ ...snapshot })
-    },
-    revert: (s) => {
-      s.overlays = s.overlays.filter((o) => o.id !== snapshot.id)
-    },
-  }
-}
-
-export function addStroke(stroke: Stroke): Command {
-  const snapshot = cloneOverlay(stroke) as Stroke
-  return {
-    label: 'Add stroke',
+    label: 'Add overlay',
     apply: (s) => {
       s.overlays.push(cloneOverlay(snapshot))
     },
     revert: (s) => {
-      s.overlays = s.overlays.filter((overlay) => overlay.id !== snapshot.id)
+      s.overlays = s.overlays.filter((o) => o.id !== snapshot.id)
     },
   }
 }
@@ -109,166 +96,57 @@ export function clearDrawing(overlays: Overlay[]): Command {
   }
 }
 
-export function removeTextbox(box: Textbox): Command {
-  const snapshot = { ...box }
+export function removeOverlay(overlay: Overlay): Command {
+  const snapshot = cloneOverlay(overlay)
   // Captured in apply: undo must restore the exact prior state, including
   // the overlay's position in the array (stacking/paint order, hit targets).
   let index = -1
   return {
-    label: 'Remove textbox',
+    label: 'Remove overlay',
     apply: (s) => {
       index = s.overlays.findIndex((o) => o.id === snapshot.id)
       s.overlays = s.overlays.filter((o) => o.id !== snapshot.id)
     },
     revert: (s) => {
-      const restored = { ...snapshot }
+      const restored = cloneOverlay(snapshot)
       if (index >= 0 && index <= s.overlays.length) s.overlays.splice(index, 0, restored)
       else s.overlays.push(restored)
     },
   }
 }
 
-export function updateTextbox(id: string, before: Partial<Textbox>, after: Partial<Textbox>): Command {
-  return {
-    label: 'Edit textbox',
-    apply: (s) => patchOverlay(s, id, after),
-    revert: (s) => patchOverlay(s, id, before),
-  }
-}
-
-export function moveTextbox(
-  id: string,
-  from: { x: number; y: number },
-  to: { x: number; y: number },
-): Command {
-  return {
-    label: 'Move textbox',
-    apply: (s) => patchOverlay(s, id, to),
-    revert: (s) => patchOverlay(s, id, from),
-  }
-}
-
-/** Nudges within this gap merge into one undo step. */
-const NUDGE_MERGE_MS = 1000
-
-interface NudgeData {
-  id: string
-  from: { x: number; y: number }
-  time: number
-}
-
-/** Small keyboard move; consecutive nudges on the same box merge for undo. */
-export function nudgeTextbox(id: string, from: { x: number; y: number }, to: { x: number; y: number }): Command {
-  const self: Command & { nudge?: NudgeData } = {
-    label: 'Nudge textbox',
-    nudge: { id, from, time: Date.now() },
-    apply: (s) => patchOverlay(s, id, to),
-    revert: (s) => patchOverlay(s, id, from),
-    merge: (previous) => {
-      const prev = (previous as { nudge?: NudgeData }).nudge
-      const own = self.nudge
-      if (!prev || !own || prev.id !== id) return null
-      if (own.time - prev.time > NUDGE_MERGE_MS) return null
-      return nudgeTextbox(id, prev.from, to)
-    },
-  }
-  return self
-}
-
 /** Source data is immutable; edits only change geometry and proportion locking. */
 export type ImageChanges = Pick<ImageOverlay, 'x' | 'y' | 'width' | 'height' | 'lockAspectRatio' | 'rotation'>
+type OverlayChanges = Partial<Textbox> | ImageChanges | ShapeChanges
 
-export function addImage(image: ImageOverlay): Command {
-  const snapshot = { ...image }
-  return {
-    label: 'Add image',
-    apply: (s) => { s.overlays.push({ ...snapshot }) },
-    revert: (s) => { s.overlays = s.overlays.filter((o) => o.id !== snapshot.id) },
+export function updateOverlay(id: string, before: OverlayChanges, after: OverlayChanges): Command {
+  const from = { ...before }, to = { ...after }
+  const patch = (state: EditorState, changes: OverlayChanges) => {
+    const overlay = state.overlays.find((o) => o.id === id)
+    if (overlay) Object.assign(overlay, changes)
   }
+  return { label: 'Edit overlay', apply: (s) => patch(s, to), revert: (s) => patch(s, from) }
 }
 
-export function removeImage(image: ImageOverlay): Command {
-  const snapshot = { ...image }
-  let index = -1
-  return {
-    label: 'Remove image',
-    apply: (s) => {
-      index = s.overlays.findIndex((o) => o.id === snapshot.id)
-      s.overlays = s.overlays.filter((o) => o.id !== snapshot.id)
-    },
-    revert: (s) => { s.overlays.splice(Math.max(0, index), 0, { ...snapshot }) },
-  }
-}
-
-export function updateImage(id: string, before: ImageChanges, after: ImageChanges): Command {
-  const from = { ...before }
-  const to = { ...after }
-  const patch = (state: EditorState, changes: ImageChanges) => {
-    const image = state.overlays.find((o) => o.id === id)
-    if (image && isImage(image)) Object.assign(image, changes)
-  }
-  return { label: 'Edit image', apply: (s) => patch(s, to), revert: (s) => patch(s, from) }
-}
+/** Repeats within this gap merge into one undo step. */
+const NUDGE_MERGE_MS = 1000
 
 export type ImageKeyboardAction = 'move' | 'rotate' | 'resize:nw' | 'resize:ne' | 'resize:sw' | 'resize:se'
-interface ImageNudgeData {
-  id: string
-  action: ImageKeyboardAction
-  before: ImageChanges
-  after: ImageChanges
-  time: number
-}
-
-/** Like textbox nudges: rapid repeats on one image/action form one undo step. */
-export function nudgeImage(id: string, before: ImageChanges, after: ImageChanges, action: ImageKeyboardAction = 'move'): Command {
-  const own: ImageNudgeData = { id, action, before: { ...before }, after: { ...after }, time: Date.now() }
-  const command: Command & { imageNudge: ImageNudgeData } = {
-    ...updateImage(id, own.before, own.after),
-    label: 'Keyboard edit image',
-    imageNudge: own,
-    merge(previous) {
-      const prev = (previous as Command & { imageNudge?: ImageNudgeData }).imageNudge
-      if (!prev || prev.id !== id || prev.action !== action || own.time - prev.time > NUDGE_MERGE_MS) return null
-      if (JSON.stringify(prev.after) !== JSON.stringify(own.before)) return null
-      return nudgeImage(id, prev.before, own.after, action)
-    },
-  }
-  return command
-}
-
-export function addShape(shape: ShapeOverlay): Command {
-  const snapshot = cloneOverlay(shape)
-  return { label: 'Add shape', apply: state => { state.overlays.push(cloneOverlay(snapshot)) },
-    revert: state => { state.overlays = state.overlays.filter(o => o.id !== snapshot.id) } }
-}
-export function removeShape(shape: ShapeOverlay): Command {
-  const snapshot = cloneOverlay(shape)
-  let index = -1
-  return { label: 'Remove shape', apply: state => {
-    index = state.overlays.findIndex(o => o.id === snapshot.id)
-    state.overlays = state.overlays.filter(o => o.id !== snapshot.id)
-  }, revert: state => { state.overlays.splice(Math.max(0, index), 0, cloneOverlay(snapshot)) } }
-}
-export function updateShape(id: string, before: ShapeChanges, after: ShapeChanges): Command {
-  const from = { ...before }, to = { ...after }
-  const patch = (state: EditorState, changes: ShapeChanges) => {
-    const shape = state.overlays.find(o => o.id === id)
-    if (shape && isShape(shape)) Object.assign(shape, changes)
-  }
-  return { label: 'Edit shape', apply: state => patch(state, to), revert: state => patch(state, from) }
-}
-
 export type ShapeKeyboardAction = ImageKeyboardAction | 'endpoint:start' | 'endpoint:end'
-interface ShapeNudgeData { id: string; action: ShapeKeyboardAction; before: ShapeChanges; after: ShapeChanges; time: number }
-export function nudgeShape(id: string, before: ShapeChanges, after: ShapeChanges, action: ShapeKeyboardAction = 'move'): Command {
-  const own: ShapeNudgeData = { id, action, before: { ...before }, after: { ...after }, time: Date.now() }
-  const command: Command & { shapeNudge: ShapeNudgeData } = {
-    ...updateShape(id, own.before, own.after), label: 'Keyboard edit shape', shapeNudge: own,
+interface NudgeData { id: string; action: ShapeKeyboardAction; before: OverlayChanges; after: OverlayChanges; time: number }
+
+/** Keyboard edit: rapid repeats on one overlay and action form one undo step. */
+export function nudgeOverlay(id: string, before: OverlayChanges, after: OverlayChanges, action: ShapeKeyboardAction = 'move'): Command {
+  const own: NudgeData = { id, action, before: { ...before }, after: { ...after }, time: Date.now() }
+  const command: Command & { nudge: NudgeData } = {
+    ...updateOverlay(id, own.before, own.after),
+    label: 'Keyboard edit overlay',
+    nudge: own,
     merge(previous) {
-      const prev = (previous as Command & { shapeNudge?: ShapeNudgeData }).shapeNudge
+      const prev = (previous as Command & { nudge?: NudgeData }).nudge
       if (!prev || prev.id !== id || prev.action !== action || own.time - prev.time > NUDGE_MERGE_MS) return null
       if (JSON.stringify(prev.after) !== JSON.stringify(own.before)) return null
-      return nudgeShape(id, prev.before, own.after, action)
+      return nudgeOverlay(id, prev.before, own.after, action)
     },
   }
   return command

@@ -1,24 +1,23 @@
 import { fileURLToPath } from 'node:url'
-import { chromiumPath } from './browser-helper.mjs'
+import { clickExport, collectErrors, launchBrowser, pdfInput } from './browser-helper.mjs'
 import { confirmDefaultExport } from './export-smoke-helper.mjs'
-import { chromium } from 'playwright'
 import assert from 'node:assert/strict'
 import { mkdirSync, mkdtempSync, readFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { PDFDocument } from 'pdf-lib'
-const browser = await chromium.launch({ executablePath: chromiumPath(), args: ['--no-sandbox'] })
+const browser = await launchBrowser()
 const context = await browser.newContext({ viewport: { width: 1280, height: 900 } })
 const page = await context.newPage()
 const errors = []
-page.on('pageerror', e => errors.push(String(e)))
+collectErrors(page, errors)
 page.on('console', m => { if (m.type() === 'error') errors.push(m.text()) })
 const artifactDir = process.env.SMOKE_ARTIFACT_DIR ?? mkdtempSync(join(tmpdir(), 'pdf-editor-t4-'))
 mkdirSync(artifactDir, { recursive: true })
 const baseUrl = process.env.SMOKE_URL ?? 'http://localhost:5199'
 try {
   await page.goto(baseUrl)
-  await page.locator('input[type=file][accept="application/pdf"]').setInputFiles(fileURLToPath(new URL('../tests/fixtures/zweiseitig.pdf', import.meta.url)))
+  await pdfInput(page).setInputFiles(fileURLToPath(new URL('../tests/fixtures/zweiseitig.pdf', import.meta.url)))
   await page.waitForSelector('.page canvas')
   const pen = page.getByRole('button', { name: 'Stift', exact: true })
   assert.equal(await pen.count(), 1, 'Freihand-Werkzeug ist erreichbar')
@@ -124,7 +123,7 @@ try {
   await page.waitForSelector('.stroke', { state: 'attached' })
   assert.deepEqual(await page.locator('.stroke').evaluateAll(paths => paths.map(p => p.getAttribute('d'))), erasedPaths, 'Striche und Teilradierung überleben Reload')
   const downloadEvent = page.waitForEvent('download')
-  await page.getByRole('button', { name: 'Exportieren', exact: true }).click(); await confirmDefaultExport(page)
+  await clickExport(page); await confirmDefaultExport(page)
   const download = await downloadEvent
   await download.saveAs(join(artifactDir, 'drawing-export.pdf'))
   assert.equal((await PDFDocument.load(readFileSync(join(artifactDir, 'drawing-export.pdf')))).getPageCount(), 2)
@@ -137,9 +136,9 @@ try {
 
   const touchContext = await browser.newContext({ viewport: { width: 390, height: 844 }, hasTouch: true, isMobile: true })
   const touchPage = await touchContext.newPage()
-  touchPage.on('pageerror', e => errors.push(String(e)))
+  collectErrors(touchPage, errors)
   await touchPage.goto(baseUrl)
-  await touchPage.locator('input[type=file][accept="application/pdf"]').setInputFiles(fileURLToPath(new URL('../tests/fixtures/zweiseitig.pdf', import.meta.url)))
+  await pdfInput(touchPage).setInputFiles(fileURLToPath(new URL('../tests/fixtures/zweiseitig.pdf', import.meta.url)))
   await touchPage.waitForSelector('.page canvas')
   await touchPage.getByRole('button', { name: 'Stift', exact: true }).tap()
   const touchSheet = await touchPage.locator('.page').first().boundingBox()

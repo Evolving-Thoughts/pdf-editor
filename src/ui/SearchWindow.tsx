@@ -9,16 +9,19 @@ import {
 } from '../core/search'
 import { isTextbox, type Overlay } from '../core/model'
 import { resolvedOverlayClips } from '../core/overlayClipping'
+import type { DocumentPage } from '../core/pages'
 
 // Browser font measurement follows the editor fonts. PDF substring advances
 // are font-measured estimates (PDF.js does not expose individual glyph advances).
 function overlayGroups(
   overlays: Overlay[],
   sizes: { width: number; height: number }[],
+  pages: readonly DocumentPage[],
 ): SearchGroup[] {
   const context = document.createElement('canvas').getContext('2d')
   return overlays.filter(isTextbox).flatMap((box) => {
-    const size = sizes[box.pageIndex]
+    const pageIndex = pages.findIndex((page) => page.id === box.pageId)
+    const size = sizes[pageIndex]
     if (!size || !context) return []
     context.font = `${box.italic ? 'italic' : 'normal'} ${box.bold ? 'bold' : 'normal'} ${box.fontSize}px ${box.font === 'times' ? 'Times New Roman' : box.font === 'courier' ? 'Courier New' : 'Arial'}`
     const angle = ((box.rotation ?? 0) * Math.PI) / 180,
@@ -59,7 +62,7 @@ function overlayGroups(
     )
     return [
       {
-        pageIndex: box.pageIndex,
+        pageIndex,
         fragments: visibleFragments(fragments, size, clips),
       },
     ]
@@ -69,12 +72,14 @@ function overlayGroups(
 export function SearchWindow({
   pdf,
   overlays,
+  pages,
   onClose,
   onHits,
   onJump,
 }: {
   pdf: PdfHandle
   overlays: Overlay[]
+  pages: readonly DocumentPage[]
   onClose: () => void
   onHits: (hits: SearchHit[], active: number) => void
   onJump: (hit: SearchHit) => void
@@ -122,11 +127,11 @@ export function SearchWindow({
     () =>
       ready
         ? searchDocument(
-            [...data.groups, ...overlayGroups(overlays, data.sizes)],
+            [...data.groups, ...overlayGroups(overlays, data.sizes, pages)],
             query,
           )
         : [],
-    [ready, data, overlays, query],
+    [ready, data, overlays, pages, query],
   )
   const active = hits.length ? Math.min(index, hits.length - 1) : 0
   const move = (delta: number) =>

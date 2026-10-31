@@ -1,7 +1,6 @@
 import { fileURLToPath } from 'node:url'
-import { chromiumPath } from './browser-helper.mjs'
+import { collectErrors, launchBrowser } from './browser-helper.mjs'
 // Continuous creation uses real pointer input and disposable storage, not mocked store state.
-import { chromium } from 'playwright'
 import assert from 'node:assert/strict'
 import { mkdirSync, mkdtempSync } from 'node:fs'
 import { tmpdir } from 'node:os'
@@ -9,10 +8,7 @@ import { join } from 'node:path'
 const base = process.env.SMOKE_URL ?? 'http://localhost:5203'
 const artifacts = process.env.SMOKE_ARTIFACT_DIR ?? mkdtempSync(join(tmpdir(), 'pdf-editor-repeat-'))
 mkdirSync(artifacts, { recursive: true })
-const browser = await chromium.launch({
-  executablePath: chromiumPath(),
-  args: ['--no-sandbox'],
-})
+const browser = await launchBrowser()
 const errors = []
 async function draw(page, a, b, touch = false, cancel = false) {
   const r = await page.locator('.page').first().boundingBox()
@@ -66,7 +62,7 @@ try {
   ]) {
     const context = await browser.newContext({ viewport, hasTouch: touch, isMobile: touch }),
       page = await context.newPage()
-    page.on('pageerror', (e) => errors.push(String(e)))
+    collectErrors(page, errors)
     await page.goto(base)
     await page
       .locator('input[accept="application/pdf"]')

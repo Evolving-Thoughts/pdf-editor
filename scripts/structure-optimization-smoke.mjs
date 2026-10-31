@@ -1,7 +1,6 @@
 // T18: "Struktur optimieren" in the real dialog: savings, the unchanged case, and
 // that protection and the plain export still work next to it.
-import { chromiumPath } from './browser-helper.mjs'
-import { chromium } from 'playwright'
+import { clickExport, collectErrors, launchBrowser, pageReady, pdfInput } from './browser-helper.mjs'
 import { PDFDocument, PDFRawStream, StandardFonts } from 'pdf-lib'
 import { readFileSync } from 'node:fs'
 import assert from 'node:assert/strict'
@@ -28,21 +27,21 @@ const textOf = async bytes => {
   return text
 }
 
-const browser = await chromium.launch({ executablePath: chromiumPath(), args: ['--no-sandbox'] })
+const browser = await launchBrowser()
 const page = await browser.newPage({ viewport: { width: 1280, height: 1000 }, acceptDownloads: true })
 const errors = []
-page.on('pageerror', error => errors.push(String(error)))
+collectErrors(page, errors)
 await page.goto(process.env.SMOKE_URL ?? 'http://localhost:5199')
 
 let opened = 0
 const open = async bytes => {
   const name = `structure-${++opened}.pdf`
-  await page.locator('input[accept="application/pdf"]').setInputFiles({ name, mimeType: 'application/pdf', buffer: Buffer.from(bytes) })
+  await pdfInput(page).setInputFiles({ name, mimeType: 'application/pdf', buffer: Buffer.from(bytes) })
   await page.waitForFunction(value => document.querySelector('.file-info')?.textContent.includes(value), name)
-  await page.waitForSelector('.page canvas[data-render-state="ready"]')
+  await pageReady(page)
 }
 const startExport = async () => {
-  await page.getByRole('button', { name: 'Exportieren', exact: true }).click()
+  await clickExport(page)
   await page.getByRole('radio', { name: /Struktur optimieren/ }).check()
   await page.getByRole('button', { name: 'Export vorbereiten', exact: true }).click()
   await page.getByRole('dialog', { name: 'Export vorbereitet' }).waitFor({ timeout: 60000 })
@@ -53,7 +52,7 @@ const save = async name => {
 }
 
 await open(await wasteful())
-await page.getByRole('button', { name: 'Exportieren', exact: true }).click()
+await clickExport(page)
 assert.equal(await page.getByRole('radio', { name: /Nicht optimieren/ }).isChecked(), true, 'optimizing stays opt-in')
 assert.match(await page.locator('.export-size').textContent(), /Keine Einsparung garantiert/)
 await page.getByRole('radio', { name: /Struktur optimieren/ }).check()

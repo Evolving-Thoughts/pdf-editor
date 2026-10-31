@@ -1,7 +1,6 @@
-import { chromiumPath } from './browser-helper.mjs'
+import { collectErrors, launchBrowser, pdfInput } from './browser-helper.mjs'
 import { confirmDefaultExport } from './export-smoke-helper.mjs'
 // T8: real PDF thumbnails, native HTML drag/drop, export and draft ordering.
-import { chromium } from 'playwright'
 import { PDFDocument, StandardFonts, rgb } from 'pdf-lib'
 import { mkdirSync, mkdtempSync, readFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
@@ -9,9 +8,9 @@ import { join } from 'node:path'
 import assert from 'node:assert/strict'
 const out = process.env.SMOKE_ARTIFACT_DIR ?? mkdtempSync(join(tmpdir(), 'pdf-thumbnails-'))
 mkdirSync(out, { recursive: true })
-const browser = await chromium.launch({ executablePath: chromiumPath(), args: ['--no-sandbox'] })
+const browser = await launchBrowser()
 const p = await browser.newPage({ viewport: { width: 1280, height: 1100 }, acceptDownloads: true }), errors = []
-p.on('pageerror', e => errors.push(String(e)))
+collectErrors(p, errors)
 const btn = name => p.getByRole('button', { name, exact: true })
 const ready = () => p.waitForFunction(() => document.querySelector('.page-manager-preview canvas')?.width > 0 && !document.querySelector('.page-manager-message')?.textContent.includes('aktualisiert'))
 const rows = () => p.locator('.page-manager-row')
@@ -37,7 +36,7 @@ try {
     page.drawText(`Fixture ${i}`, { x: 40, y: page.getHeight() - 80, size: 20, font })
   }
   await p.goto(process.env.SMOKE_URL ?? 'http://localhost:5218')
-  await p.locator('input[accept="application/pdf"]').setInputFiles({ name: 'long.pdf', mimeType: 'application/pdf', buffer: Buffer.from(await doc.save()) })
+  await pdfInput(p).setInputFiles({ name: 'long.pdf', mimeType: 'application/pdf', buffer: Buffer.from(await doc.save()) })
   await p.waitForFunction(() => document.querySelector('.pages .page canvas')?.width > 0)
   await btn('T Text').click(); const first = await p.locator('.pages .page').first().boundingBox()
   await p.mouse.click(first.x + 100, first.y + 240); await p.locator('.textbox textarea').fill('Overlay on original page one'); await p.locator('.textbox textarea').press('Escape')

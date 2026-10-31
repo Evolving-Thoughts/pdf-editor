@@ -10,7 +10,7 @@ import {
   setLineJoin,
   rgb,
 } from 'pdf-lib'
-import { exportPdf } from '../../src/core/pdf/exportPdf'
+import { exportPdf } from './exportFixture'
 import { createShape } from '../../src/core/shapes'
 import type { ShapeOverlay, Textbox } from '../../src/core/model'
 function contents(doc: PDFDocument) {
@@ -26,7 +26,7 @@ const rect: ShapeOverlay = {
   kind: 'shape',
   shape: 'rect',
   id: 'rect',
-  pageIndex: 0,
+  pageId: 'p0',
   x: 100,
   y: 200,
   width: 120,
@@ -52,7 +52,7 @@ test('white correction is painted before later text, while an invisible shape em
   doc.addPage([600, 800])
   const text: Textbox = {
     id: 'text',
-    pageIndex: 0,
+    pageId: 'p0',
     x: 110,
     y: 220,
     text: 'Korrektur',
@@ -78,7 +78,7 @@ test('marker export has transparency and Multiply blending, and cubic ellipse/ar
       { x: 100, y: 200 },
       { x: 300, y: 200 },
     ],
-    0,
+    'p0',
     { fill: null, strokeColor: '#ffe34d', strokeWidth: 24 },
   )!
   const output = await PDFDocument.load(await exportPdf(await doc.save(), [marker]))
@@ -95,7 +95,7 @@ test('marker export has transparency and Multiply blending, and cubic ellipse/ar
       { x: 100, y: 200 },
       { x: 300, y: 200 },
     ],
-    0,
+    'p0',
     { fill: null, strokeColor: '#111111', strokeWidth: 3 },
   )!
   const arrowDoc = await PDFDocument.load(await exportPdf(await doc.save(), [arrow]))
@@ -111,7 +111,7 @@ test('correction and later text share displayed coordinates on rotated cropped U
   page.node.set(PDFName.of('UserUnit'), PDFNumber.of(2))
   const text: Textbox = {
     id: 'text',
-    pageIndex: 0,
+    pageId: 'p0',
     x: 100,
     y: 200,
     text: 'Korrektur',
@@ -152,12 +152,12 @@ test.each(['rect', 'ellipse', 'line', 'arrow', 'marker'] as const)(
         { x: 160, y: 260 },
         { x: 220, y: 220 },
       ],
-      0,
+      'p0',
       { fill: null, strokeColor: '#111111', strokeWidth: 6 },
     )!
     const text: Textbox = {
       id: 'after-shape',
-      pageIndex: 0,
+      pageId: 'p0',
       x: 100,
       y: 150,
       text: 'Nachfolgend',
