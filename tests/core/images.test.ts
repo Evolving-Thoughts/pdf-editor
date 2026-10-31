@@ -9,7 +9,7 @@ const image = { kind: 'image', id: 'image', pageIndex: 0, x: 10, y: 20, width: 1
 test('an image is not a textbox and clearing drawing preserves images', () => {
   expect(isTextbox(image)).toBe(false)
   const store = new EditorStore()
-  store.restore([image, { id: 'stroke', pageIndex: 0, points: [{ x: 1, y: 2 }], color: '#111111', width: 3 }])
+  store.restore({ overlays: [image, { id: 'stroke', pageIndex: 0, points: [{ x: 1, y: 2 }], color: '#111111', width: 3 }] })
   store.dispatch(clearDrawing(store.state.overlays))
   expect(store.state.overlays).toEqual([image])
   store.undo()

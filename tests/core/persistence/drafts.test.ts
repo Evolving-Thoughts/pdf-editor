@@ -8,7 +8,7 @@ import {
   openDraftDb,
   saveDraft,
 } from '../../../src/core/persistence/drafts'
-import type { Textbox } from '../../../src/core/model'
+import { copyEditorState, type EditorState, type Textbox } from '../../../src/core/model'
 
 function sampleOverlays(): Textbox[] {
   return [
@@ -46,6 +46,36 @@ function sampleDraft(id: string) {
     overlays: sampleOverlays(),
   }
 }
+
+/** Required: a new state field fails to compile here until the test covers it. */
+function fullState(): Required<EditorState> {
+  return {
+    redactionApplied: true,
+    redactions: [{ id: 'mark', pageId: 'p', x: 1, y: 2, width: 3, height: 4, fill: 'black' }] as Required<EditorState>['redactions'],
+    formValues: { field: 'Wert' },
+    pages: [{ id: 'p', name: 'Seite', sourceId: 'extra', sourceIndex: 0, box: { x: 0, y: 0, width: 10, height: 20 }, unit: 1, rotation: 0, ocr: [{ text: 'Wort', x: 1, y: 2, dx: 3, dy: 0, height: 4 }] }] as Required<EditorState>['pages'],
+    pageSources: [{ id: 'extra', bytes: new TextEncoder().encode('%PDF-extra').buffer as ArrayBuffer }],
+    overlays: sampleOverlays(),
+    metadata: { fields: { author: null }, removeTechnical: true },
+  }
+}
+
+test('the whole editing state survives a copy, a draft and a restore', async () => {
+  const state = fullState(), db = await openDb()
+  expect(copyEditorState(state)).toEqual(state)
+  await saveDraft(db, { id: 'full', name: 'a.pdf', createdAt: 1, pdfBytes: new ArrayBuffer(1), ...copyEditorState(state) })
+  const store = new EditorStore()
+  store.restore((await loadDraft(db, 'full'))!)
+  expect(store.state).toEqual(state)
+})
+
+test('a copied state shares nothing that can be edited', () => {
+  const state = fullState(), copy = copyEditorState(state)
+  copy.overlays[0].x = 999
+  copy.pages[0].rotation = 90
+  copy.metadata!.fields.title = 'Neu'
+  expect(state).toEqual(fullState())
+})
 
 test('a saved draft round-trips with pdf bytes and overlays intact', async () => {
   const db = await openDb()
@@ -259,7 +289,7 @@ import { removeImage } from '../../../src/core/commands'
 test('undo after a persisted deletion rewrites the pruned source and restores exact image geometry', async () => {
   const db = await openDb(), store = new EditorStore()
   const original = { ...image, rotation: 37.5 }
-  store.restore([original])
+  store.restore({ overlays: [original] })
   await saveDraft(db, { ...sampleDraft('undo'), overlays: store.state.overlays })
   store.dispatch(removeImage(original))
   await saveDraft(db, { ...sampleDraft('undo'), overlays: store.state.overlays })

@@ -5,7 +5,7 @@ import { useDraftPersistence, type ActiveDraft } from './useDraftPersistence'
 import { useExportFlow } from './useExportFlow'
 import { ToolbarTools } from './ToolbarTools'
 import { inspectStructures, type TextIssue } from '../core/pdf/preflight'
-import { setMetadataCommand, type MetadataEdit } from '../core/pdf/metadata'
+import { setMetadataCommand } from '../core/pdf/metadata'
 import { preparePdf, unlockPdf, PasswordRequiredError, IncorrectPasswordError } from '../core/pdf/unlockPdf'
 import { PasswordDialog, type PasswordRequest } from './PasswordDialog'
 import { SearchWindow } from './SearchWindow'
@@ -13,12 +13,12 @@ import type { SearchHit } from '../core/search'
 import { applyRedactionResult,replaceRedactions,type Redaction } from '../core/redactions'
 import { prepareRedaction } from '../core/pdf/redactDocument'
 import { RedactionBar } from './RedactionBar'
-import type { FormValues, NativeWidget } from '../core/forms'
+import type { NativeWidget } from '../core/forms'
 import { inspectNativeForms, needsNativeFormInspection } from '../core/pdf/acroForm'
 import { useCallback, useEffect, useRef, useState, useSyncExternalStore } from 'react'
 import { addImage, clearDrawing, nudgeImage, nudgeShape, nudgeTextbox, removeImage, removeShape, removeTextbox } from '../core/commands'
 import { EditorStore } from '../core/editorStore'
-import { cloneOverlay, createId, isImage, isMarker, isShape, isStroke, isTextbox } from '../core/model'
+import { createId, isImage, isMarker, isShape, isStroke, isTextbox, type EditorState } from '../core/model'
 import { deleteDraft, DRAFT_SIZE_WARN_BYTES, loadDraft } from '../core/persistence/drafts'
 import { loadPdf, type PdfHandle } from '../core/pdf/loadPdf'
 import { assertFileBudget } from '../core/pdf/documentBudget'
@@ -39,7 +39,7 @@ import { PageView } from './PageView'
 import { VirtualPage } from './VirtualPage'
 import { PagesManager } from './PagesManager'
 import { composePages, inspectPages } from '../core/pdf/pageOperations'
-import { pageSize, type DocumentPage, type PageSource } from '../core/pages'
+import { pageSize, type DocumentPage } from '../core/pages'
 import type { ChosenStamp } from './StampPicker'
 import { renderStampImage } from './stampImage'
 import { stampOverlay } from '../core/stamps'
@@ -187,7 +187,7 @@ export default function App() {
   },[pdf,shapePage])
 
   const replaceDocument = useCallback(
-    (next: PdfHandle, draft: ActiveDraft, nextOverlays: typeof store.state.overlays, pages: DocumentPage[], sources: PageSource[] = [], formValues?: FormValues, pendingRedactions?: Redaction[], redactionApplied?: boolean, metadata?: MetadataEdit) => {
+    (next: PdfHandle, draft: ActiveDraft, state: EditorState) => {
       documentIntentRef.current += 1
       persistenceGenerationRef.current += 1
       if (saveTimerRef.current) {
@@ -211,7 +211,7 @@ export default function App() {
       setOriginalBytes(draft.bytes)
       setSizeWarning(draft.bytes.byteLength > DRAFT_SIZE_WARN_BYTES)
       setPdf(next)
-      store.restore(nextOverlays, pages, sources, formValues, pendingRedactions, redactionApplied, metadata)
+      store.restore(state)
       pdfPagesRef.current = store.state.pages
       setRenderedPages(store.state.pages)
       void previous?.destroy()
@@ -283,8 +283,7 @@ export default function App() {
             createdAt: Date.now(),
             bytes: buffer,
           },
-          [],
-          pages,
+          { overlays: [], pages },
         )
         void persistActiveDraft().catch((problem) =>
           reportDraftProblem(
@@ -332,8 +331,7 @@ export default function App() {
         replaceDocument(
           next,
           { id: record.id, name: record.name, createdAt: record.createdAt, bytes },
-          record.overlays.map(cloneOverlay),
-          pages, sources, record.formValues, record.redactions, record.redactionApplied, record.metadata,
+          { ...record, pages, pageSources: sources },
         )
       } catch {
         if(documentIntentRef.current===intent)setError('Der Entwurf konnte nicht geöffnet werden.')

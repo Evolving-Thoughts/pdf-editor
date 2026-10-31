@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import type { EditorStore } from '../core/editorStore'
-import { cloneOverlay } from '../core/model'
+import { copyEditorState } from '../core/model'
 import {
   listDrafts,
   openDraftDb,
@@ -82,15 +82,9 @@ export function useDraftPersistence(store: EditorStore) {
     const draft = draftRef.current
     if (!draft) return null
     const generation = persistenceGenerationRef.current
-    // Copy the overlays now: the record must describe this save point even if
-    // the user keeps editing while the queued IndexedDB write is waiting.
-    const overlaysSnapshot = store.state.overlays.map(cloneOverlay)
-    const redactionAppliedSnapshot = store.state.redactionApplied
-    const redactionSnapshot = structuredClone(store.state.redactions ?? [])
-    const formSnapshot = store.state.formValues ? structuredClone(store.state.formValues) : undefined
-    const pagesSnapshot = store.state.pages ? structuredClone(store.state.pages) : undefined
-    const metadataSnapshot = store.state.metadata ? structuredClone(store.state.metadata) : undefined
-    const sourcesSnapshot = [...(store.state.pageSources ?? [])]
+    // Copy now: the record must describe this save point even if the user keeps
+    // editing while the queued IndexedDB write is waiting.
+    const snapshot = copyEditorState(store.state)
     const record = await queuePersistence(async () => {
       if (generation !== persistenceGenerationRef.current) return null
       const db = await ensureDraftDb()
@@ -99,13 +93,7 @@ export function useDraftPersistence(store: EditorStore) {
         name: draft.name,
         createdAt: draft.createdAt,
         pdfBytes: draft.bytes,
-        overlays: overlaysSnapshot,
-        pages: pagesSnapshot,
-        pageSources: sourcesSnapshot,
-        formValues: formSnapshot,
-        redactionApplied: redactionAppliedSnapshot,
-        redactions: redactionSnapshot,
-        metadata: metadataSnapshot,
+        ...snapshot,
       })
     })
     if (record) {

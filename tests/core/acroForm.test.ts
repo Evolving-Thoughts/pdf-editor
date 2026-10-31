@@ -43,7 +43,7 @@ test('detects shared widgets, field types, read-only fields and unsupported butt
 })
 test('native edits share values across widgets, coalesce one typing session and undo independently of page operations', async () => {
   const { info, pages } = await fixture(), field = info.widgets.find(w => w.name === 'name')!, store = new EditorStore()
-  store.restore([], pages)
+  store.restore({ overlays: [], pages: pages })
   store.dispatch(setNativeFieldValue(store.state, field, 'G', 'focus-1')); store.dispatch(setNativeFieldValue(store.state, field, 'Grace', 'focus-1'))
   store.dispatch(rotatePage(store.state, pages[0].id, true)); store.undo()
   expect(store.state.formValues?.[field.key]).toBe('Grace'); store.undo(); expect(store.state.formValues).toBeUndefined()
@@ -74,7 +74,7 @@ test('identical names in an attached PDF use separate stable source keys', async
   expect(result.getForm().getFields().filter(f => f.constructor.name === 'PDFTextField').map(f => (f as import('pdf-lib').PDFTextField).getText())).toContain('Attached')
 })
 test('A4 bakes values into a new editable source and undo restores the original source keys', async () => {
-  const { bytes, pages, info } = await fixture(), store = new EditorStore(); store.restore([], pages)
+  const { bytes, pages, info } = await fixture(), store = new EditorStore(); store.restore({ overlays: [], pages: pages })
   const field = info.widgets.find(w => w.name === 'name')!; store.dispatch(setNativeFieldValue(store.state, field, 'Grace'))
   const normalized = await normalizeA4(bytes, [], pages, [], store.state.formValues)
   store.dispatch(replacePageDocument(store.state, normalized.pages, normalized.source, [])); expect(store.state.formValues).toBeUndefined()

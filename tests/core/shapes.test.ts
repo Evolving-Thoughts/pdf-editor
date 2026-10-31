@@ -285,7 +285,7 @@ test('eraser splits markers but retains forms; clearing drawing removes markers 
     'form',
   )!
   const store = new EditorStore()
-  store.restore([marker, form])
+  store.restore({ overlays: [marker, form] })
   const after = eraseStrokes(store.state.overlays, 0, [{ x: 200, y: 200 }], 8)
   expect(after).toHaveLength(3)
   expect(after[2]).toEqual(form)
@@ -350,7 +350,7 @@ test('a pause or a different element breaks shape keyboard undo grouping', async
         'first',
       )!
     const second = { ...first, id: 'second' }
-    store.restore([first, second])
+    store.restore({ overlays: [first, second] })
     const a = shapeGeometry(first),
       b = { ...a, x: 101 },
       c = { ...a, x: 102 }

@@ -61,7 +61,7 @@ test('A4 replacement is one undoable operation and retains editable overlay type
     { kind: 'shape' as const, shape: 'rect' as const, id: 'shape', pageIndex: 0, x: 30, y: 40, width: 100, height: 50, rotation: 30, fill: '#ffffff', strokeColor: '#111111', strokeWidth: 2 },
     { id: 'pen', pageIndex: 0, points: [{ x: 20, y: 50 }, { x: 200, y: 60 }], color: '#111111', width: 3 },
   ]
-  const before = structuredClone(overlays), store = new EditorStore(); store.restore(overlays, pages, [])
+  const before = structuredClone(overlays), store = new EditorStore(); store.restore({ overlays: overlays, pages: pages, pageSources: [] })
   const prepared = await normalizeA4(bytes, [], pages, overlays)
   expect(overlays).toEqual(before)
   const factor = A4_WIDTH / 612, dy = (A4_HEIGHT - 792 * factor) / 2

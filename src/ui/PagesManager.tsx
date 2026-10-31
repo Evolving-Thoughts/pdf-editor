@@ -184,7 +184,7 @@ export function PagesManager({ nativeWidgets = [], pdf, store, original, busy, o
       if (request.current !== token) { await previewPdf.destroy(); return }
       if (store.getVersion() !== version) { await previewPdf.destroy(); throw new Error('Der Arbeitsstand hat sich geändert. Bitte erneut öffnen.') }
       const previewStore = new EditorStore()
-      previewStore.restore(prepared.overlays, prepared.pages, [prepared.source])
+      previewStore.restore({ overlays: prepared.overlays, pages: prepared.pages, pageSources: [prepared.source] })
       setA4Preview({ pdf: previewPdf, prepared, store: previewStore, version })
       setMessage('A4-Vorschau: Erst Anwenden verändert die Seiten.')
     } catch (error) {

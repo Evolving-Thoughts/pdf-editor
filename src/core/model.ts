@@ -136,6 +136,23 @@ export interface EditorState {
   metadata?: MetadataEdit
 }
 
+/** A separate copy of a whole state: later edits cannot reach it. Source bytes never change, so they are shared. */
+export function copyEditorState(state: EditorState): EditorState {
+  return {
+    redactionApplied: state.redactionApplied,
+    redactions: structuredClone(state.redactions),
+    formValues: structuredClone(state.formValues),
+    pages: structuredClone(state.pages),
+    pageSources: state.pageSources ? [...state.pageSources] : undefined,
+    overlays: state.overlays.map(cloneOverlay),
+    metadata: structuredClone(state.metadata),
+  }
+}
+
+export function assignEditorState(target: EditorState, source: EditorState): void {
+  Object.assign(target, copyEditorState(source))
+}
+
 let counter = 0
 export function createId(): string {
   counter += 1

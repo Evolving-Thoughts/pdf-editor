@@ -1,5 +1,5 @@
 import type { Command } from './commands'
-import { cloneOverlay, isStroke, isTextbox, type Overlay, type EditorState } from './model'
+import { assignEditorState, cloneOverlay, copyEditorState, isStroke, isTextbox, type Overlay, type EditorState } from './model'
 import { assertPageBudget, assertSourceBudget } from './pdf/documentBudget'
 import { renumberLabels } from './labelNumbers'
 
@@ -50,15 +50,9 @@ export function insertionPageSize(pages: DocumentPage[], index: number) {
   const reference = pages[Math.max(0, index - 1)]
   return reference ? pageSize(reference) : { width: 595.28, height: 841.89 }
 }
-function snapshot(state: EditorState) {
-  return {
-    redactionApplied: state.redactionApplied,
-    redactions: structuredClone(state.redactions),
-    formValues: state.formValues ? structuredClone(state.formValues) : undefined,
-    pages: structuredClone(state.pages ?? []),
-    overlays: state.overlays.map(cloneOverlay),
-    pageSources: [...(state.pageSources ?? [])],
-  }
+function withPages(state: EditorState) {
+  const copy = copyEditorState(state)
+  return { ...copy, pages: copy.pages ?? [], pageSources: copy.pageSources ?? [] }
 }
 function pageCommand(
   state: EditorState,
@@ -68,19 +62,11 @@ function pageCommand(
   if(state.redactions?.length)throw new Error('Vorgemerkte Schwärzungen zuerst anwenden oder verwerfen.')
   if (state.pages?.some(p => p.hasXfa))
     throw new Error('XFA-Formulare werden bei Seitenoperationen noch nicht unterstützt.')
-  const before = snapshot(state),
-    after = snapshot(state)
+  const before = withPages(state),
+    after = withPages(state)
   mutate(after)
   renumberLabels(after.overlays)
-  const assign = (target: EditorState, value: typeof before) => {
-    target.redactionApplied = value.redactionApplied
-    target.redactions = structuredClone(value.redactions)
-    target.formValues = value.formValues ? structuredClone(value.formValues) : undefined
-    target.pages = structuredClone(value.pages)
-    target.overlays = value.overlays.map(cloneOverlay)
-    target.pageSources = [...value.pageSources]
-  }
-  return { label, apply: (s) => assign(s, after), revert: (s) => assign(s, before) }
+  return { label, apply: (s) => assignEditorState(s, after), revert: (s) => assignEditorState(s, before) }
 }
 export function movePage(state: EditorState, id: string, index: number): Command {
   const from = state.pages?.findIndex((p) => p.id === id) ?? -1

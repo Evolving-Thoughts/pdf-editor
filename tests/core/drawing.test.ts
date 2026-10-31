@@ -145,7 +145,7 @@ test('stored and command snapshots do not share mutable stroke points', async ()
   const { EditorStore } = await import('../../src/core/editorStore')
   const source = makeStroke()
   const store = new EditorStore()
-  store.restore([source])
+  store.restore({ overlays: [source] })
   source.points[0].x = 999
   expect(store.state.overlays.filter(isStroke)[0].points[0].x).toBe(0)
   const fresh = makeStroke('new')

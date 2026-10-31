@@ -1,26 +1,15 @@
-import type { Redaction } from '../redactions'
-import type { FormValues } from '../forms'
-import type { DocumentPage, PageSource } from '../pages'
 // Draft persistence in IndexedDB (framework-free, ADR-004). A draft holds the
 // original PDF bytes plus the full overlay state, so closing the tab and
 // reopening restores everything. Multiple drafts live side by side.
-import { isImage, type ImageOverlay, type Overlay } from '../model'
-import type { MetadataEdit } from '../pdf/metadata'
+import { isImage, type EditorState, type ImageOverlay, type Overlay } from '../model'
 
-export interface DraftRecord {
-  redactionApplied?: boolean
-  redactions?: Redaction[]
-  formValues?: FormValues
+export interface DraftRecord extends EditorState {
   id: string
   /** Display name, usually the original file name. */
   name: string
   createdAt: number
   updatedAt: number
   pdfBytes: ArrayBuffer
-  overlays: Overlay[]
-  pages?: DocumentPage[]
-  pageSources?: PageSource[]
-  metadata?: MetadataEdit
 }
 
 /** Draft metadata for the menu list; the heavy bytes stay outside this record. */
