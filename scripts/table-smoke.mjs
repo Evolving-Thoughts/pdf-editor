@@ -82,6 +82,7 @@ await confirmed.check()
 await page.getByLabel('Zahlenformat').selectOption('en')
 assert.equal(await confirmed.isChecked(), false, 'a format change revokes the check')
 await page.getByLabel('Zahlenformat').selectOption('de')
+assert.equal(await cell(3, 1).inputValue(), 'Toner schwarz', 'a format change keeps corrections')
 
 // A wrong boundary can be corrected. Moving a line rebuilds the table.
 await page.getByRole('button', { name: 'Spaltengrenze 3', exact: true }).focus()
@@ -89,6 +90,14 @@ await page.keyboard.press('Delete')
 assert.equal(await page.locator('.table-line').count(), 2)
 assert.equal(await cell(2, 3).inputValue(), '1.234,50 0042')
 assert.equal(await cell(2, 4).count(), 0)
+
+// The rebuilt table started over, and the corrections can come back with one click.
+assert.notEqual(await cell(3, 1).inputValue(), 'Toner schwarz')
+await page.getByRole('button', { name: 'Korrekturen wiederherstellen', exact: true }).click()
+assert.equal(await cell(3, 1).inputValue(), 'Toner schwarz')
+assert.equal(await page.locator('.table-line').count(), 3)
+await page.getByRole('button', { name: 'Spaltengrenze 3', exact: true }).focus()
+await page.keyboard.press('Delete')
 await page.mouse.click(...at(370, 680))
 assert.equal(await page.locator('.table-line').count(), 3, 'a click adds the line back')
 assert.equal(await cell(2, 4).inputValue(), '0042')

@@ -1,6 +1,6 @@
 import { expect, test } from 'vitest'
 import { strFromU8, unzipSync } from 'fflate'
-import { buildTable, detectColumns, groupRows, mergeRows, TABLE_LIMITS, wordsFromFragments, wordsInRegion, type TableWord } from '../../src/core/tables/extract'
+import { buildTable, COLUMN_CROSSING, detectColumns, groupRows, mergeRows, reclassifyRows, TABLE_LIMITS, wordsFromFragments, wordsInRegion, type TableWord } from '../../src/core/tables/extract'
 import { asNumberCell, classifyCell, parseNumber } from '../../src/core/tables/values'
 import { buildOds, buildXlsx } from '../../src/core/tables/workbook'
 import type { TableCell } from '../../src/core/tables/values'
@@ -159,4 +159,16 @@ test('oversized output is refused', () => {
   const random = () => Buffer.from(crypto.getRandomValues(new Uint8Array(2000))).toString('base64')
   const wide = Array.from({ length: 400 }, () => Array.from({ length: 30 }, () => plain(random())))
   expect(() => buildXlsx(wide, 'de')).toThrow(/zu groß/)
+})
+
+test('a new number format reads the cells again and keeps what a person corrected', () => {
+  const rows: TableCell[][] = [[
+    plain('Toner schwarz'),
+    number('1.234,50'),
+    { ...plain('89.90'), note: COLUMN_CROSSING },
+  ]]
+  const [row] = reclassifyRows(rows, 'en')
+  expect(row[0]).toEqual(plain('Toner schwarz'))
+  expect(row[1].type).toBe('text')
+  expect(row[2]).toEqual({ ...number('89.90'), note: COLUMN_CROSSING })
 })

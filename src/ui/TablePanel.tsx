@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type PointerEvent as ReactPointerEvent } from 'react'
-import { buildTable, detectColumns, mergeRows, wordsFromFragments, wordsInRegion, type TableRegion, type TableWord } from '../core/tables/extract'
+import { buildTable, detectColumns, mergeRows, reclassifyRows, wordsFromFragments, wordsInRegion, type TableRegion, type TableWord } from '../core/tables/extract'
 import { asNumberCell, classifyCell, type NumberLocale, type TableCell } from '../core/tables/values'
 import { buildOds, buildXlsx } from '../core/tables/workbook'
 import { downloadFile } from '../core/pdf/downloadPdf'
@@ -11,11 +11,13 @@ const MIN_DRAG = 6
 const XLSX_TYPE = 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'
 const ODS_TYPE = 'application/vnd.oasis.opendocument.spreadsheet'
 
+interface TableSnapshot { pageIndex: number; region: TableRegion | null; lines: number[]; rows: TableCell[][] }
+
 /** Reviewing happens on this copy; the PDF and the editor state are never touched. */
 export function TablePanel({ pdf, pages, fileName, initialPage, onClose }: { pdf: PdfHandle; pages: DocumentPage[]; fileName: string; initialPage: number; onClose: () => void }) {
   const canvas = useRef<HTMLCanvasElement>(null)
   const stage = useRef<HTMLDivElement>(null)
-  const gesture = useRef<{ x: number; y: number; moved: boolean; line?: number } | null>(null)
+  const gesture = useRef<{ x: number; y: number; moved: boolean; line?: number; lines: number[] } | null>(null)
   const [pageIndex, setPageIndex] = useState(Math.min(initialPage, pages.length - 1))
   const [words, setWords] = useState<{ pageIndex: number; words: TableWord[] } | null>(null)
   const [region, setRegion] = useState<TableRegion | null>(null)
@@ -25,6 +27,9 @@ export function TablePanel({ pdf, pages, fileName, initialPage, onClose }: { pdf
   const [rows, setRows] = useState<TableCell[][]>([])
   const [problem, setProblem] = useState('')
   const [reviewed, setReviewed] = useState(false)
+  const [edited, setEdited] = useState(false)
+  // A rebuilt table starts over, so the corrections stay one click away.
+  const [replaced, setReplaced] = useState<TableSnapshot | null>(null)
 
   const size = pageSize(pages[pageIndex])
   const scale = Math.min(1.2, STAGE_WIDTH / size.width)
@@ -46,6 +51,7 @@ export function TablePanel({ pdf, pages, fileName, initialPage, onClose }: { pdf
 
   const rebuild = useCallback((area: TableRegion | null, columnLines: number[], format: NumberLocale) => {
     setReviewed(false)
+    setEdited(false)
     setProblem('')
     if (!area || !pageWords) { setRows([]); return }
     try { setRows(buildTable(wordsInRegion(pageWords, area), columnLines, format).rows) }
@@ -55,17 +61,41 @@ export function TablePanel({ pdf, pages, fileName, initialPage, onClose }: { pdf
     }
   }, [pageWords])
 
+  const keepCorrections = (columnLines = lines) => {
+    if (edited) setReplaced({ pageIndex, region, lines: columnLines, rows })
+  }
+  const restoreCorrections = () => {
+    if (!replaced) return
+    setPageIndex(replaced.pageIndex)
+    setRegion(replaced.region)
+    setLines(replaced.lines)
+    setRows(replaced.rows)
+    setEdited(true)
+    setReviewed(false)
+    setProblem('')
+    setReplaced(null)
+  }
+  const markEdited = () => {
+    setEdited(true)
+    setReplaced(null)
+    setReviewed(false)
+  }
+
   const chooseRegion = (area: TableRegion) => {
+    keepCorrections()
     const detected = pageWords ? detectColumns(wordsInRegion(pageWords, area)) : []
     setRegion(area)
     setLines(detected)
     rebuild(area, detected, locale)
   }
   const updateLines = (next: number[]) => {
+    keepCorrections()
     setLines(next)
     rebuild(region, next, locale)
   }
   const changePage = (index: number) => {
+    keepCorrections()
+    setEdited(false)
     setPageIndex(index)
     setRegion(null)
     setLines([])
@@ -84,7 +114,7 @@ export function TablePanel({ pdf, pages, fileName, initialPage, onClose }: { pdf
   const onPointerDown = (event: ReactPointerEvent<HTMLDivElement>) => {
     if (event.button !== 0) return
     const line = (event.target as HTMLElement).dataset.line
-    gesture.current = { ...point(event), moved: false, line: line === undefined ? undefined : Number(line) }
+    gesture.current = { ...point(event), moved: false, line: line === undefined ? undefined : Number(line), lines }
     event.currentTarget.setPointerCapture(event.pointerId)
   }
   const onPointerMove = (event: ReactPointerEvent<HTMLDivElement>) => {
@@ -103,29 +133,32 @@ export function TablePanel({ pdf, pages, fileName, initialPage, onClose }: { pdf
     if (!start) return
     const here = point(event)
     if (start.line !== undefined) {
-      if (start.moved) rebuild(region, lines.map((value, index) => index === start.line ? here.x : value), locale)
+      if (start.moved) {
+        keepCorrections(start.lines)
+        rebuild(region, lines.map((value, index) => index === start.line ? here.x : value), locale)
+      }
     } else if (start.moved) chooseRegion(areaBetween(start, here))
     else if (region && here.x > region.left && here.x < region.right && here.y > region.top && here.y < region.bottom) updateLines([...lines, here.x])
   }
 
   const editCell = (rowIndex: number, columnIndex: number, text: string) => {
     setRows(list => list.map((row, r) => r !== rowIndex ? row : row.map((cell, c) => c === columnIndex ? classifyCell(text, locale) : cell)))
-    setReviewed(false)
+    markEdited()
   }
   const setColumnType = (columnIndex: number, type: 'number' | 'text') => {
     setRows(list => list.map(row => row.map((cell, c) => {
       if (c !== columnIndex || !cell.text) return cell
       return type === 'number' ? asNumberCell(cell, locale) : { text: cell.text, type: 'text' }
     })))
-    setReviewed(false)
+    markEdited()
   }
   const deleteRow = (rowIndex: number) => {
     setRows(list => list.filter((_, index) => index !== rowIndex))
-    setReviewed(false)
+    markEdited()
   }
   const mergeWithNext = (rowIndex: number) => {
     setRows(list => mergeRows(list, rowIndex, locale))
-    setReviewed(false)
+    markEdited()
   }
   const save = (format: 'xlsx' | 'ods') => {
     try {
@@ -179,7 +212,7 @@ export function TablePanel({ pdf, pages, fileName, initialPage, onClose }: { pdf
         <div className="table-review-bar">
           <h2>Tabelle prüfen</h2>
           <label>Zahlenformat
-            <select value={locale} onChange={event => { const next = event.target.value as NumberLocale; setLocale(next); rebuild(region, lines, next) }}>
+            <select value={locale} onChange={event => { const next = event.target.value as NumberLocale; setLocale(next); setRows(list => reclassifyRows(list, next)); setReviewed(false) }}>
               <option value="de">Deutsch (1.234,50)</option>
               <option value="en">Englisch (1,234.50)</option>
             </select>
@@ -187,6 +220,7 @@ export function TablePanel({ pdf, pages, fileName, initialPage, onClose }: { pdf
           <button type="button" onClick={onClose}>Zur Dokumentbearbeitung</button>
         </div>
         {problem && <p role="alert" className="export-error">{problem}</p>}
+        {replaced && <p role="status" className="password-warning">Die Tabelle wurde neu aufgebaut, frühere Korrekturen sind darin nicht enthalten. <button type="button" onClick={restoreCorrections}>Korrekturen wiederherstellen</button></p>}
         {!rows.length && !problem && <p className="table-hint">{pageWords && !pageWords.length ? 'Diese Seite hat keine Textebene. Bei einem Scan zuerst über „Dokument“ den Text erkennen lassen, dann lässt sich die Tabelle hier übernehmen.' : 'Noch kein Bereich gewählt.'}</p>}
         {!!rows.length && <>
           {recognized && <p className="password-warning">Diese Seite ist ein Scan. Der Text stammt aus der Texterkennung, Ziffern und Trennzeichen können falsch sein. Bitte Werte besonders mit dem Scan vergleichen.</p>}

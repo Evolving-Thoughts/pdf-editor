@@ -3,6 +3,8 @@
 import { fragmentRange, type SearchFragment } from '../search'
 import { classifyCell, type NumberLocale, type TableCell } from './values'
 
+export const COLUMN_CROSSING = 'Ein Wort liegt über einer Spaltengrenze.'
+
 export const TABLE_LIMITS = { words: 8000, rows: 400, columns: 30, cells: 12000, outputBytes: 10 * 1024 * 1024 }
 
 export interface TableWord { text: string; left: number; right: number; top: number; bottom: number }
@@ -79,11 +81,18 @@ export function buildTable(words: TableWord[], columnLines: number[], locale: Nu
     }
     return cells.map((cell, index): TableCell => {
       const classified = classifyCell(cell.sort((a, b) => a.left - b.left).map(word => word.text).join(' '), locale)
-      return crossing.has(index) ? { ...classified, note: 'Ein Wort liegt über einer Spaltengrenze.' } : classified
+      return crossing.has(index) ? { ...classified, note: COLUMN_CROSSING } : classified
     })
   })
   return { rows }
 }
+
+/** Another number format changes how cells read, never what they say. */
+export const reclassifyRows = (rows: TableCell[][], locale: NumberLocale): TableCell[][] =>
+  rows.map(row => row.map(cell => {
+    const classified = classifyCell(cell.text, locale)
+    return cell.note === COLUMN_CROSSING ? { ...classified, note: COLUMN_CROSSING } : classified
+  }))
 
 export const mergeRows = (rows: TableCell[][], index: number, locale: NumberLocale): TableCell[][] =>
   rows.flatMap((row, position) => {
