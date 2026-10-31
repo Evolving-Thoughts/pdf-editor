@@ -15,7 +15,7 @@ test('drawing a rectangle in reverse direction retains the exact visible bounds 
         { x: 300, y: 300 },
         { x: 100, y: 200 },
       ],
-      0,
+      'p0',
       { fill: '#ffffff', strokeColor: null, strokeWidth: 3 },
       'cover',
     ),
@@ -23,7 +23,7 @@ test('drawing a rectangle in reverse direction retains the exact visible bounds 
     kind: 'shape',
     shape: 'rect',
     id: 'cover',
-    pageIndex: 0,
+    pageId: 'p0',
     x: 100,
     y: 200,
     width: 200,
@@ -42,13 +42,13 @@ test('shape commands keep a cover before later text and restore its exact order 
       { x: 100, y: 200 },
       { x: 300, y: 300 },
     ],
-    0,
+    'p0',
     { fill: '#ffffff', strokeColor: null, strokeWidth: 3 },
     'cover',
   )!
   const text: Textbox = {
     id: 'text',
-    pageIndex: 0,
+    pageId: 'p0',
     x: 120,
     y: 220,
     text: 'Korrektur',
@@ -119,7 +119,7 @@ test('vertical lines and reverse horizontal arrows retain endpoints without inve
         { x: 100, y: 300 },
         { x: 100, y: 200 },
       ],
-      0,
+      'p0',
       { fill: '#ffffff', strokeColor: '#111111', strokeWidth: 3 },
       'line',
     ),
@@ -139,7 +139,7 @@ test('vertical lines and reverse horizontal arrows retain endpoints without inve
         { x: 300, y: 200 },
         { x: 100, y: 200 },
       ],
-      0,
+      'p0',
       { fill: null, strokeColor: '#111111', strokeWidth: 3 },
       'arrow',
     ),
@@ -160,7 +160,7 @@ test('a freehand marker keeps every sampled point in immutable local fractions',
       { x: 180, y: 230 },
       { x: 200, y: 200 },
     ],
-    1,
+    'p1',
     { fill: null, strokeColor: '#ffe34b', strokeWidth: 24 },
     'marker',
   )!
@@ -184,7 +184,7 @@ test('rotated line endpoint editing fixes the other endpoint and retains its ang
       { x: 100, y: 100 },
       { x: 300, y: 200 },
     ],
-    0,
+    'p0',
     { fill: null, strokeColor: '#111111', strokeWidth: 3 },
     'line',
   )!
@@ -212,7 +212,7 @@ test('local marker and rectangle paths match independently known SVG coordinates
       { x: 180, y: 230 },
       { x: 200, y: 200 },
     ],
-    0,
+    'p0',
     { fill: null, strokeColor: '#ffe34b', strokeWidth: 24 },
     'mark',
   )!
@@ -233,7 +233,7 @@ test('rapid shape nudges merge but changing the action starts a new undo step', 
       { x: 100, y: 100 },
       { x: 200, y: 160 },
     ],
-    0,
+    'p0',
     style,
     'nudge',
   )!
@@ -253,11 +253,11 @@ test('long markers and single-point markers have drawable paths without argument
   const long = createShape(
     'marker',
     Array.from({ length: 200000 }, (_, i) => ({ x: i % 300, y: i % 200 })),
-    0,
+    'p0',
     style,
   )!
   expect(long.width).toBe(299)
-  const dot = createShape('marker', [{ x: 100, y: 100 }], 0, style)!
+  const dot = createShape('marker', [{ x: 100, y: 100 }], 'p0', style)!
   expect(shapeToSvgPath(dot)).toBe('M 2 2 L 2.01 2')
 })
 
@@ -270,7 +270,7 @@ test('eraser splits markers but retains forms; clearing drawing removes markers 
       { x: 100, y: 200 },
       { x: 300, y: 200 },
     ],
-    0,
+    'p0',
     { ...style, strokeWidth: 12 },
     'marker',
   )!
@@ -280,13 +280,13 @@ test('eraser splits markers but retains forms; clearing drawing removes markers 
       { x: 100, y: 100 },
       { x: 200, y: 160 },
     ],
-    0,
+    'p0',
     style,
     'form',
   )!
   const store = new EditorStore()
   store.restore({ overlays: [marker, form] })
-  const after = eraseStrokes(store.state.overlays, 0, [{ x: 200, y: 200 }], 8)
+  const after = eraseStrokes(store.state.overlays, 'p0', [{ x: 200, y: 200 }], 8)
   expect(after).toHaveLength(3)
   expect(after[2]).toEqual(form)
   expect(after[0]).toMatchObject({ shape: 'marker', strokeWidth: 12, strokeColor: '#111111' })
@@ -307,7 +307,7 @@ test('style objects cannot overwrite the calculated shape geometry', () => {
       { x: 100, y: 100 },
       { x: 200, y: 160 },
     ],
-    0,
+    'p0',
     supplied,
   )!
   expect(rect).toMatchObject({ x: 100, y: 100, width: 100, height: 60 })
@@ -345,7 +345,7 @@ test('a pause or a different element breaks shape keyboard undo grouping', async
           { x: 100, y: 100 },
           { x: 200, y: 160 },
         ],
-        0,
+        'p0',
         style,
         'first',
       )!

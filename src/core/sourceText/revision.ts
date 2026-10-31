@@ -14,7 +14,7 @@ export function sourceRevisions(state: EditorState, revisions: readonly { pageId
   if (!revisions.length || new Set(revisions.map(r => r.pageId)).size !== revisions.length) throw new Error('Ungültige Originaltext-Korrektur.')
   for (const { pageId } of revisions) {
     const page = state.pages?.find(value => value.id === pageId)
-    if (!page || state.redactions?.length || page.hasForms || page.hasXfa || page.redacted || state.overlays.some(overlay => overlay.pageIndex === state.pages!.indexOf(page))) {
+    if (!page || state.redactions?.length || page.hasForms || page.hasXfa || page.redacted || state.overlays.some(overlay => overlay.pageId === pageId)) {
       throw new Error('Originaltext-Korrektur ist auf dieser Seite derzeit nicht sicher möglich. Overlays oder vorgemerkte Schwärzungen zuerst entfernen.')
     }
   }

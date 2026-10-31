@@ -3,17 +3,17 @@ import { addOverlay, clearDrawing, CommandStack, updateOverlay } from '../../src
 import { isStroke, type EditorState, type Stroke, type Textbox } from '../../src/core/model'
 
 const text: Textbox = {
-  id: 'text', pageIndex: 0, x: 10, y: 700, text: 'Keep me', font: 'helvetica',
+  id: 'text', pageId: 'p0', x: 10, y: 700, text: 'Keep me', font: 'helvetica',
   fontSize: 14, bold: false, italic: false, underline: false,
 }
 const stroke: Stroke = {
-  id: 'first', pageIndex: 0, color: '#111111', width: 3,
+  id: 'first', pageId: 'p0', color: '#111111', width: 3,
   points: [{ x: 10, y: 50 }, { x: 100, y: 50 }],
 }
-const second: Stroke = { ...stroke, id: 'second', pageIndex: 1, color: '#2455c7', width: 6 }
+const second: Stroke = { ...stroke, id: 'second', pageId: 'p1', color: '#2455c7', width: 6 }
 
 test('clearing a drawing removes strokes on every page, preserving texts and symbols in order', () => {
-  const symbol = { ...text, id: 'symbol', pageIndex: 1, font: 'zapfdingbats' as const, text: '✓' }
+  const symbol = { ...text, id: 'symbol', pageId: 'p1', font: 'zapfdingbats' as const, text: '✓' }
   const state: EditorState = { overlays: [stroke, text, second, symbol] }
   const stack = new CommandStack(state)
   stack.execute(clearDrawing(state.overlays))

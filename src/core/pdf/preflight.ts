@@ -200,13 +200,13 @@ const excerptOf = (text: string, character: string) => {
 }
 
 /** Uses the same font selection as the export, so the check cannot disagree with it. */
-export async function findTextIssues(overlays: Overlay[]): Promise<TextIssue[]> {
+export async function findTextIssues(overlays: Overlay[], pages: readonly { id: string }[]): Promise<TextIssue[]> {
   const doc = await PDFDocument.create(), fonts = new Map(), issues: TextIssue[] = []
   for (const overlay of overlays.filter(isTextbox) as Textbox[]) {
     if (!overlay.text.trim()) continue
     const font = await embedOverlayFont(doc, overlay, fonts)
     const characters = unsupportedCharacters(font, overlay.text)
-    if (characters.length) issues.push({ overlayId: overlay.id, pageIndex: overlay.pageIndex, characters, font: font.name, excerpt: excerptOf(overlay.text, characters[0]) })
+    if (characters.length) issues.push({ overlayId: overlay.id, pageIndex: pages.findIndex(page => page.id === overlay.pageId), characters, font: font.name, excerpt: excerptOf(overlay.text, characters[0]) })
   }
   return issues
 }
@@ -220,7 +220,7 @@ export async function preflightExport({ original, state }: DocumentSnapshot): Pr
   const kept = { outline: !secure, tags: await tagsSurvive(original, sources, pages, secure) }
   // A rebuilt document has no packet that could go.
   const xmpDropped = !rebuilt && hasMetadataEdit(metadata) && (await applyMetadata(original, metadata!)).xmpRemoved
-  return { rebuilt, assessments: findings.map(finding => assessExport(finding, rebuilt, kept)), textIssues: await findTextIssues(overlays), xmpDropped }
+  return { rebuilt, assessments: findings.map(finding => assessExport(finding, rebuilt, kept)), textIssues: await findTextIssues(overlays, pages), xmpDropped }
 }
 
 export const needsConfirmation = (report: PreflightReport) => report.assessments.filter(item => item.decision === 'confirm')

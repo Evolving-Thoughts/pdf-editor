@@ -3,13 +3,13 @@ import { clearDrawing } from '../../src/core/commands'
 import { EditorStore } from '../../src/core/editorStore'
 import { isTextbox, type Overlay } from '../../src/core/model'
 
-const image = { kind: 'image', id: 'image', pageIndex: 0, x: 10, y: 20, width: 100, height: 50,
+const image = { kind: 'image', id: 'image', pageId: 'p0', x: 10, y: 20, width: 100, height: 50,
   lockAspectRatio: true, name: 'logo.png', dataUrl: 'data:image/png;base64,AQ==', pixelWidth: 200, pixelHeight: 100 } as unknown as Overlay
 
 test('an image is not a textbox and clearing drawing preserves images', () => {
   expect(isTextbox(image)).toBe(false)
   const store = new EditorStore()
-  store.restore({ overlays: [image, { id: 'stroke', pageIndex: 0, points: [{ x: 1, y: 2 }], color: '#111111', width: 3 }] })
+  store.restore({ overlays: [image, { id: 'stroke', pageId: 'p0', points: [{ x: 1, y: 2 }], color: '#111111', width: 3 }] })
   store.dispatch(clearDrawing(store.state.overlays))
   expect(store.state.overlays).toEqual([image])
   store.undo()
@@ -52,7 +52,7 @@ test('clone, erasing and model guards do not misclassify or change an image', ()
   const cloned = cloneOverlay(logo) as ImageOverlay
   cloned.x = 200
   expect(logo.x).toBe(10)
-  expect(eraseStrokes([logo], 0, [{ x: 10, y: 20 }], 40)).toEqual([logo])
+  expect(eraseStrokes([logo], 'p0', [{ x: 10, y: 20 }], 40)).toEqual([logo])
 })
 
 test('moving clamps all four edges without changing dimensions', () => {

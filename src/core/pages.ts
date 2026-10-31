@@ -65,7 +65,7 @@ function pageCommand(
   const before = withPages(state),
     after = withPages(state)
   mutate(after)
-  renumberLabels(after.overlays)
+  renumberLabels(after.overlays, after.pages)
   return { label, apply: (s) => assignEditorState(s, after), revert: (s) => assignEditorState(s, before) }
 }
 export function movePage(state: EditorState, id: string, index: number): Command {
@@ -73,11 +73,8 @@ export function movePage(state: EditorState, id: string, index: number): Command
   if (from < 0 || !Number.isInteger(index) || index < 0 || index >= state.pages!.length)
     throw new Error('Ungültige Seitenposition.')
   return pageCommand(state, 'Move page', (next) => {
-    const old = [...next.pages]
     const [page] = next.pages.splice(from, 1)
     next.pages.splice(index, 0, page)
-    for (const overlay of next.overlays)
-      overlay.pageIndex = next.pages.findIndex((p) => p.id === old[overlay.pageIndex]?.id)
   })
 }
 function selectedPageIds(state: EditorState, ids: readonly string[]) {
@@ -89,11 +86,8 @@ function selectedPageIds(state: EditorState, ids: readonly string[]) {
 export function deletePages(state: EditorState, ids: readonly string[]): Command {
   const selected = selectedPageIds(state, ids)
   return pageCommand(state, 'Delete pages', next => {
-    const old = [...next.pages]
     next.pages = next.pages.filter(page => !selected.has(page.id))
-    const indices = new Map(next.pages.map((page, index) => [page.id, index]))
-    next.overlays = next.overlays.filter(overlay => indices.has(old[overlay.pageIndex]?.id))
-    next.overlays.forEach(overlay => { overlay.pageIndex = indices.get(old[overlay.pageIndex].id)! })
+    next.overlays = next.overlays.filter(overlay => !selected.has(overlay.pageId))
   })
 }
 export function deletePage(state: EditorState, id: string): Command {
@@ -128,14 +122,11 @@ export function insertPages(
   assertPageBudget((state.pages?.length ?? 0) + pages.length)
   if (!state.pageSources?.some(existing => existing.id === source.id))
     assertSourceBudget((state.pageSources ?? []).reduce((total, existing) => total + existing.bytes.byteLength, originalBytes), source.bytes.byteLength)
-  if (overlays.some((o) => !Number.isInteger(o.pageIndex) || o.pageIndex < 0 || o.pageIndex >= pages.length))
+  if (overlays.some((o) => !pages.some((p) => p.id === o.pageId)))
     throw new Error('Ungültige Overlay-Seite.')
   return pageCommand(state, 'Insert pages', (next) => {
     next.pages.splice(index, 0, ...structuredClone(pages))
-    next.overlays.forEach((o) => {
-      if (o.pageIndex >= index) o.pageIndex += pages.length
-    })
-    next.overlays.push(...overlays.map((o) => ({ ...cloneOverlay(o), pageIndex: o.pageIndex + index })))
+    next.overlays.push(...overlays.map(cloneOverlay))
     if (!next.pageSources?.some((s) => s.id === source.id)) next.pageSources!.push(source)
   })
 }
@@ -161,14 +152,14 @@ function transformOverlay(
 }
 export function rotatePages(state: EditorState, ids: readonly string[], clockwise: boolean): Command {
   const selected = selectedPageIds(state, ids), delta = clockwise ? 90 : -90
-  const sizes = new Map(state.pages!.map((page, index) => [index, pageSize(page)]))
+  const sizes = new Map(state.pages!.map(page => [page.id, pageSize(page)]))
   return pageCommand(state, 'Rotate pages', next => {
     next.pages.forEach(page => {
       if (selected.has(page.id)) page.rotation = (page.rotation + delta + 360) % 360
     })
     next.overlays.forEach(overlay => {
-      if (!selected.has(next.pages[overlay.pageIndex]?.id)) return
-      const size = sizes.get(overlay.pageIndex)!
+      if (!selected.has(overlay.pageId)) return
+      const size = sizes.get(overlay.pageId)!
       transformOverlay(overlay,
         clockwise ? (x, y) => ({ x: y, y: size.width - x }) : (x, y) => ({ x: size.height - y, y: x }),
         delta,
@@ -216,7 +207,7 @@ export function cropPage(state: EditorState, id: string, m: CropMargins): Comman
       height: Math.abs(a.y - b.y),
     }
     next.overlays
-      .filter((o) => o.pageIndex === index)
+      .filter((o) => o.pageId === id)
       .forEach((o) => transformOverlay(o, (x, y) => ({ x: x - m.left, y: y - m.bottom })))
   })
 }

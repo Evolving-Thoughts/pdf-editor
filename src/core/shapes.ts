@@ -10,7 +10,7 @@ export interface ShapeStyle {
 export function createShape(
   kind: ShapeKind,
   points: StrokePoint[],
-  pageIndex: number,
+  pageId: string,
   style: ShapeStyle,
   id = createId(),
 ): ShapeOverlay | null {
@@ -47,7 +47,7 @@ export function createShape(
     kind: 'shape',
     shape: kind,
     id,
-    pageIndex,
+    pageId,
     x,
     y,
     width,

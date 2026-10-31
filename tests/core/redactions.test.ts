@@ -23,7 +23,7 @@ test('all four corner grips preserve the opposite corner; moves and crossing dra
 })
 test('pending edits and applying a replacement page are atomic undoable snapshots; unaffected overlays and form values survive',()=>{
  const store=new EditorStore(),other={...page,id:'q',sourceIndex:1}
- const overlays=[{id:'private',pageIndex:0,x:1,y:20,text:'old',font:'helvetica' as const,fontSize:14,bold:false,italic:false,underline:false},{id:'public',pageIndex:1,x:1,y:20,text:'keep',font:'helvetica' as const,fontSize:14,bold:false,italic:false,underline:false}]
+ const overlays=[{id:'private',pageId:page.id,x:1,y:20,text:'old',font:'helvetica' as const,fontSize:14,bold:false,italic:false,underline:false},{id:'public',pageId:'q',x:1,y:20,text:'keep',font:'helvetica' as const,fontSize:14,bold:false,italic:false,underline:false}]
  store.restore({ overlays: overlays, pages: [page,other], pageSources: [], formValues: {'field':'native'} })
  const input=[mark];store.dispatch(replaceRedactions(store.state,input));input[0]={...mark,x:70};store.undo();store.redo();expect(store.state.redactions![0].x).toBe(10)
  const raster={...page,sourceId:'raster',redacted:true,hasForms:false},source={id:'raster',bytes:new Uint8Array([1]).buffer}

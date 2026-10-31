@@ -4,7 +4,7 @@ import { EditorStore } from '../../src/core/editorStore'
 import type { Textbox } from '../../src/core/model'
 
 function makeBox(id: string, text = ''): Textbox {
-  return { id, pageIndex: 0, x: 50, y: 700, text, font: 'helvetica', fontSize: 14, bold: false, italic: false, underline: false }
+  return { id, pageId: 'p0', x: 50, y: 700, text, font: 'helvetica', fontSize: 14, bold: false, italic: false, underline: false }
 }
 
 test('preview mutates state and notifies without recording history', () => {

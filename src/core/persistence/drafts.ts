@@ -28,7 +28,7 @@ const DB_NAME = 'pdf-editor-drafts'
 const STORE = 'drafts'
 const BYTES_STORE = 'draft-bytes'
 const ASSETS_STORE = 'image-assets'
-const DB_VERSION = 3
+const DB_VERSION = 4
 
 type StoredImage = Omit<ImageOverlay, 'dataUrl'> & { imageAssetKey: string[] }
 type StoredOverlay = Exclude<Overlay, ImageOverlay> | StoredImage
@@ -41,6 +41,8 @@ export function openDraftDb(): Promise<IDBDatabase> {
     const request = indexedDB.open(DB_NAME, DB_VERSION)
     request.onupgradeneeded = (event) => {
       const db = request.result
+      // Before v4 overlays pointed at page positions. Those drafts are dropped, not converted.
+      if (event.oldVersion < 4) Array.from(db.objectStoreNames).forEach(name => db.deleteObjectStore(name))
       if (!db.objectStoreNames.contains(STORE)) {
         db.createObjectStore(STORE, { keyPath: 'id' })
       }
@@ -51,28 +53,6 @@ export function openDraftDb(): Promise<IDBDatabase> {
       if (!db.objectStoreNames.contains(ASSETS_STORE)) {
         const assets = db.createObjectStore(ASSETS_STORE, { keyPath: 'key' })
         assets.createIndex('draftId', 'draftId')
-      }
-
-      // v1 stored metadata, overlays and the PDF bytes in one record. Split
-      // existing rows so listing drafts never has to clone large PDF buffers.
-      if (event.oldVersion < 2) {
-        const transaction = request.transaction
-        if (!transaction) return
-        const drafts = transaction.objectStore(STORE)
-        const bytesStore = transaction.objectStore(BYTES_STORE)
-        const cursorRequest = drafts.openCursor()
-        cursorRequest.onsuccess = () => {
-          const cursor = cursorRequest.result
-          if (!cursor) return
-          const value = cursor.value as StoredDraft & { pdfBytes?: ArrayBuffer }
-          if (value.pdfBytes) {
-            bytesStore.put(value.pdfBytes, value.id)
-            const { pdfBytes, ...metadata } = value
-            const stored: StoredDraft = { ...metadata, sizeBytes: pdfBytes.byteLength }
-            cursor.update(stored)
-          }
-          cursor.continue()
-        }
       }
     }
     request.onsuccess = () => resolve(request.result)

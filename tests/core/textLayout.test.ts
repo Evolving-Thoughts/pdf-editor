@@ -1,7 +1,7 @@
 import { expect, test } from 'vitest'
 import { TEXT_LINE_HEIGHT } from '../../src/core/textLayout'
 import { PDFArray, PDFDocument, PDFRawStream, decodePDFRawStream } from 'pdf-lib'
-import { exportPdf } from '../../src/core/pdf/exportPdf'
+import { exportPdf } from './exportFixture'
 import { EditorStore } from '../../src/core/editorStore'
 import { addOverlay, nudgeOverlay } from '../../src/core/commands'
 import type { Textbox } from '../../src/core/model'
@@ -15,7 +15,7 @@ test('export retains keyboard-nudged baseline and uses the same multiline spacin
   const store = new EditorStore()
   const box: Textbox = {
     id: 'text',
-    pageIndex: 0,
+    pageId: 'p0',
     x: 200,
     y: 400,
     text: 'Erste Zeile\nZweite Zeile',
@@ -46,7 +46,7 @@ test('each underline follows its own baseline for multiline correction text', as
   doc.addPage([600, 800])
   const box: Textbox = {
     id: 'text',
-    pageIndex: 0,
+    pageId: 'p0',
     x: 210,
     y: 405,
     text: 'Erste\nZweite',

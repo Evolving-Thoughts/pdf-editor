@@ -7,7 +7,7 @@ test('multi-page extraction follows document order, remaps overlays and retains 
   const field = doc.getForm().createTextField('shared'); field.setText('Ada')
   sheets.forEach(page=>field.addToPage(page,{ x: 20, y: 200, width: 100, height: 20 }))
   const bytes = await doc.save(), pages = await inspectPages(bytes,'base')
-  const overlays: Textbox[] = ['one','two','three'].map((text,pageIndex)=>({ id: text, text, pageIndex, x: 10, y: 100, font: 'helvetica', fontSize: 12, bold: false, italic: false, underline: false }))
+  const overlays: Textbox[] = ['one','two','three'].map((text,index)=>({ id: text, text, pageId: pages[index].id, x: 10, y: 100, font: 'helvetica', fontSize: 12, bold: false, italic: false, underline: false }))
   const before = structuredClone(overlays)
   const output = await PDFDocument.load(await exportPageDocument(bytes,[],pages,overlays,[pages[2].id,pages[0].id]))
   expect(output.getPages().map(p=>p.getWidth())).toEqual([201,203])

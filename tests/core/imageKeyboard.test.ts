@@ -3,7 +3,7 @@ import { addOverlay, nudgeOverlay, updateOverlay } from '../../src/core/commands
 import { EditorStore } from '../../src/core/editorStore'
 import { imageGeometry } from '../../src/core/images/geometry'
 import type { ImageOverlay } from '../../src/core/model'
-const image: ImageOverlay = { kind: 'image', id: 'img', pageIndex: 0, x: 100, y: 100, width: 200, height: 100,
+const image: ImageOverlay = { kind: 'image', id: 'img', pageId: 'p0', x: 100, y: 100, width: 200, height: 100,
   lockAspectRatio: true, dataUrl: 'data:image/png;base64,AQ==', name: 'logo.png', pixelWidth: 200, pixelHeight: 100 }
 afterEach(() => vi.useRealTimers())
 function setup() { const store = new EditorStore(); store.dispatch(addOverlay(image)); return store }

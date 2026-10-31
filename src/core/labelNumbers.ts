@@ -14,7 +14,8 @@ export function labelText(template: string, number: number, last: number): strin
 
 const digits = (text: string) => (text.match(/\d/g) ?? []).length
 
-export function renumberLabels(overlays: Overlay[]): void {
+export function renumberLabels(overlays: Overlay[], pages: readonly { id: string }[]): void {
+  const order = new Map(pages.map((page, index) => [page.id, index]))
   const groups = new Map<string, Textbox[]>()
   for (const overlay of overlays) {
     if (!isTextbox(overlay) || !overlay.label || !overlay.labelGroup) continue
@@ -23,7 +24,7 @@ export function renumberLabels(overlays: Overlay[]): void {
     groups.set(overlay.labelGroup, group)
   }
   for (const [position, boxes] of groups) {
-    boxes.sort((a, b) => a.pageIndex - b.pageIndex)
+    boxes.sort((a, b) => order.get(a.pageId)! - order.get(b.pageId)!)
     const start = boxes[0].label!.start, last = start + boxes.length - 1
     boxes.forEach((box, index) => {
       const source = box.label!

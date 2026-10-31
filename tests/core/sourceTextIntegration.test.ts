@@ -147,7 +147,7 @@ test('worker request terminates on abort and deadline; original bytes stay avail
 test('source revision refuses overlays and leaves duplicate page copies and original bytes untouched', async () => {
   const bytes = await paragraphFixture(), pages = await inspectPages(bytes, 'original.pdf'), store = new EditorStore()
   store.restore({ overlays: [], pages: [...pages, { ...pages[0], id: 'another-copy' }], pageSources: [] })
-  store.state.overlays.push({ id: 'overlay', pageIndex: 0, x: 50, y: 700, text: 'overlay', font: 'helvetica', fontSize: 12, bold: false, italic: false, underline: false })
+  store.state.overlays.push({ id: 'overlay', pageId: pages[0].id, x: 50, y: 700, text: 'overlay', font: 'helvetica', fontSize: 12, bold: false, italic: false, underline: false })
   const before = store.state.pages
   expect(() => sourceRevision(store.state, pages[0].id, Uint8Array.from(bytes).buffer)).toThrow(/Overlays/)
   expect(store.state.pages).toBe(before); expect(store.canUndo).toBe(false)

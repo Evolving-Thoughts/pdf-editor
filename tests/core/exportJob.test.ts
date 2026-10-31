@@ -120,11 +120,12 @@ async function source() {
   doc.getForm().createTextField('name').addToPage(page, { x: 20, y: 20, width: 100, height: 20 })
   return doc.save()
 }
-const box: Textbox = { id: 't', pageIndex: 0, x: 20, y: 200, text: 'Zusatz', font: 'helvetica', fontSize: 12, bold: false, italic: false, underline: false }
+const box: Textbox = { id: 't', pageId: 'p0', x: 20, y: 200, text: 'Zusatz', font: 'helvetica', fontSize: 12, bold: false, italic: false, underline: false }
 
 test('the worker side writes a real export and reports its stages', async () => {
   const original = await source(), messages: ExportJobMessage[] = [], before = original.slice()
-  const job: ExportJob = { jobId: 'j', kind: 'export', request: { original, state: { pages: await inspectPages(original, 'a.pdf'), overlays: [box] }, size: { mode: 'structure' } } }
+  const pages = await inspectPages(original, 'a.pdf')
+  const job: ExportJob = { jobId: 'j', kind: 'export', request: { original, state: { pages, overlays: [{ ...box, pageId: pages[0].id }] }, size: { mode: 'structure' } } }
   await executeJob(job, message => messages.push(message))
   expect(messages.map(message => message.type === 'progress' ? message.progress.stage : message.type)).toEqual(['compose', 'structure', 'done'])
   const done = messages.at(-1)

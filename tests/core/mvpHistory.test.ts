@@ -58,7 +58,7 @@ test('40 mixed actions undo and redo every exact state, including page order, fo
   for (let i = 0; i < 4; i++) {
     const box: Textbox = {
       id: `text${i}`,
-      pageIndex: 0,
+      pageId: 'p0',
       x: 40,
       y: 700,
       text: 'before',
@@ -73,7 +73,7 @@ test('40 mixed actions undo and redo every exact state, including page order, fo
     execute(
       addOverlay({
         id: `stroke${i}`,
-        pageIndex: 1,
+        pageId: 'p1',
         points: [
           { x: 20, y: 30 },
           { x: 40, y: 50 },
@@ -87,7 +87,7 @@ test('40 mixed actions undo and redo every exact state, including page order, fo
         id: `shape${i}`,
         kind: 'shape',
         shape: 'rect',
-        pageIndex: 1,
+        pageId: 'p1',
         x: 50,
         y: 60,
         width: 100,
@@ -102,7 +102,7 @@ test('40 mixed actions undo and redo every exact state, including page order, fo
       addOverlay({
         id: `image${i}`,
         kind: 'image',
-        pageIndex: 2,
+        pageId: 'p2',
         x: 10,
         y: 10,
         width: 50,

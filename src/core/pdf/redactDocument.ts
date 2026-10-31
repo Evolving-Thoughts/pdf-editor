@@ -17,7 +17,7 @@ export async function prepareRedaction(original: Uint8Array, state: EditorState)
       const onPage = marks.filter(mark => mark.pageId === page.id)
       if (!onPage.length) continue
       const raster = await pdf.rasterizePage(index + 1, onPage); rows.push({ page, png: raster.png })
-      for (const suggestion of raster.replacements) newText.push({ id: createId(), pageIndex: index, x: suggestion.x, y: suggestion.y, text: '', font: suggestion.font, fontSize: suggestion.fontSize, rotation: suggestion.rotation, bold: false, italic: false, underline: false })
+      for (const suggestion of raster.replacements) newText.push({ id: createId(), pageId: page.id, x: suggestion.x, y: suggestion.y, text: '', font: suggestion.font, fontSize: suggestion.fontSize, rotation: suggestion.rotation, bold: false, italic: false, underline: false })
     }
     const result = await writeRasterSource(rows)
     const replacements = new Map(result.replacements.map(page => [page.id, page]))

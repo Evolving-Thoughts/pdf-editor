@@ -262,10 +262,8 @@ export function SourceTextPanel({ store, original, onClose, onHistory, initialPa
       if (changed) { setCandidate(null); setShowOriginal(false); setReady(false); setDraft(NONE); setMetas({}); history.current = emptyHistory(); bump() }
       setAnalysis(null); setSelection(null); setPending(null); setText(''); setParagraph(false); setError(''); setBusy(true)
     })
-    const supported = (p: typeof page) => {
-      const index = store.state.pages?.findIndex(value => value.id === p?.id) ?? -1
-      return !!p && !p.cropped && p.rotation === 0 && p.unit === 1 && !p.redacted && !store.state.redactions?.length && !store.state.overlays.some(overlay => overlay.pageIndex === index)
-    }
+    const supported = (p: typeof page) =>
+      !!p && !p.cropped && p.rotation === 0 && p.unit === 1 && !p.redacted && !store.state.redactions?.length && !store.state.overlays.some(overlay => overlay.pageId === p.id)
     if (!source || !supported(page)) {
       queueMicrotask(() => { if (!controller.signal.aborted) { setAnalysis({ ...EMPTY_ANALYSIS, pageId }); setError('Diese Seite ist derzeit nicht unterstützt: Drehung, Zuschnitt, Schwärzungen oder Overlays verhindern eine sichere Originaltext-Korrektur.'); setBusy(false) } }); return () => controller.abort()
     }

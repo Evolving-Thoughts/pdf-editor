@@ -14,8 +14,8 @@ export interface Textbox extends OverlayClipping {
   /** Clockwise rotation of the text baseline; absent in older drafts means zero. */
   rotation?: number
   id: string
-  /** 0-based page index. */
-  pageIndex: number
+  /** The page it sits on; it follows that page wherever the page goes. */
+  pageId: string
   /** Position in PDF points, origin bottom-left; y is the text baseline. */
   x: number
   y: number
@@ -40,8 +40,7 @@ export interface StrokePoint {
 
 export interface Stroke extends OverlayClipping {
   id: string
-  /** 0-based page index. */
-  pageIndex: number
+  pageId: string
   /** Ordered points relative to the visible, rotated page (bottom-left origin). */
   points: StrokePoint[]
   /** Hex color such as #111111. */
@@ -54,7 +53,7 @@ export interface Stroke extends OverlayClipping {
 export interface ImageOverlay extends OverlayClipping {
   kind: 'image'
   id: string
-  pageIndex: number
+  pageId: string
   /** Displayed page points, bottom-left origin, like strokes. */
   x: number
   y: number
@@ -77,7 +76,7 @@ export interface ShapeOverlay extends OverlayClipping {
   kind: 'shape'
   shape: ShapeKind
   id: string
-  pageIndex: number
+  pageId: string
   x: number
   y: number
   width: number
@@ -152,6 +151,10 @@ export function copyEditorState(state: EditorState): EditorState {
 export function assignEditorState(target: EditorState, source: EditorState): void {
   Object.assign(target, copyEditorState(source))
 }
+
+/** The overlay's current page position, or -1 when its page is not in this state. */
+export const overlayPageIndex = (state: EditorState, overlay: Overlay) =>
+  state.pages?.findIndex(page => page.id === overlay.pageId) ?? -1
 
 let counter = 0
 export function createId(): string {

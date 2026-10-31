@@ -50,7 +50,7 @@ export async function normalizeA4({ original, state }: DocumentSnapshot) {
     page.setCropBox(0, 0, width, height)
     page.setBleedBox(0, 0, width, height); page.setTrimBox(0, 0, width, height); page.setArtBox(0, 0, width, height)
     page.node.set(PDFName.of('UserUnit'), PDFNumber.of(1))
-    for (const overlay of mapped.filter(o => o.pageIndex === index)) {
+    for (const overlay of mapped.filter(o => o.pageId === plan.id)) {
       capturePageClip(overlay, size)
       if (isStroke(overlay)) {
         overlay.points = overlay.points.map(p => ({ x: p.x * factor + dx, y: p.y * factor + dy }))

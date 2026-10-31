@@ -1,7 +1,7 @@
 import { expect, test } from 'vitest'
 import { PDFDocument } from 'pdf-lib'
 import { addOverlay, CommandStack } from '../../src/core/commands'
-import { exportPdf } from '../../src/core/pdf/exportPdf'
+import { exportPdf } from './exportFixture'
 import { customStamp, formatStampDate, loadCustomStamps, saveCustomStamps, STAMP_TEMPLATES, stampGeometry, stampLines, stampOverlay, todayValue } from '../../src/core/stamps'
 import type { EditorState } from '../../src/core/model'
 import { PNG_DATA_URL } from '../imageFixtures.js'
@@ -84,8 +84,8 @@ test('a click at the edge stays on the page, also on tiny pages', () => {
 test('placing twice gives two independent overlays, undone one at a time', () => {
   const state: EditorState = { overlays: [] }, stack = new CommandStack(state)
   const page = { width: 600, height: 800 }
-  stack.execute(addOverlay(stampOverlay(picture, 'ERLEDIGT', 0, { x: 100, y: 100 }, page)))
-  stack.execute(addOverlay(stampOverlay(picture, 'ERLEDIGT', 1, { x: 300, y: 300 }, page)))
+  stack.execute(addOverlay(stampOverlay(picture, 'ERLEDIGT', 'p0', { x: 100, y: 100 }, page)))
+  stack.execute(addOverlay(stampOverlay(picture, 'ERLEDIGT', 'p1', { x: 300, y: 300 }, page)))
   expect(new Set(state.overlays.map(overlay => overlay.id)).size).toBe(2)
   stack.undo()
   expect(state.overlays).toHaveLength(1)
@@ -98,8 +98,8 @@ test('a stamp is marked as such and exports as a picture on differently sized pa
   doc.addPage([300, 300])
   doc.addPage([800, 400])
   const overlays = [
-    stampOverlay(picture, 'ERLEDIGT', 0, { x: 100, y: 100 }, { width: 300, height: 300 }),
-    stampOverlay(picture, 'ERLEDIGT', 1, { x: 100, y: 100 }, { width: 800, height: 400 }),
+    stampOverlay(picture, 'ERLEDIGT', 'p0', { x: 100, y: 100 }, { width: 300, height: 300 }),
+    stampOverlay(picture, 'ERLEDIGT', 'p1', { x: 100, y: 100 }, { width: 800, height: 400 }),
   ]
   expect(overlays[0].name).toBe('Stempel: ERLEDIGT')
   expect(overlays[0].lockAspectRatio).toBe(true)

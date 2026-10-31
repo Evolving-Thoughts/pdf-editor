@@ -80,7 +80,7 @@ test('arbitrary-angle resize stops at page edges instead of clipping or moving i
   expect(next.y + next.height / 2 + c * next.width / 2 - c * next.height / 2).toBeCloseTo(185.35533905932738)
 })
 test('rotation commands undo/redo without losing source or older zero-angle image state', () => {
-  const image: ImageOverlay = { kind: 'image', id: 'old', pageIndex: 0, x: 100, y: 100, width: 200, height: 100,
+  const image: ImageOverlay = { kind: 'image', id: 'old', pageId: 'p0', x: 100, y: 100, width: 200, height: 100,
     lockAspectRatio: true, name: 'logo.png', dataUrl: 'data:image/png;base64,AQ==', pixelWidth: 200, pixelHeight: 100 }
   const store = new EditorStore(); store.dispatch(addOverlay(image))
   const before = imageGeometry(image)

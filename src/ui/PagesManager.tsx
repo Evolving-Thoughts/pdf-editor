@@ -530,6 +530,7 @@ export function PagesManager({ nativeWidgets = [], pdf, store, original, busy, o
                     <PageView
                       {...pageProps}
                       pageIndex={i}
+                      pageId={p.id}
                       zoom={Math.min(42 / pageSize(p).width, 54 / pageSize(p).height)}
                     />
                   )}
@@ -580,7 +581,7 @@ export function PagesManager({ nativeWidgets = [], pdf, store, original, busy, o
               className="page-preview-paper"
               style={{ width: shownSize.width * scale, height: shownSize.height * scale }}
             >
-              <PageView {...pageProps} nativeWidgets={a4Preview ? [] : nativeWidgets} pdf={a4Preview?.pdf ?? pdf} store={a4Preview?.store ?? store} overlays={a4Preview?.prepared.overlays ?? store.state.overlays} pageIndex={index} zoom={scale} />
+              <PageView {...pageProps} nativeWidgets={a4Preview ? [] : nativeWidgets} pdf={a4Preview?.pdf ?? pdf} store={a4Preview?.store ?? store} overlays={a4Preview?.prepared.overlays ?? store.state.overlays} pageIndex={index} pageId={pages[index].id} zoom={scale} />
               {activeCrop && (
                 <div className="page-crop-layer">
                   <div

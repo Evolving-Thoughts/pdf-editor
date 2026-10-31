@@ -12,8 +12,8 @@ import { copyEditorState, type EditorState, type Textbox } from '../../../src/co
 
 function sampleOverlays(): Textbox[] {
   return [
-    { id: 'a', pageIndex: 0, x: 50, y: 700, text: 'Hallo', font: 'helvetica', fontSize: 14, bold: false, italic: false, underline: false },
-    { id: 'b', pageIndex: 1, x: 100, y: 400, text: '✓', font: 'zapfdingbats', fontSize: 20, bold: false, italic: false, underline: false },
+    { id: 'a', pageId: 'p0', x: 50, y: 700, text: 'Hallo', font: 'helvetica', fontSize: 14, bold: false, italic: false, underline: false },
+    { id: 'b', pageId: 'p1', x: 100, y: 400, text: '✓', font: 'zapfdingbats', fontSize: 20, bold: false, italic: false, underline: false },
   ]
 }
 
@@ -145,34 +145,31 @@ test('listDrafts summarizes multiple drafts newest first, without loading bytes'
   expect('pdfBytes' in list[0]).toBe(false)
 })
 
-test('openDraftDb migrates v1 records by splitting PDF bytes from metadata', async () => {
+test('drafts from before page identity are dropped, and the store works afterwards', async () => {
   await new Promise<void>((resolve, reject) => {
-    const request = indexedDB.open('pdf-editor-drafts', 1)
+    const request = indexedDB.open('pdf-editor-drafts', 3)
     request.onupgradeneeded = () => {
       request.result.createObjectStore('drafts', { keyPath: 'id' })
+      request.result.createObjectStore('draft-bytes')
+      request.result.createObjectStore('image-assets', { keyPath: 'key' }).createIndex('draftId', 'draftId')
     }
     request.onsuccess = () => {
       const db = request.result
-      const transaction = db.transaction('drafts', 'readwrite')
-      transaction.objectStore('drafts').put({ ...sampleDraft('legacy'), updatedAt: 1234 })
-      transaction.oncomplete = () => {
-        db.close()
-        resolve()
-      }
-      transaction.onerror = () => reject(transaction.error)
+      const tx = db.transaction(['drafts', 'draft-bytes'], 'readwrite')
+      const { pdfBytes, ...metadata } = sampleDraft('old')
+      tx.objectStore('drafts').put({ ...metadata, updatedAt: 1, sizeBytes: pdfBytes.byteLength })
+      tx.objectStore('draft-bytes').put(pdfBytes, 'old')
+      tx.oncomplete = () => { db.close(); resolve() }
+      tx.onerror = () => reject(tx.error)
     }
     request.onerror = () => reject(request.error)
   })
-
   const db = await openDb()
-  expect(db.objectStoreNames.contains('draft-bytes')).toBe(true)
-  const loaded = await loadDraft(db, 'legacy')
-  expect(loaded).not.toBeNull()
-  expect(new TextDecoder().decode(loaded!.pdfBytes)).toBe('%PDF-fake-legacy')
-  expect(loaded!.overlays).toEqual(sampleOverlays())
-  const list = await listDrafts(db)
-  expect(list).toHaveLength(1)
-  expect(list[0].sizeBytes).toBeGreaterThan(0)
+  expect(db.version).toBe(4)
+  expect(await listDrafts(db)).toEqual([])
+  expect(await loadDraft(db, 'old')).toBeNull()
+  await saveDraft(db, sampleDraft('new'))
+  expect((await loadDraft(db, 'new'))!.overlays).toEqual(sampleOverlays())
 })
 
 test('loadDraft returns null and deleteDraft removes for unknown ids', async () => {
@@ -190,7 +187,7 @@ test('the size warning threshold is 50 MB', () => {
 
 import type { ImageOverlay } from '../../../src/core/model'
 import { PNG_DATA_URL } from '../../imageFixtures.js'
-const image: ImageOverlay = { kind: 'image', id: 'image', pageIndex: 1, x: 40, y: 50, width: 120, height: 60,
+const image: ImageOverlay = { kind: 'image', id: 'image', pageId: 'p1', x: 40, y: 50, width: 120, height: 60,
   lockAspectRatio: true, name: 'logo.png', pixelWidth: 120, pixelHeight: 60, dataUrl: PNG_DATA_URL }
 
 test('image source is stored outside draft listing metadata and restored after reopening', async () => {
@@ -223,34 +220,6 @@ test('deleting one draft deletes only its image assets; missing assets fail rath
   remove.objectStore('image-assets').clear()
   await new Promise<void>((resolve) => { remove.oncomplete = () => resolve() })
   await expect(loadDraft(db, 'two')).rejects.toThrow('Bilddaten')
-})
-
-test('v2 text/stroke drafts migrate to v3 without data loss', async () => {
-  const legacy = { ...sampleDraft('v2'), updatedAt: 123 }
-  const stroke = { id: 'line', pageIndex: 1, color: '#111111', width: 3, points: [{ x: 1, y: 2 }, { x: 3, y: 4 }] }
-  await new Promise<void>((resolve, reject) => {
-    const request = indexedDB.open('pdf-editor-drafts', 2)
-    request.onupgradeneeded = () => {
-      request.result.createObjectStore('drafts', { keyPath: 'id' })
-      request.result.createObjectStore('draft-bytes')
-    }
-    request.onsuccess = () => {
-      const db = request.result
-      const tx = db.transaction(['drafts', 'draft-bytes'], 'readwrite')
-      const { pdfBytes, ...metadata } = legacy
-      tx.objectStore('drafts').put({ ...metadata, sizeBytes: pdfBytes.byteLength, overlays: [...legacy.overlays, stroke] })
-      tx.objectStore('draft-bytes').put(pdfBytes, 'v2')
-      tx.oncomplete = () => { db.close(); resolve() }
-      tx.onerror = () => reject(tx.error)
-    }
-    request.onerror = () => reject(request.error)
-  })
-  const db = await openDb()
-  expect(db.version).toBe(3)
-  expect((await loadDraft(db, 'v2'))!.overlays).toEqual([...legacy.overlays, stroke])
-  expect((await loadDraft(db, 'v2'))!.pdfBytes).toEqual(legacy.pdfBytes)
-  await saveDraft(db, { ...legacy, overlays: [...legacy.overlays, stroke, image] })
-  expect((await loadDraft(db, 'v2'))!.overlays).toEqual([...legacy.overlays, stroke, image])
 })
 
 test('arbitrary image angles survive draft save, reopen and geometry edits', async () => {
@@ -314,9 +283,9 @@ test('repeated add/delete/save cycles cannot accumulate orphaned image asset row
 
 test('shape drafts retain styles, rotation and independent normalized marker samples', async () => {
   const { createShape } = await import('../../../src/core/shapes')
-  const marker = createShape('marker',[{x:40,y:50},{x:80,y:90}],0,{fill:null,strokeColor:'#ffe34d',strokeWidth:24},'marker')!
+  const marker = createShape('marker',[{x:40,y:50},{x:80,y:90}],'p0',{fill:null,strokeColor:'#ffe34d',strokeWidth:24},'marker')!
   marker.rotation=37.5
-  const shape = createShape('ellipse',[{x:100,y:100},{x:200,y:250}],1,{fill:'#ffffff',strokeColor:null,strokeWidth:3},'ellipse')!
+  const shape = createShape('ellipse',[{x:100,y:100},{x:200,y:250}],'p1',{fill:'#ffffff',strokeColor:null,strokeWidth:3},'ellipse')!
   const db=await openDb(); const expected=structuredClone([marker,shape])
   await saveDraft(db,{...sampleDraft('shapes'),overlays:[marker,shape]})
   marker.markerPoints![0].x=.9

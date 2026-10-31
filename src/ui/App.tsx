@@ -18,7 +18,7 @@ import { inspectNativeForms, needsNativeFormInspection } from '../core/pdf/acroF
 import { useCallback, useEffect, useRef, useState, useSyncExternalStore } from 'react'
 import { addOverlay, clearDrawing, nudgeOverlay, removeOverlay } from '../core/commands'
 import { EditorStore } from '../core/editorStore'
-import { createId, isImage, isMarker, isShape, isStroke, isTextbox, type EditorState } from '../core/model'
+import { createId, isImage, isMarker, isShape, isStroke, isTextbox, overlayPageIndex, type EditorState } from '../core/model'
 import { deleteDraft, DRAFT_SIZE_WARN_BYTES, loadDraft } from '../core/persistence/drafts'
 import { loadPdf, type PdfHandle } from '../core/pdf/loadPdf'
 import { assertFileBudget } from '../core/pdf/documentBudget'
@@ -180,10 +180,10 @@ export default function App() {
     return () => {cancelled = true}
   }, [documentPages, store, draftRef])
   const selectedShape = overlays.find(o=>o.id===selectedId && isShape(o))
-  const shapePage = selectedShape?.pageIndex
+  const shapePage = selectedShape ? overlayPageIndex(store.state, selectedShape) : -1
   useEffect(()=>{
     let cancelled=false
-    if(pdf && shapePage!==undefined) void pdf.getPageSize(shapePage+1).then(size=>{if(!cancelled)setShapePageSize({pdf,pageIndex:shapePage,size})})
+    if(pdf && shapePage>=0) void pdf.getPageSize(shapePage+1).then(size=>{if(!cancelled)setShapePageSize({pdf,pageIndex:shapePage,size})})
     return ()=>{cancelled=true}
   },[pdf,shapePage])
 
@@ -412,6 +412,7 @@ export default function App() {
       }
       const visiblePage = pages.sort((a, b) => visibleArea(b) - visibleArea(a))[0]
       const pageIndex = targetPage ?? Number(visiblePage?.dataset.pageIndex ?? 0)
+      const pageId = store.state.pages![pageIndex].id
       const element = pages.find(page => Number(page.dataset.pageIndex) === pageIndex)
       const rect = element?.getBoundingClientRect()
       const source = await importImage(file)
@@ -423,7 +424,7 @@ export default function App() {
         y: pageSize.height - ((Math.max(rect.top, workspace.top) + Math.min(rect.bottom, workspace.bottom)) / 2 - rect.top) / zoom,
       } : { x: pageSize.width / 2, y: pageSize.height / 2 })
       const image = { ...source, ...initialImageGeometry(source.pixelWidth, source.pixelHeight, pageSize, center),
-        kind: 'image' as const, id: createId(), pageIndex }
+        kind: 'image' as const, id: createId(), pageId }
       store.dispatch(addOverlay(image))
       setTool('select')
       setSelectedId(image.id)
@@ -466,7 +467,7 @@ export default function App() {
         event.preventDefault()
         if (isImage(box) || isShape(box)) {
           const step = event.shiftKey ? 10 : 1
-          const element = workspaceRef.current?.querySelector<HTMLElement>(`[data-page-index="${box.pageIndex}"]`)
+          const element = workspaceRef.current?.querySelector<HTMLElement>(`[data-page-index="${overlayPageIndex(store.state, box)}"]`)
           if (!element) return
           const stepX = event.key === 'ArrowLeft' ? -step : event.key === 'ArrowRight' ? step : 0
           const stepY = event.key === 'ArrowUp' ? step : event.key === 'ArrowDown' ? -step : 0
@@ -505,10 +506,10 @@ export default function App() {
     return () => window.removeEventListener('keydown', onKeyDown)
   }, [sourceTextOpen, store, selectedId, zoom, pageBusy, pageManagerOpen, cropActive, redactionBusy, openingFile, exportBusy, loadingDraftId, pdf])
 
-  const placeStamp = useCallback((pageIndex: number, point: { x: number; y: number }, page: { width: number; height: number }) => {
+  const placeStamp = useCallback((pageId: string, point: { x: number; y: number }, page: { width: number; height: number }) => {
     if (!stamp) return
     try {
-      store.dispatch(addOverlay(stampOverlay(renderStampImage(stamp.lines, stamp.design.color), stamp.design.text, pageIndex, point, page)))
+      store.dispatch(addOverlay(stampOverlay(renderStampImage(stamp.lines, stamp.design.color), stamp.design.text, pageId, point, page)))
     } catch (problem) {
       setError(problem instanceof Error ? problem.message : 'Der Stempel konnte nicht platziert werden.')
     }
@@ -867,7 +868,7 @@ export default function App() {
       )}
       {openingFile && <p role="status" className="hint">PDF wird geöffnet …</p>}
       <div className="workspace" ref={workspaceRef} inert={exportDialogOpen || redactionBusy || openingFile || exportBusy || !!loadingDraftId}>
-        {pdf && searchOpen && !pageManagerOpen && !pageBusy && <SearchWindow pdf={pdf} overlays={overlays} onClose={closeSearch} onHits={onSearchHits} onJump={onSearchJump}/>}
+        {pdf && searchOpen && !pageManagerOpen && !pageBusy && <SearchWindow pdf={pdf} overlays={overlays} pages={documentPages ?? []} onClose={closeSearch} onHits={onSearchHits} onJump={onSearchJump}/>}
         {pdf && pageManagerOpen && originalBytes && <PagesManager nativeWidgets={nativeWidgets} key={activeDraftId} pdf={pdf} store={store} original={originalBytes} busy={pageBusy} onCropActive={setCropActive} initialPage={viewedPageRef.current} onPage={onViewedPage} />}
         {pdf && sourceTextOpen && originalBytes && !pageBusy && <SourceTextPanel key={activeDraftId} store={store} original={originalBytes} initialPage={viewedPageRef.current} onPage={onViewedPage} onClose={() => { returnPageRef.current = viewedPageRef.current; setSourceTextOpen(false) }} onHistory={setSourceHistory} />}
         {pdf && tableOpen && documentPages && <TablePanel key={activeDraftId} pdf={pdf} pages={documentPages} fileName={pdf.fileName} initialPage={viewedPageRef.current} onClose={() => { returnPageRef.current = viewedPageRef.current; setDocumentDialog(null) }} />}
@@ -889,7 +890,7 @@ export default function App() {
               index={index}
               size={documentPages ? pageSize(documentPages[index]) : undefined}
               zoom={zoom}
-              keepMounted={overlays.some(overlay => overlay.id === selectedId && overlay.pageIndex === index) || redactions.some(mark => mark.id === selectedId && mark.pageId === page.id)}
+              keepMounted={overlays.some(overlay => overlay.id === selectedId && overlay.pageId === page.id) || redactions.some(mark => mark.id === selectedId && mark.pageId === page.id)}
             >
             <PageView
               pdf={pdf}
@@ -900,6 +901,7 @@ export default function App() {
               highlightFields={highlightFields}
               onFormError={setError}
               pageIndex={index}
+              pageId={page.id}
               zoom={zoom}
               tool={tool}
               symbol={symbol}

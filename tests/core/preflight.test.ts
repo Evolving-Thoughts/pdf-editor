@@ -18,7 +18,7 @@ async function blank(pages = 1) {
 }
 const save = (doc: PDFDocument) => doc.save({ useObjectStreams: false, updateFieldAppearances: false })
 const find = (findings: StructureFinding[], kind: StructureKind) => findings.find(item => item.kind === kind)!
-const box = (overrides: Partial<Textbox>): Textbox => ({ id: 't', pageIndex: 0, x: 20, y: 200, text: 'Text', font: 'helvetica', fontSize: 12, bold: false, italic: false, underline: false, ...overrides })
+const box = (overrides: Partial<Textbox>): Textbox => ({ id: 't', pageId: 'p0', x: 20, y: 200, text: 'Text', font: 'helvetica', fontSize: 12, bold: false, italic: false, underline: false, ...overrides })
 
 async function withForm() {
   const doc = await blank()
@@ -149,7 +149,7 @@ test('report on an unchanged document: structures stay, and they really are stil
   const report = await preflightExport({ original: bytes, state: { pageSources: [], pages, overlays: [] } })
   expect(report.rebuilt).toBe(false)
   expect(needsConfirmation(report)).toEqual([])
-  const output = await inspectStructures(await exportPageDocument(bytes, [], pages, [box({ text: 'Neu' })]))
+  const output = await inspectStructures(await exportPageDocument(bytes, [], pages, [box({ text: 'Neu', pageId: pages[0].id })]))
   for (const kind of ['forms', 'outline', 'tags', 'attachments'] as const) expect(find(output, kind).state).toBe('present')
 })
 
@@ -197,32 +197,32 @@ test('the check never changes its input', async () => {
 })
 
 test('names the unsupported character, its text and its font', async () => {
-  const issues = await findTextIssues([box({ id: 'a', pageIndex: 3, text: 'Gewicht 5 Ω und Rest' })])
-  expect(issues).toEqual([{ overlayId: 'a', pageIndex: 3, characters: ['Ω'], font: StandardFonts.Helvetica, excerpt: 'Gewicht 5 Ω und Rest' }])
+  const issues = await findTextIssues([box({ id: 'a', pageId: 'p3', text: 'Gewicht 5 Ω und Rest' })], [{ id: 'p0' }, { id: 'p3' }])
+  expect(issues).toEqual([{ overlayId: 'a', pageIndex: 1, characters: ['Ω'], font: StandardFonts.Helvetica, excerpt: 'Gewicht 5 Ω und Rest' }])
 })
 
 test('German text in a standard font and line breaks are fine, and empty boxes do not count', async () => {
-  expect(await findTextIssues([box({ text: 'Größe\nÄpfel Öl Übung ß €' }), box({ id: 'leer', text: '   ' })])).toEqual([])
+  expect(await findTextIssues([box({ text: 'Größe\nÄpfel Öl Übung ß €' }), box({ id: 'leer', text: '   ' })], [])).toEqual([])
 })
 
 test('a bundled font reports characters outside its glyph set instead of drawing an empty box', async () => {
   stubFontFetch()
-  const issues = await findTextIssues([box({ font: 'lato', text: 'Hallo 漢' })])
+  const issues = await findTextIssues([box({ font: 'lato', text: 'Hallo 漢' })], [])
   expect(issues[0]).toMatchObject({ characters: ['漢'] })
 })
 
 test('a bundled font accepts German text', async () => {
   stubFontFetch()
-  expect(await findTextIssues([box({ font: 'noto-sans', text: 'Größe prüfen: Äpfel, Öl, Straße' })])).toEqual([])
+  expect(await findTextIssues([box({ font: 'noto-sans', text: 'Größe prüfen: Äpfel, Öl, Straße' })], [])).toEqual([])
 })
 
 test('symbol boxes report letters that ZapfDingbats cannot show', async () => {
-  const issues = await findTextIssues([box({ font: 'zapfdingbats', text: '✓A' })])
+  const issues = await findTextIssues([box({ font: 'zapfdingbats', text: '✓A' })], [])
   expect(issues[0].characters).toEqual(['A'])
 })
 
 test('each character is listed once', async () => {
-  expect((await findTextIssues([box({ text: 'ΩΩ α Ω' })]))[0].characters).toEqual(['Ω', 'α'])
+  expect((await findTextIssues([box({ text: 'ΩΩ α Ω' })], []))[0].characters).toEqual(['Ω', 'α'])
 })
 
 test('a report does not touch overlays', async () => {
