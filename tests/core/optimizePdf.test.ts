@@ -154,3 +154,26 @@ test('leaves its input bytes alone', async () => {
   await optimizePdfStructure(input)
   expect(input).toEqual(copy)
 })
+
+async function longOutline(count: number, lastTitle = 'Letzter Punkt') {
+  const doc = await PDFDocument.create({ updateMetadata: false }), page = doc.addPage([300, 300])
+  const root = doc.context.nextRef(), items = Array.from({ length: count }, () => doc.context.nextRef())
+  items.forEach((item, index) => doc.context.assign(item, doc.context.obj({
+    Title: PDFString.of(index === count - 1 ? lastTitle : `Punkt ${index}`), Parent: root, Dest: [page.ref, key('Fit')],
+    ...(index ? { Prev: items[index - 1] } : {}), ...(index < count - 1 ? { Next: items[index + 1] } : {}),
+  })))
+  doc.context.assign(root, doc.context.obj({ Type: 'Outlines', First: items[0], Last: items[count - 1], Count: count }))
+  doc.catalog.set(key('Outlines'), root)
+  doc.context.register(doc.context.stream('x'.repeat(50_000)))
+  return doc.save({ useObjectStreams: false })
+}
+
+test('a long bookmark list neither blocks the optimization nor hides a difference', async () => {
+  const result = await optimizePdfStructure(await longOutline(3000))
+  expect(result.outcome).toBe('smaller')
+  const task = getDocument({ data: result.bytes.slice() })
+  expect((await (await task.promise).getOutline())?.length).toBe(3000)
+  await task.destroy()
+  const describe = async (title: string) => describeDocument(await PDFDocument.load(await longOutline(3000, title), { updateMetadata: false }))
+  expect(await describe('Letzter Punkt')).not.toBe(await describe('Anderer Punkt'))
+})

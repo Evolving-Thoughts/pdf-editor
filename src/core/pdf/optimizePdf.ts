@@ -39,7 +39,7 @@ const hasReference = (value: PDFObject): boolean =>
 /** Everything reachable from the document root, in a form independent of object
  * numbers and stream compression. Two documents with one description draw the same. */
 export function describeDocument(doc: PDFDocument): string {
-  const numbers = new Map<PDFRef, number>()
+  const numbers = new Map<PDFRef, number>(), pending: PDFRef[] = []
   const describe = (value: PDFObject | undefined, depth = 0): string => {
     if (value === undefined) return '∅'
     if (depth > 400) throw new Error('Too deeply nested')
@@ -47,9 +47,11 @@ export function describeDocument(doc: PDFDocument): string {
       const target = doc.context.lookup(value)
       // Plain streams are values: two identical copies describe the same as one shared copy.
       if (target instanceof PDFRawStream && ![...target.dict.values()].some(hasReference)) return describe(target, depth + 1)
-      if (numbers.has(value)) return `#${numbers.get(value)}`
-      numbers.set(value, numbers.size)
-      return describe(target, depth + 1)
+      if (!numbers.has(value)) {
+        numbers.set(value, numbers.size)
+        pending.push(value)
+      }
+      return `#${numbers.get(value)}`
     }
     if (value instanceof PDFRawStream) return `stream(${describeDict(value.dict, depth, [FILTER, LENGTH])}|${streamContent(value)})`
     if (value instanceof PDFStream) return `stream(${describeDict(value.dict, depth, [FILTER, LENGTH])})`
@@ -62,7 +64,10 @@ export function describeDocument(doc: PDFDocument): string {
     entries.sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0))
     return `<${entries.map(([name, item]) => `${name} ${describe(item, depth + 1)}`).join(' ')}>`
   }
-  return `${describe(doc.context.trailerInfo.Root as PDFObject)}|${describe(doc.context.trailerInfo.Info as PDFObject | undefined)}`
+  const parts = [describe(doc.context.trailerInfo.Root as PDFObject), describe(doc.context.trailerInfo.Info as PDFObject | undefined)]
+  // One object after the other, so a long chain of bookmarks needs no deep recursion.
+  for (let index = 0; index < pending.length; index++) parts.push(describe(doc.context.lookup(pending[index])))
+  return parts.join('|')
 }
 
 function replaceReferences(value: PDFObject, map: Map<PDFRef, PDFRef>): void {
