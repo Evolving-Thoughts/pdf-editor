@@ -1,6 +1,6 @@
 import { expect, test, vi } from 'vitest'
 import { createShape } from '../../src/core/shapes'
-import { addShape, addTextbox, removeShape, updateShape } from '../../src/core/commands'
+import { addOverlay, removeOverlay, updateOverlay } from '../../src/core/commands'
 import { EditorStore } from '../../src/core/editorStore'
 import { shapeGeometry } from '../../src/core/shapes'
 import type { Textbox } from '../../src/core/model'
@@ -59,15 +59,15 @@ test('shape commands keep a cover before later text and restore its exact order 
     underline: false,
   }
   const store = new EditorStore()
-  store.dispatch(addShape(cover))
-  store.dispatch(addTextbox(text))
+  store.dispatch(addOverlay(cover))
+  store.dispatch(addOverlay(text))
   expect(store.state.overlays.map((o) => o.id)).toEqual(['cover', 'text'])
   const before = shapeGeometry(cover),
     after = { ...before, x: 150, fill: null, strokeColor: '#111111' }
-  store.dispatch(updateShape(cover.id, before, after))
+  store.dispatch(updateOverlay(cover.id, before, after))
   after.x = 999
   expect(store.state.overlays[0]).toMatchObject({ x: 150, fill: null, strokeColor: '#111111' })
-  store.dispatch(removeShape(store.state.overlays[0] as typeof cover))
+  store.dispatch(removeOverlay(store.state.overlays[0] as typeof cover))
   store.undo()
   expect(store.state.overlays.map((o) => o.id)).toEqual(['cover', 'text'])
   store.undo()
@@ -225,7 +225,7 @@ test('local marker and rectangle paths match independently known SVG coordinates
 const style = { fill: null, strokeColor: '#111111', strokeWidth: 3 }
 
 test('rapid shape nudges merge but changing the action starts a new undo step', async () => {
-  const { nudgeShape } = await import('../../src/core/commands')
+  const { nudgeOverlay } = await import('../../src/core/commands')
   const store = new EditorStore()
   const shape = createShape(
     'rect',
@@ -237,13 +237,13 @@ test('rapid shape nudges merge but changing the action starts a new undo step', 
     style,
     'nudge',
   )!
-  store.dispatch(addShape(shape))
+  store.dispatch(addOverlay(shape))
   const a = shapeGeometry(shape),
     b = { ...a, x: 101 },
     c = { ...a, x: 102 }
-  store.dispatch(nudgeShape(shape.id, a, b, 'move'))
-  store.dispatch(nudgeShape(shape.id, b, c, 'move'))
-  store.dispatch(nudgeShape(shape.id, c, { ...c, rotation: 1 }, 'rotate'))
+  store.dispatch(nudgeOverlay(shape.id, a, b, 'move'))
+  store.dispatch(nudgeOverlay(shape.id, b, c, 'move'))
+  store.dispatch(nudgeOverlay(shape.id, c, { ...c, rotation: 1 }, 'rotate'))
   store.undo()
   expect(store.state.overlays[0]).toMatchObject({ x: 102, rotation: 0 })
   store.undo()
@@ -335,7 +335,7 @@ test.each(['nw', 'ne', 'sw', 'se'] as const)(
 )
 
 test('a pause or a different element breaks shape keyboard undo grouping', async () => {
-  const { nudgeShape } = await import('../../src/core/commands')
+  const { nudgeOverlay } = await import('../../src/core/commands')
   const clock = vi.spyOn(Date, 'now').mockReturnValue(1000)
   try {
     const store = new EditorStore(),
@@ -354,10 +354,10 @@ test('a pause or a different element breaks shape keyboard undo grouping', async
     const a = shapeGeometry(first),
       b = { ...a, x: 101 },
       c = { ...a, x: 102 }
-    store.dispatch(nudgeShape(first.id, a, b))
+    store.dispatch(nudgeOverlay(first.id, a, b))
     clock.mockReturnValue(2101)
-    store.dispatch(nudgeShape(first.id, b, c))
-    store.dispatch(nudgeShape(second.id, a, b))
+    store.dispatch(nudgeOverlay(first.id, b, c))
+    store.dispatch(nudgeOverlay(second.id, a, b))
     store.undo()
     expect((store.state.overlays[1] as typeof first).x).toBe(100)
     store.undo()

@@ -1,12 +1,6 @@
 import 'fake-indexeddb/auto'
 import { expect, test } from 'vitest'
-import {
-  addImage,
-  addShape,
-  addStroke,
-  addTextbox,
-  updateTextbox,
-} from '../../src/core/commands'
+import { addOverlay, updateOverlay } from '../../src/core/commands'
 import { EditorStore } from '../../src/core/editorStore'
 import {
   formKey,
@@ -74,10 +68,10 @@ test('40 mixed actions undo and redo every exact state, including page order, fo
       italic: false,
       underline: false,
     }
-    execute(addTextbox(box))
-    execute(updateTextbox(box.id, { text: 'before' }, { text: `after${i}` }))
+    execute(addOverlay(box))
+    execute(updateOverlay(box.id, { text: 'before' }, { text: `after${i}` }))
     execute(
-      addStroke({
+      addOverlay({
         id: `stroke${i}`,
         pageIndex: 1,
         points: [
@@ -89,7 +83,7 @@ test('40 mixed actions undo and redo every exact state, including page order, fo
       }),
     )
     execute(
-      addShape({
+      addOverlay({
         id: `shape${i}`,
         kind: 'shape',
         shape: 'rect',
@@ -105,7 +99,7 @@ test('40 mixed actions undo and redo every exact state, including page order, fo
       }),
     )
     execute(
-      addImage({
+      addOverlay({
         id: `image${i}`,
         kind: 'image',
         pageIndex: 2,

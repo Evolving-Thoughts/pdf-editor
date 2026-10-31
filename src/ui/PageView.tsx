@@ -5,7 +5,7 @@ import type { NativeWidget } from '../core/forms'
 import { NativeFormLayer } from './NativeFormLayer'
 import { useEffect, useRef, useState, type ReactNode, type Dispatch, type SetStateAction } from 'react'
 import { resolvedOverlayClips } from '../core/overlayClipping'
-import { addShape, addStroke, addTextbox, replaceOverlays } from '../core/commands'
+import { addOverlay, replaceOverlays } from '../core/commands'
 import { eraseStrokes, strokeToSvgPath } from '../core/drawing'
 import type { EditorStore } from '../core/editorStore'
 import { createId, isImage, isShape, isStroke, type Overlay, type StrokePoint, type Textbox } from '../core/model'
@@ -186,7 +186,7 @@ export function PageView({
       italic: false,
       underline: false,
     }
-    store.dispatch(addTextbox(box))
+    store.dispatch(addOverlay(box))
     onSelect(box.id)
   }
 
@@ -230,7 +230,7 @@ export function PageView({
     setPreview(null)
     if (event.currentTarget.hasPointerCapture(event.pointerId)) event.currentTarget.releasePointerCapture(event.pointerId)
     if (gesture.tool === 'pen') {
-      store.dispatch(addStroke({
+      store.dispatch(addOverlay({
         id: createId(), pageIndex, points: gesture.points, color: gesture.color, width: gesture.width,
       }))
     } else if (gesture.tool === 'redact') {
@@ -238,7 +238,7 @@ export function PageView({
       if(mark){store.dispatch(replaceRedactions(store.state,[...(store.state.redactions??[]),mark]));onSelect(mark.id)}
     } else if (isShapeTool(gesture.tool)) {
       const shape = createShape(gesture.tool, gesture.points, pageIndex, gesture.style)
-      if (shape) { store.dispatch(addShape(shape)); onSelect(shape.id) }
+      if (shape) { store.dispatch(addOverlay(shape)); onSelect(shape.id) }
     } else {
       const before = store.state.overlays
       const after = eraseStrokes(before, pageIndex, gesture.points, gesture.radius)

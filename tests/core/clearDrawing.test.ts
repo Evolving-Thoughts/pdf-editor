@@ -1,5 +1,5 @@
 import { expect, test } from 'vitest'
-import { addStroke, clearDrawing, CommandStack, updateTextbox } from '../../src/core/commands'
+import { addOverlay, clearDrawing, CommandStack, updateOverlay } from '../../src/core/commands'
 import { isStroke, type EditorState, type Stroke, type Textbox } from '../../src/core/model'
 
 const text: Textbox = {
@@ -27,10 +27,10 @@ test('clearing a drawing removes strokes on every page, preserving texts and sym
 test('clear is a single history step and does not corrupt neighboring drawing or text commands', () => {
   const state: EditorState = { overlays: [{ ...text }] }
   const stack = new CommandStack(state)
-  stack.execute(addStroke(stroke))
-  stack.execute(addStroke(second))
+  stack.execute(addOverlay(stroke))
+  stack.execute(addOverlay(second))
   stack.execute(clearDrawing(state.overlays))
-  stack.execute(updateTextbox('text', { text: 'Keep me' }, { text: 'Edited' }))
+  stack.execute(updateOverlay('text', { text: 'Keep me' }, { text: 'Edited' }))
   stack.undo()
   expect(state.overlays).toEqual([text])
   stack.undo()

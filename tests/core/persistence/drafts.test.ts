@@ -285,13 +285,13 @@ test('autosave prunes deleted image assets only in this draft, retaining referen
 })
 
 import { EditorStore } from '../../../src/core/editorStore'
-import { removeImage } from '../../../src/core/commands'
+import { removeOverlay } from '../../../src/core/commands'
 test('undo after a persisted deletion rewrites the pruned source and restores exact image geometry', async () => {
   const db = await openDb(), store = new EditorStore()
   const original = { ...image, rotation: 37.5 }
   store.restore({ overlays: [original] })
   await saveDraft(db, { ...sampleDraft('undo'), overlays: store.state.overlays })
-  store.dispatch(removeImage(original))
+  store.dispatch(removeOverlay(original))
   await saveDraft(db, { ...sampleDraft('undo'), overlays: store.state.overlays })
   expect(await imageAssetKeys(db)).toEqual([])
   store.undo()

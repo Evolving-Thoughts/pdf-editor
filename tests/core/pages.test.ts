@@ -14,7 +14,7 @@ import {
   A4_HEIGHT,
   type DocumentPage,
 } from '../../src/core/pages'
-import { addTextbox } from '../../src/core/commands'
+import { addOverlay } from '../../src/core/commands'
 import type { Textbox } from '../../src/core/model'
 const pages = (): DocumentPage[] =>
   ['a', 'b', 'c'].map((id) => ({
@@ -45,7 +45,7 @@ test('reordering keeps overlays attached to their page across undo and later tex
   store.dispatch(movePage(store.state, 'a', 2))
   expect(store.state.pages?.map((p) => p.id)).toEqual(['b', 'c', 'a'])
   expect(store.state.overlays.map((o) => o.pageIndex)).toEqual([2, 1])
-  store.dispatch(addTextbox(textbox('new', 2)))
+  store.dispatch(addOverlay(textbox('new', 2)))
   store.undo()
   store.undo()
   expect(store.state.pages?.map((p) => p.id)).toEqual(['a', 'b', 'c'])

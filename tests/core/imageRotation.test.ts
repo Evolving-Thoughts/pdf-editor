@@ -40,7 +40,7 @@ test('numeric size retains the exact requested local dimension with rotated prop
 
 import { imageBounds, imageGeometry, normalizeAngle, rotateImage } from '../../src/core/images/geometry'
 import { EditorStore } from '../../src/core/editorStore'
-import { addImage, updateImage } from '../../src/core/commands'
+import { addOverlay, updateOverlay } from '../../src/core/commands'
 import type { ImageOverlay } from '../../src/core/model'
 
 test('arbitrary clockwise angles preserve the center, local sizes and normalize/snap as specified', () => {
@@ -82,9 +82,9 @@ test('arbitrary-angle resize stops at page edges instead of clipping or moving i
 test('rotation commands undo/redo without losing source or older zero-angle image state', () => {
   const image: ImageOverlay = { kind: 'image', id: 'old', pageIndex: 0, x: 100, y: 100, width: 200, height: 100,
     lockAspectRatio: true, name: 'logo.png', dataUrl: 'data:image/png;base64,AQ==', pixelWidth: 200, pixelHeight: 100 }
-  const store = new EditorStore(); store.dispatch(addImage(image))
+  const store = new EditorStore(); store.dispatch(addOverlay(image))
   const before = imageGeometry(image)
-  store.dispatch(updateImage(image.id, before, rotateImage(before, 37.5, page)))
+  store.dispatch(updateOverlay(image.id, before, rotateImage(before, 37.5, page)))
   expect(store.state.overlays[0]).toMatchObject({ rotation: 37.5, dataUrl: image.dataUrl })
   store.undo(); expect(store.state.overlays[0]).toEqual(image)
   store.redo(); expect(store.state.overlays[0]).toMatchObject({ rotation: 37.5 })

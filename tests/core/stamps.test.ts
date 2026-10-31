@@ -1,6 +1,6 @@
 import { expect, test } from 'vitest'
 import { PDFDocument } from 'pdf-lib'
-import { addImage, CommandStack } from '../../src/core/commands'
+import { addOverlay, CommandStack } from '../../src/core/commands'
 import { exportPdf } from '../../src/core/pdf/exportPdf'
 import { customStamp, formatStampDate, loadCustomStamps, saveCustomStamps, STAMP_TEMPLATES, stampGeometry, stampLines, stampOverlay, todayValue } from '../../src/core/stamps'
 import type { EditorState } from '../../src/core/model'
@@ -84,8 +84,8 @@ test('a click at the edge stays on the page, also on tiny pages', () => {
 test('placing twice gives two independent overlays, undone one at a time', () => {
   const state: EditorState = { overlays: [] }, stack = new CommandStack(state)
   const page = { width: 600, height: 800 }
-  stack.execute(addImage(stampOverlay(picture, 'ERLEDIGT', 0, { x: 100, y: 100 }, page)))
-  stack.execute(addImage(stampOverlay(picture, 'ERLEDIGT', 1, { x: 300, y: 300 }, page)))
+  stack.execute(addOverlay(stampOverlay(picture, 'ERLEDIGT', 0, { x: 100, y: 100 }, page)))
+  stack.execute(addOverlay(stampOverlay(picture, 'ERLEDIGT', 1, { x: 300, y: 300 }, page)))
   expect(new Set(state.overlays.map(overlay => overlay.id)).size).toBe(2)
   stack.undo()
   expect(state.overlays).toHaveLength(1)

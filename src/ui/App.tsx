@@ -16,7 +16,7 @@ import { RedactionBar } from './RedactionBar'
 import type { NativeWidget } from '../core/forms'
 import { inspectNativeForms, needsNativeFormInspection } from '../core/pdf/acroForm'
 import { useCallback, useEffect, useRef, useState, useSyncExternalStore } from 'react'
-import { addImage, clearDrawing, nudgeImage, nudgeShape, nudgeTextbox, removeImage, removeShape, removeTextbox } from '../core/commands'
+import { addOverlay, clearDrawing, nudgeOverlay, removeOverlay } from '../core/commands'
 import { EditorStore } from '../core/editorStore'
 import { createId, isImage, isMarker, isShape, isStroke, isTextbox, type EditorState } from '../core/model'
 import { deleteDraft, DRAFT_SIZE_WARN_BYTES, loadDraft } from '../core/persistence/drafts'
@@ -424,7 +424,7 @@ export default function App() {
       } : { x: pageSize.width / 2, y: pageSize.height / 2 })
       const image = { ...source, ...initialImageGeometry(source.pixelWidth, source.pixelHeight, pageSize, center),
         kind: 'image' as const, id: createId(), pageIndex }
-      store.dispatch(addImage(image))
+      store.dispatch(addOverlay(image))
       setTool('select')
       setSelectedId(image.id)
     } catch (problem) {
@@ -455,7 +455,7 @@ export default function App() {
         const box = store.state.overlays.find((o) => o.id === selectedId)
         if (box && (isTextbox(box) || isImage(box) || isShape(box))) {
           event.preventDefault()
-          store.dispatch(isImage(box) ? removeImage(box) : isShape(box) ? removeShape(box) : removeTextbox(box))
+          store.dispatch(removeOverlay(box))
           setSelectedId(null)
         }
         return
@@ -473,10 +473,10 @@ export default function App() {
           const page = {width:element.clientWidth/zoom,height:element.clientHeight/zoom}
           if(isImage(box)) {
             const before=imageGeometry(box), next=moveImage(before,stepX,stepY,page)
-            if(next.x!==box.x || next.y!==box.y) store.dispatch(nudgeImage(box.id,before,next))
+            if(next.x!==box.x || next.y!==box.y) store.dispatch(nudgeOverlay(box.id,before,next))
           } else {
             const before=shapeGeometry(box), next=moveShape(before,stepX,stepY,page)
-            if(next.x!==box.x || next.y!==box.y) store.dispatch(nudgeShape(box.id,before,next))
+            if(next.x!==box.x || next.y!==box.y) store.dispatch(nudgeOverlay(box.id,before,next))
           }
           return
         }
@@ -484,7 +484,7 @@ export default function App() {
         const dx = event.key === 'ArrowLeft' ? -step : event.key === 'ArrowRight' ? step : 0
         const dy = event.key === 'ArrowUp' ? step : event.key === 'ArrowDown' ? -step : 0
         store.dispatch(
-          nudgeTextbox(box.id, { x: box.x, y: box.y }, { x: Math.max(0, box.x + dx), y: Math.max(0, box.y + dy) }),
+          nudgeOverlay(box.id, { x: box.x, y: box.y }, { x: Math.max(0, box.x + dx), y: Math.max(0, box.y + dy) }),
         )
         return
       }
@@ -508,7 +508,7 @@ export default function App() {
   const placeStamp = useCallback((pageIndex: number, point: { x: number; y: number }, page: { width: number; height: number }) => {
     if (!stamp) return
     try {
-      store.dispatch(addImage(stampOverlay(renderStampImage(stamp.lines, stamp.design.color), stamp.design.text, pageIndex, point, page)))
+      store.dispatch(addOverlay(stampOverlay(renderStampImage(stamp.lines, stamp.design.color), stamp.design.text, pageIndex, point, page)))
     } catch (problem) {
       setError(problem instanceof Error ? problem.message : 'Der Stempel konnte nicht platziert werden.')
     }

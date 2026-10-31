@@ -16,7 +16,7 @@ test('an image is not a textbox and clearing drawing preserves images', () => {
   expect(store.state.overlays.map(o => o.id)).toEqual(['image', 'stroke'])
 })
 
-import { addImage, removeImage, updateImage } from '../../src/core/commands'
+import { addOverlay, removeOverlay, updateOverlay } from '../../src/core/commands'
 import { eraseStrokes } from '../../src/core/drawing'
 import { cloneOverlay, isImage, type ImageOverlay } from '../../src/core/model'
 import { imageGeometry, initialImageGeometry, moveImage, resizeImage, setImageSize, mmToPts, ptsToMm } from '../../src/core/images/geometry'
@@ -26,20 +26,20 @@ const page = { width: 600, height: 800 }
 test('image command snapshots, source and stacking order survive delete, undo and redo', () => {
   const store = new EditorStore()
   const input = { ...logo }
-  store.dispatch(addImage(input))
+  store.dispatch(addOverlay(input))
   input.x = 999
   expect(store.state.overlays[0]).toEqual(logo)
   const before = imageGeometry(logo)
   const after = { ...before, x: 70, width: 200, height: 100 }
-  store.dispatch(updateImage(logo.id, before, after))
+  store.dispatch(updateOverlay(logo.id, before, after))
   after.x = 888
   expect(store.state.overlays[0]).toMatchObject({ x: 70, width: 200, dataUrl: logo.dataUrl })
   store.undo()
   expect(store.state.overlays[0]).toEqual(logo)
   store.redo()
   const moved = store.state.overlays[0] as ImageOverlay
-  store.dispatch(addImage({ ...logo, id: 'second' }))
-  store.dispatch(removeImage(moved))
+  store.dispatch(addOverlay({ ...logo, id: 'second' }))
+  store.dispatch(removeOverlay(moved))
   store.undo()
   expect(store.state.overlays.map(o => o.id)).toEqual(['image', 'second'])
   expect(store.state.overlays[0]).toEqual(moved)

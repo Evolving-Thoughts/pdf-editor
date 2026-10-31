@@ -1,5 +1,5 @@
 import { expect, test, vi } from 'vitest'
-import { addTextbox, updateTextbox } from '../../src/core/commands'
+import { addOverlay, updateOverlay } from '../../src/core/commands'
 import { EditorStore } from '../../src/core/editorStore'
 import type { Textbox } from '../../src/core/model'
 
@@ -9,7 +9,7 @@ function makeBox(id: string, text = ''): Textbox {
 
 test('preview mutates state and notifies without recording history', () => {
   const store = new EditorStore()
-  store.dispatch(addTextbox(makeBox('a', 'Hallo')))
+  store.dispatch(addOverlay(makeBox('a', 'Hallo')))
   const notify = vi.fn()
   store.subscribe(notify)
 
@@ -27,7 +27,7 @@ test('preview mutates state and notifies without recording history', () => {
 
 test('reset clears overlays and history', () => {
   const store = new EditorStore()
-  store.dispatch(addTextbox(makeBox('a')))
+  store.dispatch(addOverlay(makeBox('a')))
   expect(store.canUndo).toBe(true)
 
   store.reset()
@@ -36,7 +36,7 @@ test('reset clears overlays and history', () => {
   expect(store.canRedo).toBe(false)
 
   // The store keeps working after a reset (fresh stack on the same state).
-  store.dispatch(addTextbox(makeBox('b')))
+  store.dispatch(addOverlay(makeBox('b')))
   expect(store.state.overlays.map((o) => o.id)).toEqual(['b'])
   store.undo()
   expect(store.state.overlays).toHaveLength(0)
@@ -51,7 +51,7 @@ test('undo/redo notify only when the stack actually changes', () => {
   store.redo()
   expect(notify).not.toHaveBeenCalled()
 
-  store.dispatch(addTextbox(makeBox('a')))
+  store.dispatch(addOverlay(makeBox('a')))
   notify.mockClear()
   store.undo()
   store.redo()
@@ -63,17 +63,17 @@ test('subscribers can unsubscribe and dispatch updates via commands', () => {
   const notify = vi.fn()
   const unsubscribe = store.subscribe(notify)
 
-  store.dispatch(addTextbox(makeBox('a')))
+  store.dispatch(addOverlay(makeBox('a')))
   expect(notify).toHaveBeenCalledTimes(1)
   unsubscribe()
-  store.dispatch(updateTextbox('a', { text: '' }, { text: 'neu' }))
+  store.dispatch(updateOverlay('a', { text: '' }, { text: 'neu' }))
   expect(notify).toHaveBeenCalledTimes(1)
   expect(store.state.overlays[0].text).toBe('neu')
 })
 
 test('restore replaces overlays and clears history (loading a draft)', () => {
   const store = new EditorStore()
-  store.dispatch(addTextbox(makeBox('old')))
+  store.dispatch(addOverlay(makeBox('old')))
   const notify = vi.fn()
   store.subscribe(notify)
 

@@ -1,7 +1,7 @@
 import './fonts.css'
 import { fontSupportsItalic } from '../core/fonts'
 import { useCallback, useEffect, useLayoutEffect, useRef, useState, type Dispatch, type SetStateAction } from 'react'
-import { moveTextbox, removeTextbox, updateTextbox } from '../core/commands'
+import { updateOverlay, removeOverlay } from '../core/commands'
 import type { EditorStore } from '../core/editorStore'
 import { isTextbox, patchOverlay, type OverlayFont, type Textbox } from '../core/model'
 import { TEXT_LINE_HEIGHT as LINE_HEIGHT } from '../core/textLayout'
@@ -252,7 +252,7 @@ export function TextboxView({ box, zoom, pageHeightPts, selected, tool, store, o
       // …but only when focus truly leaves the box: blurring into the
       // minibar (e.g. to set the font size first) must keep the empty box.
       if (removeIfEmpty) {
-        store.dispatch(removeTextbox(box))
+        store.dispatch(removeOverlay(box))
         // A new textbox may already own the selection when its autofocus blurs us.
         // Cleanup can only clear our own selection, never the newer one.
         onSelect(current => current === box.id ? null : current)
@@ -260,7 +260,7 @@ export function TextboxView({ box, zoom, pageHeightPts, selected, tool, store, o
       return
     }
     if (draft === beforeEdit.current) return
-    store.dispatch(updateTextbox(box.id, { text: beforeEdit.current }, { text: draft }))
+    store.dispatch(updateOverlay(box.id, { text: beforeEdit.current }, { text: draft }))
   }
 
   // Selection tool: a surface over the text makes the whole frame draggable;
@@ -287,7 +287,7 @@ export function TextboxView({ box, zoom, pageHeightPts, selected, tool, store, o
     if (!drag) return
     const current = store.state.overlays.find((o) => o.id === box.id)
     if (!current || !isTextbox(current) || (current.x === drag.x && current.y === drag.y)) return
-    store.dispatch(moveTextbox(box.id, { x: drag.x, y: drag.y }, { x: current.x, y: current.y }))
+    store.dispatch(updateOverlay(box.id, { x: drag.x, y: drag.y }, { x: current.x, y: current.y }))
   }
 
   const left = box.x * zoom
@@ -324,7 +324,7 @@ export function TextboxView({ box, zoom, pageHeightPts, selected, tool, store, o
               value={box.font}
               onChange={(event) => {
                 const font = event.target.value as OverlayFont
-                store.dispatch(updateTextbox(box.id, { font: box.font, italic: box.italic }, { font, italic: box.italic && fontSupportsItalic(font) }))
+                store.dispatch(updateOverlay(box.id, { font: box.font, italic: box.italic }, { font, italic: box.italic && fontSupportsItalic(font) }))
                 // Continue typing at the existing caret after committing the font choice.
                 textareaRef.current?.focus({ preventScroll: true })
               }}
@@ -345,7 +345,7 @@ export function TextboxView({ box, zoom, pageHeightPts, selected, tool, store, o
                 aria-label="Fett"
                 aria-pressed={box.bold}
                 title="Fett"
-                onClick={() => store.dispatch(updateTextbox(box.id, { bold: box.bold }, { bold: !box.bold }))}
+                onClick={() => store.dispatch(updateOverlay(box.id, { bold: box.bold }, { bold: !box.bold }))}
               >
                 <b>B</b>
               </button>
@@ -356,7 +356,7 @@ export function TextboxView({ box, zoom, pageHeightPts, selected, tool, store, o
                 aria-pressed={box.italic && fontSupportsItalic(box.font)}
                 disabled={!fontSupportsItalic(box.font)}
                 title={fontSupportsItalic(box.font) ? 'Kursiv' : 'Caveat bietet keinen kursiven Schnitt'}
-                onClick={() => store.dispatch(updateTextbox(box.id, { italic: box.italic }, { italic: !box.italic }))}
+                onClick={() => store.dispatch(updateOverlay(box.id, { italic: box.italic }, { italic: !box.italic }))}
               >
                 <i>I</i>
               </button>
@@ -367,7 +367,7 @@ export function TextboxView({ box, zoom, pageHeightPts, selected, tool, store, o
                 aria-pressed={box.underline}
                 title="Unterstrichen"
                 onClick={() =>
-                  store.dispatch(updateTextbox(box.id, { underline: box.underline }, { underline: !box.underline }))
+                  store.dispatch(updateOverlay(box.id, { underline: box.underline }, { underline: !box.underline }))
                 }
               >
                 <u>U</u>
@@ -378,7 +378,7 @@ export function TextboxView({ box, zoom, pageHeightPts, selected, tool, store, o
             value={box.fontSize}
             onCommit={(size) => {
               if (size !== box.fontSize) {
-                store.dispatch(updateTextbox(box.id, { fontSize: box.fontSize }, { fontSize: size }))
+                store.dispatch(updateOverlay(box.id, { fontSize: box.fontSize }, { fontSize: size }))
               }
             }}
           />
@@ -386,7 +386,7 @@ export function TextboxView({ box, zoom, pageHeightPts, selected, tool, store, o
             type="button"
             aria-label="Textbox löschen"
             onClick={() => {
-              store.dispatch(removeTextbox(box))
+              store.dispatch(removeOverlay(box))
               onSelect(null)
             }}
           >

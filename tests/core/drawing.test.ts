@@ -1,5 +1,5 @@
 import { expect, test } from 'vitest'
-import { addStroke, CommandStack, replaceOverlays } from '../../src/core/commands'
+import { addOverlay, CommandStack, replaceOverlays } from '../../src/core/commands'
 import { eraseStrokes, strokeToSvgPath } from '../../src/core/drawing'
 import { isStroke, type EditorState, type Stroke, type Textbox } from '../../src/core/model'
 
@@ -31,7 +31,7 @@ test('a pen stroke is one undoable command', () => {
   const state: EditorState = { overlays: [] }
   const stack = new CommandStack(state)
 
-  stack.execute(addStroke(makeStroke()))
+  stack.execute(addOverlay(makeStroke()))
   expect(state.overlays).toHaveLength(1)
 
   stack.undo()
@@ -149,7 +149,7 @@ test('stored and command snapshots do not share mutable stroke points', async ()
   source.points[0].x = 999
   expect(store.state.overlays.filter(isStroke)[0].points[0].x).toBe(0)
   const fresh = makeStroke('new')
-  store.dispatch(addStroke(fresh))
+  store.dispatch(addOverlay(fresh))
   fresh.points[0].x = 999
   store.undo()
   store.redo()
