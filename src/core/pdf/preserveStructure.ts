@@ -56,9 +56,16 @@ function destinationOf(doc: PDFDocument, item: PDFDict): PDFArray | undefined {
   return undefined
 }
 
-interface OutlineItem { title: PDFObject; target?: { page: PDFRef; rest: PDFObject[] }; flags?: PDFObject; color?: PDFObject; children: OutlineItem[] }
+/** The one action carried over: others run code or lead to places this file may no longer have. */
+function webLink(doc: PDFDocument, item: PDFDict): PDFObject | undefined {
+  const action = lookup(doc, item.get(key('A')))
+  return action instanceof PDFDict && action.get(key('S'))?.toString() === '/URI' ? lookup(doc, action.get(key('URI'))) : undefined
+}
 
-/** Reads the tree; items pointing at a removed page go, their children move up. */
+interface OutlineItem { title: PDFObject; target?: { page: PDFRef; rest: PDFObject[] }; link?: PDFObject; flags?: PDFObject; color?: PDFObject; children: OutlineItem[] }
+
+/** Reads the tree; items pointing at a removed page go, their children move up. An item
+ * without a target is a heading: it stays unless everything below it is gone. */
 function readOutline(doc: PDFDocument, first: PDFObject | undefined, pages: ReadonlyMap<PDFRef, PDFRef>, seen: Set<PDFObject>): OutlineItem[] {
   const items: OutlineItem[] = []
   for (let current = lookup(doc, first); current instanceof PDFDict && !seen.has(current) && seen.size < MAX_OUTLINE_ITEMS; current = lookup(doc, current.get(key('Next')))) {
@@ -68,8 +75,10 @@ function readOutline(doc: PDFDocument, first: PDFObject | undefined, pages: Read
     const page = destination?.get(0)
     const mapped = page instanceof PDFRef ? pages.get(page) : undefined
     const title = lookup(doc, current.get(key('Title')))
-    if (mapped && destination && title) {
-      items.push({ title, children, flags: lookup(doc, current.get(key('F'))), color: lookup(doc, current.get(key('C'))), target: { page: mapped, rest: destination.asArray().slice(1).filter(value => !(value instanceof PDFRef)) } })
+    const link = destination ? undefined : webLink(doc, current)
+    const target = mapped && destination ? { page: mapped, rest: destination.asArray().slice(1).filter(value => !(value instanceof PDFRef)) } : undefined
+    if (title && (target || (!destination && (link || children.length || !current.has(key('First')))))) {
+      items.push({ title, children, target, link, flags: lookup(doc, current.get(key('F'))), color: lookup(doc, current.get(key('C'))) })
     } else items.push(...children)
   }
   return items
@@ -83,6 +92,7 @@ function writeOutline(output: PDFDocument, items: OutlineItem[], parent: PDFRef)
     if (index > 0) entries.Prev = refs[index - 1]
     if (index < items.length - 1) entries.Next = refs[index + 1]
     if (item.target) entries.Dest = output.context.obj([item.target.page, ...item.target.rest.map(value => value.clone(output.context))])
+    if (item.link) entries.A = output.context.obj({ S: 'URI', URI: item.link.clone(output.context) })
     if (item.flags) entries.F = item.flags.clone(output.context)
     if (item.color) entries.C = item.color.clone(output.context)
     if (item.children.length) {

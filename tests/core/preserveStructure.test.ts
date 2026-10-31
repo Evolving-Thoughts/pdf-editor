@@ -193,3 +193,47 @@ test('the check and the export agree for a redacted document', async () => {
   const report = await preflightExport({ original: bytes, sources: [], pages, overlays: [], secure: true })
   expect(report.assessments.filter(item => item.decision === 'confirm').map(item => item.kind).sort()).toEqual(['outline', 'tags'])
 })
+
+/** A heading without a target, a web link, a script and a plain entry on page 2. */
+async function mixedOutline() {
+  const doc = await PDFDocument.create({ updateMetadata: false })
+  const pages = [doc.addPage([300, 300]), doc.addPage([300, 300])]
+  const root = doc.context.nextRef(), [heading, child, emptied, gone, link, script, plain] = Array.from({ length: 7 }, () => doc.context.nextRef())
+  const entry = (ref: typeof root, title: string, parent: typeof root, extra: object) =>
+    doc.context.assign(ref, doc.context.obj({ Title: PDFString.of(title), Parent: parent, ...extra }))
+  entry(heading, 'Kapitel', root, { First: child, Last: child, Count: 1, Next: emptied })
+  entry(child, 'Abschnitt', heading, { Dest: [pages[0].ref, key('Fit')] })
+  entry(emptied, 'Nur Seite 2', root, { First: gone, Last: gone, Count: 1, Prev: heading, Next: link })
+  entry(gone, 'Auf Seite 2', emptied, { Dest: [pages[1].ref, key('Fit')] })
+  entry(link, 'Webseite', root, { A: { S: 'URI', URI: PDFString.of('https://example.org/') }, Prev: emptied, Next: script })
+  entry(script, 'Skript', root, { A: { S: 'JavaScript', JS: PDFString.of('app.alert(1)') }, Prev: link, Next: plain })
+  entry(plain, 'Normal', root, { Dest: [pages[0].ref, key('Fit')], Prev: script })
+  doc.context.assign(root, doc.context.obj({ Type: 'Outlines', First: heading, Last: plain, Count: 5 }))
+  doc.catalog.set(key('Outlines'), root)
+  return doc.save({ useObjectStreams: false })
+}
+const outlineText = async (bytes: Uint8Array) => {
+  const task = getDocument({ data: bytes.slice() })
+  const items = await (await task.promise).getOutline()
+  const result = JSON.stringify(items)
+  await task.destroy()
+  return result
+}
+
+test('reordering keeps entries without a target and web links, removed pages take theirs along', async () => {
+  const bytes = await mixedOutline(), pages = await inspectPages(bytes, 'mixed')
+  const reordered = await outlineText(await composePages(bytes, [], [...pages].reverse()))
+  for (const title of ['Kapitel', 'Abschnitt', 'Nur Seite 2', 'Webseite', 'Normal']) expect(reordered).toContain(`"title":"${title}"`)
+  expect(reordered).toContain('https://example.org/')
+  const shortened = await outlineText(await composePages(bytes, [], [pages[0]]))
+  for (const title of ['Kapitel', 'Abschnitt', 'Webseite', 'Normal']) expect(shortened).toContain(`"title":"${title}"`)
+  expect(shortened).not.toContain('Nur Seite 2')
+  expect(shortened).not.toContain('Auf Seite 2')
+})
+
+test('a script behind a bookmark is not carried into a rebuilt document', async () => {
+  const bytes = await mixedOutline(), pages = await inspectPages(bytes, 'mixed')
+  const raw = new TextDecoder('latin1').decode(await composePages(bytes, [], [...pages].reverse()))
+  expect(raw).not.toContain('JavaScript')
+  expect(raw).not.toContain('app.alert')
+})
