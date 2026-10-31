@@ -1,6 +1,6 @@
 import { expect, test, vi } from 'vitest'
 import { PDFDocument } from 'pdf-lib'
-import { runExport, type ExportRequest } from '../../src/core/pdf/exportPipeline'
+import { extractPages, runExport, type ExportRequest } from '../../src/core/pdf/exportPipeline'
 import { inspectPages } from '../../src/core/pdf/pageOperations'
 
 const titled = async () => {
@@ -31,4 +31,17 @@ test('the single check still decides both ways: a metadata edit and a rebuilt or
   expect(await title(edited.original)).toBe('Neu')
   const rebuilt = await runExport(request(original, [...pages].reverse()), encodeImage)
   expect(await title(rebuilt.original)).toBe('Bericht')
+})
+
+test('pages saved on their own follow the decision about document info', async () => {
+  const doc = await PDFDocument.create({ updateMetadata: false })
+  doc.addPage([200, 300])
+  doc.addPage([200, 300])
+  doc.setAuthor('Mira Muster')
+  const original = await doc.save(), pages = await inspectPages(original, 'original'), ids = pages.map(page => page.id)
+  const author = async (bytes: Uint8Array) => (await PDFDocument.load(bytes, { updateMetadata: false })).getAuthor()
+  const metadata = { fields: { author: null } }
+  expect(await author(await extractPages(request(original, pages, { metadata }), ids))).toBeUndefined()
+  expect(await author(await extractPages(request(original, pages), ids))).toBe('Mira Muster')
+  expect(await author(await extractPages(request(original, pages), [ids[0]]))).toBeUndefined()
 })

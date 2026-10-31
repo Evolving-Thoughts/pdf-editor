@@ -49,6 +49,12 @@ async function finalMetadata(request: ExportRequest, output: Uint8Array, rebuilt
   return hasMetadataEdit(merged) ? (await applyMetadata(output, merged)).bytes : output
 }
 
+/** Chosen pages as their own file. Info is not carried over, but a decision about it holds here too. */
+export async function extractPages(request: Omit<ExportRequest, 'size'>, ids: readonly string[]): Promise<Uint8Array> {
+  const bytes = await exportPageDocument(request.original, request.sources, request.pages, request.overlays, ids, request.formValues, request.secure)
+  return hasMetadataEdit(request.metadata) ? (await applyMetadata(bytes, request.metadata!)).bytes : bytes
+}
+
 export async function runExport(
   request: ExportRequest,
   encodeImage: ImageEncoder,

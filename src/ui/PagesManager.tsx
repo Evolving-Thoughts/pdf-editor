@@ -17,7 +17,8 @@ import {
   rotatePages,
   type CropMargins,
 } from '../core/pages'
-import { exportPageDocument, importPageFile, preparePages, textPageBytes } from '../core/pdf/pageOperations'
+import { importPageFile, preparePages, textPageBytes } from '../core/pdf/pageOperations'
+import { extractPages } from '../core/pdf/exportPipeline'
 import { loadPdf, type PdfHandle } from '../core/pdf/loadPdf'
 import { normalizeA4 } from '../core/pdf/normalizeA4'
 import { PageView } from './PageView'
@@ -237,14 +238,15 @@ export function PagesManager({ nativeWidgets = [], pdf, store, original, busy, o
     setWorking(true)
     setProblem(null)
     try {
-      const bytes = await exportPageDocument(
-        new Uint8Array(original),
-        store.state.pageSources ?? [],
+      const bytes = await extractPages({
+        original: new Uint8Array(original),
+        sources: store.state.pageSources ?? [],
         pages,
-        store.state.overlays,
-        ids,
-        store.state.formValues, store.state.redactionApplied||pages.some(page=>page.redacted),
-      )
+        overlays: store.state.overlays,
+        formValues: store.state.formValues,
+        secure: !!store.state.redactionApplied || pages.some(page => page.redacted),
+        metadata: store.state.metadata,
+      }, ids)
       if (token !== request.current) return
       downloadPdf(bytes, ids.length === 1 ? `Seite-${pages.findIndex(p => p.id === ids[0]) + 1}.pdf` : `Auswahl-${ids.length}-Seiten.pdf`)
       setMessage(ids.length === 1 ? 'Die ausgewählte Seite wurde als eigenes PDF gespeichert.' : `${ids.length} ausgewählte Seiten wurden als eigenes PDF gespeichert.`)
