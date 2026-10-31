@@ -34,9 +34,8 @@ export type ExportProgress =
 
 /** A rebuilt document starts empty, so its info is carried over. After a redaction
  * nothing is carried: that info may describe what was blacked out. */
-async function finalMetadata(request: ExportRequest, output: Uint8Array): Promise<Uint8Array> {
+async function finalMetadata(request: ExportRequest, output: Uint8Array, rebuilt: boolean): Promise<Uint8Array> {
   const edit = request.metadata
-  const rebuilt = !await keepsPageTree(request.original, request.pages, request.secure)
   if (!rebuilt && !hasMetadataEdit(edit)) return output
   const fields: MetadataEdit['fields'] = {}
   if (rebuilt && !request.secure) {
@@ -58,9 +57,10 @@ export async function runExport(
   const { signal, onProgress } = options
   checkExportAbort(signal)
   onProgress?.({ stage: 'compose' })
-  const exported = await exportPageDocument(request.original, request.sources, request.pages, request.overlays, undefined, request.formValues, request.secure)
+  const keptTree = await keepsPageTree(request.original, request.pages, request.secure)
+  const exported = await exportPageDocument(request.original, request.sources, request.pages, request.overlays, undefined, request.formValues, request.secure, keptTree)
   checkExportAbort(signal)
-  const original = await finalMetadata(request, exported)
+  const original = await finalMetadata(request, exported, !keptTree)
   checkExportAbort(signal)
   if (request.size.mode === 'structure') {
     onProgress?.({ stage: 'structure' })

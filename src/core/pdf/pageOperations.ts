@@ -77,8 +77,9 @@ export async function composePages(
   pages: DocumentPage[],
   formValues: FormValues = {},
   secure = pages.some(page => page.redacted),
+  keptTree?: boolean,
 ): Promise<Uint8Array> {
-  return writeOcrLayers(await composeBase(original, sources, pages, formValues, secure), pages)
+  return writeOcrLayers(await composeBase(original, sources, pages, formValues, secure, keptTree), pages)
 }
 
 async function composeBase(
@@ -87,11 +88,12 @@ async function composeBase(
   pages: DocumentPage[],
   formValues: FormValues,
   secure: boolean,
+  keptTree?: boolean,
 ): Promise<Uint8Array> {
   if (!pages.length) throw new Error('Ein PDF muss mindestens eine Seite enthalten.')
   // An ordinary overlay edit must not rebuild the page tree: preserve forms,
   // metadata, outlines and other document-level structures when no page changed.
-  if (await keepsPageTree(original, pages, secure)) {
+  if (keptTree ?? await keepsPageTree(original, pages, secure)) {
     if (!Object.keys(formValues).length) return original.slice()
     const doc = await PDFDocument.load(original, { updateMetadata: false })
     if (doc.catalog.lookupMaybe(PDFName.of('AcroForm'), PDFDict)?.has(PDFName.of('XFA'))) throw new Error('XFA-Formulare werden noch nicht unterstützt.')
@@ -235,6 +237,7 @@ export async function exportPageDocument(
   pageId?: string | readonly string[],
   formValues: FormValues = {},
   secure = pages.some(page => page.redacted),
+  keptTree?: boolean,
 ) {
   if (pageId !== undefined) {
     const ids = new Set(typeof pageId === 'string' ? [pageId] : pageId), available = new Set(pages.map(page => page.id))
@@ -246,5 +249,5 @@ export async function exportPageDocument(
       .map(overlay => ({ ...cloneOverlay(overlay), pageIndex: indices.get(pages[overlay.pageIndex].id)! }))
     return exportPdf(await composePages(original, sources, chosen, formValues, secure), mapped)
   }
-  return exportPdf(await composePages(original, sources, pages, formValues, secure), overlays)
+  return exportPdf(await composePages(original, sources, pages, formValues, secure, keptTree), overlays)
 }
