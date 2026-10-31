@@ -1,22 +1,20 @@
-import { useCallback, useRef, useState, type RefObject } from 'react'
+import { useCallback, useRef } from 'react'
 import { checkExportAbort } from '../core/pdf/compressPdf'
 import { encryptInWorker, exportInWorker, preflightInWorker } from '../core/pdf/exportJob'
 import type { ExportProgress, ExportSize } from '../core/pdf/exportPipeline'
 import { downloadPdf } from '../core/pdf/downloadPdf'
+import type { DocumentSession } from '../core/documentSession'
 import type { EditorStore } from '../core/editorStore'
 import { snapshotDocument } from '../core/pdf/documentOutput'
 import type { PreparedExport } from './ExportDialog'
-import type { ActiveDraft } from './useDraftPersistence'
 
 /** The export dialog's three steps. Each runs in a worker and refuses an outdated state. */
-export function useExportFlow(store: EditorStore, draftRef: RefObject<ActiveDraft | null>, documentIntentRef: RefObject<number>, pageBusy: boolean) {
-  const [exportBusy, setExportBusy] = useState(false)
+export function useExportFlow(store: EditorStore, session: DocumentSession, pageBusy: boolean) {
   // The export must describe the same editing state as the check the user read.
   const checkedVersionRef = useRef<number | null>(null)
-  const exportRunningRef = useRef(false)
 
   const checkExport = useCallback(async (signal: AbortSignal) => {
-    const draft = draftRef.current
+    const draft = session.draft
     if (!draft || !store.state.pages?.length) throw new Error('Der Export ist gerade nicht verfügbar.')
     const version = store.getVersion()
     try {
@@ -25,15 +23,13 @@ export function useExportFlow(store: EditorStore, draftRef: RefObject<ActiveDraf
       // A failed check is confirmed in the dialog, and that answer is about this state too.
       checkedVersionRef.current = version
     }
-  }, [store, draftRef])
+  }, [store, session])
   const prepareExport = useCallback(
     async (size: ExportSize, signal: AbortSignal, onProgress: (progress: ExportProgress) => void): Promise<PreparedExport> => {
-      const draft = draftRef.current
-      if (!draft || !store.state.pages?.length || pageBusy || exportRunningRef.current)
+      const draft = session.draft
+      if (!draft || !store.state.pages?.length || pageBusy || session.running('exporting'))
         throw new Error('Der Export ist gerade nicht verfügbar.')
-      exportRunningRef.current = true
-      setExportBusy(true)
-      const version = store.getVersion(), intent = documentIntentRef.current
+      const task = session.begin('exporting')
       try {
         checkExportAbort(signal)
         if (store.state.redactions?.length)
@@ -43,28 +39,25 @@ export function useExportFlow(store: EditorStore, draftRef: RefObject<ActiveDraf
         const result = await exportInWorker({ ...snapshotDocument(new Uint8Array(draft.bytes), store.state), size }, { signal, onProgress })
         checkExportAbort(signal)
         // An outdated result is thrown away, whatever changed in the meantime.
-        if (draftRef.current !== draft || documentIntentRef.current !== intent || store.getVersion() !== version)
+        if (!task.sameState())
           throw new Error('Das Dokument hat sich während des Exports geändert. Bitte erneut exportieren.')
         return { name: draft.name, ...result }
       } finally {
-        exportRunningRef.current = false
-        setExportBusy(false)
+        task.finish()
       }
-    }, [store, pageBusy, draftRef, documentIntentRef],
+    }, [store, pageBusy, session],
   )
   const downloadExport = useCallback(async (bytes: Uint8Array, name: string, password: string | undefined, signal: AbortSignal) => {
-    exportRunningRef.current = true
-    setExportBusy(true)
+    const task = session.begin('exporting')
     try {
       checkExportAbort(signal)
       const output = password === undefined ? bytes : await encryptInWorker(bytes, password, { signal })
       checkExportAbort(signal)
       downloadPdf(output, name)
     } finally {
-      exportRunningRef.current = false
-      setExportBusy(false)
+      task.finish()
     }
-  }, [])
+  }, [session])
 
-  return { exportBusy, checkExport, prepareExport, downloadExport }
+  return { checkExport, prepareExport, downloadExport }
 }

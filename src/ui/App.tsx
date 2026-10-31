@@ -1,12 +1,12 @@
 import { SourceTextPanel } from './SourceTextPanel'
 import type { SourceHistory } from './SourceTextPanel'
 import { ExportDialog } from './ExportDialog'
-import { useDraftPersistence, type ActiveDraft } from './useDraftPersistence'
+import { useDraftPersistence } from './useDraftPersistence'
 import { useExportFlow } from './useExportFlow'
 import { ToolbarTools } from './ToolbarTools'
 import { inspectStructures, type TextIssue } from '../core/pdf/preflight'
 import { setMetadataCommand } from '../core/pdf/metadata'
-import { preparePdf, unlockPdf, PasswordRequiredError, IncorrectPasswordError } from '../core/pdf/unlockPdf'
+import { IncorrectPasswordError } from '../core/pdf/unlockPdf'
 import { PasswordDialog, type PasswordRequest } from './PasswordDialog'
 import { SearchWindow } from './SearchWindow'
 import type { SearchHit } from '../core/search'
@@ -18,10 +18,10 @@ import { inspectNativeForms, needsNativeFormInspection } from '../core/pdf/acroF
 import { useCallback, useEffect, useRef, useState, useSyncExternalStore } from 'react'
 import { addOverlay, clearDrawing, nudgeOverlay, removeOverlay } from '../core/commands'
 import { EditorStore } from '../core/editorStore'
-import { createId, isImage, isMarker, isShape, isStroke, isTextbox, overlayPageIndex, type EditorState } from '../core/model'
+import { DocumentSession } from '../core/documentSession'
+import { createId, isImage, isMarker, isShape, isStroke, isTextbox, overlayPageIndex } from '../core/model'
 import { deleteDraft, DRAFT_SIZE_WARN_BYTES, loadDraft } from '../core/persistence/drafts'
 import { loadPdf, type PdfHandle } from '../core/pdf/loadPdf'
-import { assertFileBudget } from '../core/pdf/documentBudget'
 import { importImage } from '../core/images/importImage'
 import { imageGeometry, initialImageGeometry, moveImage } from '../core/images/geometry'
 import { shapeGeometry, moveShape, type ShapeStyle } from '../core/shapes'
@@ -38,8 +38,6 @@ import { DrawingToolbar } from './DrawingToolbar'
 import { PageView } from './PageView'
 import { VirtualPage } from './VirtualPage'
 import { PagesManager } from './PagesManager'
-import { inspectPages } from '../core/pdf/pageOperations'
-import { previewDocument, snapshotDocument } from '../core/pdf/documentOutput'
 import { pageSize, type DocumentPage } from '../core/pages'
 import type { ChosenStamp } from './StampPicker'
 import { renderStampImage } from './stampImage'
@@ -59,13 +57,11 @@ export default function App() {
     hits: SearchHit[]
     active: number
   }>({ hits: [], active: 0 })
-  const [openingFile, setOpeningFile] = useState(false)
   const [passwordRequest, setPasswordRequest] = useState<PasswordRequest | null>(
     null,
   )
   const passwordPending = useRef<((password: string | null) => void) | null>(null)
-  const passwordEpoch = useRef(0)
-  const openingIntent = useRef(0)
+  const [passwordEpoch, setPasswordEpoch] = useState(0)
   const searchButtonRef = useRef<HTMLButtonElement>(null)
   const onSearchHits = useCallback(
     (hits: SearchHit[], active: number) => setSearchResult({ hits, active }),
@@ -77,15 +73,10 @@ export default function App() {
   }, [])
 
   const [redactionFill,setRedactionFill]=useState<Redaction['fill']>('black')
-  const [redactionBusy,setRedactionBusy]=useState(false)
   const [highlightFields, setHighlightFields] = useState(true)
   const [formInfo, setFormInfo] = useState<{ pages: DocumentPage[]; widgets: NativeWidget[]; unsupported: string[] } | null>(null)
   const [pageManagerOpen, setPageManagerOpen] = useState(false)
-  const [renderedPages, setRenderedPages] = useState<DocumentPage[] | undefined>(undefined)
-  const [originalBytes, setOriginalBytes] = useState<ArrayBuffer | null>(null)
   const [cropActive, setCropActive] = useState(false)
-  const pdfPagesRef = useRef<DocumentPage[] | undefined>(undefined)
-  const [pdf, setPdf] = useState<PdfHandle | null>(null)
   const [zoom, setZoom] = useState(1)
   const [tool, setTool] = useState<Tool>('select')
   const [symbol, setSymbol] = useState('✓')
@@ -98,44 +89,39 @@ export default function App() {
   const [eraserRadius, setEraserRadius] = useState(8)
   const [error, setError] = useState<string | null>(null)
   const [selectedId, setSelectedId] = useState<string | null>(null)
-  const [sizeWarning, setSizeWarning] = useState(false)
-  const [activeDraftId, setActiveDraftId] = useState<string | null>(null)
-  const [loadingDraftId, setLoadingDraftId] = useState<string | null>(null)
-  // Current handle in a ref so destroy() runs outside React state updaters
-  // (updaters must stay pure; StrictMode double-invokes them in dev).
-  const pdfRef = useRef<PdfHandle | null>(null)
   const fileInputRef = useRef<HTMLInputElement>(null)
   const imageInputRef = useRef<HTMLInputElement>(null)
-  const documentIntentRef = useRef(0)
   const imageImportRef = useRef(0)
   const workspaceRef = useRef<HTMLDivElement>(null)
-  // Page shown in the normal view before switching to the page manager or the
-  // text correction (and the page shown there): both views open at that page,
-  // and the normal view returns to it.
-  const viewedPageRef = useRef(0), returnPageRef = useRef<number | null>(null)
+  // Editor state lives in the framework-free store (ADR-002/ADR-004);
+  // React re-renders on store notifications.
+  const [store] = useState(() => new EditorStore())
+  useSyncExternalStore(store.subscribe, store.getVersion)
+  const [session] = useState(() => new DocumentSession(store, loadPdf))
+  useSyncExternalStore(session.subscribe, session.getVersion)
+  const returnPageRef = useRef<number | null>(null)
   const visiblePageIndex = useCallback(() => {
     const scroller = workspaceRef.current?.querySelector<HTMLElement>('.pages')
-    if (!scroller) return viewedPageRef.current
+    if (!scroller) return session.viewedPage
     const view = scroller.getBoundingClientRect()
-    let best = viewedPageRef.current, area = 0
+    let best = session.viewedPage, area = 0
     for (const page of scroller.querySelectorAll<HTMLElement>('.page[data-page-index]')) {
       const rect = page.getBoundingClientRect()
       const visible = Math.max(0, Math.min(rect.bottom, view.bottom) - Math.max(rect.top, view.top)) * Math.max(0, Math.min(rect.right, view.right) - Math.max(rect.left, view.left))
       if (visible > area) { area = visible; best = Number(page.dataset.pageIndex) }
     }
     return best
-  }, [])
-  const onViewedPage = useCallback((index: number) => { viewedPageRef.current = index }, [])
+  }, [session])
+  const onViewedPage = useCallback((index: number) => { session.rememberPage(index) }, [session])
 
-  // Editor state lives in the framework-free store (ADR-002/ADR-004);
-  // React re-renders on store notifications.
-  const [store] = useState(() => new EditorStore())
-  useSyncExternalStore(store.subscribe, store.getVersion)
+  const { pdf, activeDraftId, loadingDraftId, busy, pagesStale: pageBusy, original: originalBytes } = session
+  const redactionBusy = session.running('redacting'), openingFile = session.running('opening')
+  const sizeWarning = (originalBytes?.byteLength ?? 0) > DRAFT_SIZE_WARN_BYTES
   const {
-    drafts, setDrafts, draftsError, setDraftsError, manualSave, setManualSave, manualSaveRequestRef, inputEpochRef,
-    draftRef, saveTimerRef, persistenceGenerationRef, ensureDraftDb, queuePersistence, reportDraftProblem,
+    drafts, setDrafts, draftsError, setDraftsError, manualSave, setManualSave, inputEpochRef,
+    pauseSaving, ensureDraftDb, queuePersistence, reportDraftProblem,
     persistActiveDraft, onManualSave, onDraftsMenuOpen,
-  } = useDraftPersistence(store)
+  } = useDraftPersistence(store, session)
   const redactions = store.state.redactions ?? []
   const overlays = store.state.overlays
   const documentPages = store.state.pages
@@ -157,28 +143,11 @@ export default function App() {
     })
     return () => { cancelled = true }
   }, [originalBytes])
-  const pageBusy = !!documentPages?.length && renderedPages !== documentPages
   const tableOpen = documentDialog === 'table'
-  const { exportBusy, checkExport, prepareExport, downloadExport } = useExportFlow(store, draftRef, documentIntentRef, pageBusy)
-  useEffect(() => {
-    if (!documentPages || !draftRef.current || pdfPagesRef.current === documentPages) return
-    const draft = draftRef.current
-    let cancelled = false
-    if (!documentPages.length) {
-      pdfPagesRef.current = documentPages
-      return
-    }
-    void previewDocument(snapshotDocument(new Uint8Array(draft.bytes), store.state)).then(bytes => loadPdf(draft.name, bytes)).then(next => {
-      if (cancelled || draftRef.current !== draft) { void next.destroy(); return }
-      const old = pdfRef.current
-      pdfRef.current = next; pdfPagesRef.current = documentPages
-      setPdf(next); setRenderedPages(documentPages)
-      void old?.destroy()
-    }).catch(problem => {
-      if (!cancelled) {setError(problem instanceof Error ? problem.message : 'Die Seiten konnten nicht aktualisiert werden.')}
-    })
-    return () => {cancelled = true}
-  }, [documentPages, store, draftRef])
+  const { checkExport, prepareExport, downloadExport } = useExportFlow(store, session, pageBusy)
+  useEffect(() => session.refreshPages(problem => {
+    setError(problem instanceof Error ? problem.message : 'Die Seiten konnten nicht aktualisiert werden.')
+  }), [documentPages, session])
   const selectedShape = overlays.find(o=>o.id===selectedId && isShape(o))
   const shapePage = selectedShape ? overlayPageIndex(store.state, selectedShape) : -1
   useEffect(()=>{
@@ -187,105 +156,35 @@ export default function App() {
     return ()=>{cancelled=true}
   },[pdf,shapePage])
 
-  const replaceDocument = useCallback(
-    (next: PdfHandle, draft: ActiveDraft, state: EditorState) => {
-      documentIntentRef.current += 1
-      persistenceGenerationRef.current += 1
-      if (saveTimerRef.current) {
-        clearTimeout(saveTimerRef.current)
-        saveTimerRef.current = null
-      }
-      const previous = pdfRef.current
-      pdfRef.current = next
-      draftRef.current = draft
-      setSourceTextOpen(false)
-      setActiveDraftId(draft.id)
-      setManualSave(null)
-      manualSaveRequestRef.current = null
-      setSearchOpen(false)
-      setSelectedId(null)
-      setTool('select')
-      setRedactionFill('black')
-      setPageManagerOpen(false)
-      setCropActive(false)
-      setDocumentDialog(null)
-      setOriginalBytes(draft.bytes)
-      setSizeWarning(draft.bytes.byteLength > DRAFT_SIZE_WARN_BYTES)
-      setPdf(next)
-      store.restore(state)
-      pdfPagesRef.current = store.state.pages
-      setRenderedPages(store.state.pages)
-      void previous?.destroy()
-    },
-    [store, draftRef, manualSaveRequestRef, persistenceGenerationRef, saveTimerRef, setManualSave],
-  )
+  const resetView = useCallback(() => {
+    setSourceTextOpen(false)
+    setSearchOpen(false)
+    setSelectedId(null)
+    setTool('select')
+    setRedactionFill('black')
+    setPageManagerOpen(false)
+    setCropActive(false)
+    setDocumentDialog(null)
+  }, [])
+
+  const askPassword = useCallback((fileName: string, problem: string | null) => new Promise<string | null>((resolve) => {
+    const finish = (value: string | null) => {
+      passwordPending.current = null
+      setPasswordRequest(null)
+      resolve(value)
+    }
+    passwordPending.current = finish
+    setPasswordEpoch(epoch => epoch + 1)
+    setPasswordRequest({ fileName, error: problem, resolve: finish })
+  }), [])
 
   const onOpenFile = useCallback(
     async (file: File) => {
-      const intent = ++documentIntentRef.current
-      openingIntent.current = intent
       passwordPending.current?.(null)
       setError(null)
-      setOpeningFile(true)
       try {
-        // Do not discard the current document if its last save failed.
-        await persistActiveDraft()
-        assertFileBudget(file.size)
-        const input = new Uint8Array(await file.arrayBuffer())
-        if (documentIntentRef.current !== intent) return
-        let bytes: Uint8Array
-        try {
-          bytes = await preparePdf(input)
-        } catch (problem) {
-          if (!(problem instanceof PasswordRequiredError)) throw problem
-          let message: string | null = null
-          for (;;) {
-            if (documentIntentRef.current !== intent) return
-            const password = await new Promise<string | null>((resolve) => {
-              const finish = (value: string | null) => {
-                passwordPending.current = null
-                setPasswordRequest(null)
-                resolve(value)
-              }
-              passwordPending.current = finish
-              passwordEpoch.current++
-              setPasswordRequest({
-                fileName: file.name,
-                error: message,
-                resolve: finish,
-              })
-            })
-            if (password === null || documentIntentRef.current !== intent) return
-            try {
-              bytes = await unlockPdf(input, password)
-              break
-            } catch (error) {
-              if (error instanceof IncorrectPasswordError) {
-                message = error.message
-                continue
-              }
-              throw error
-            }
-          }
-        }
-        if (documentIntentRef.current !== intent) return
-        const buffer = bytes.slice().buffer as ArrayBuffer
-        const pages = await inspectPages(bytes, file.name)
-        const next = await loadPdf(file.name, bytes)
-        if (documentIntentRef.current !== intent) {
-          void next.destroy()
-          return
-        }
-        replaceDocument(
-          next,
-          {
-            id: createId(),
-            name: file.name,
-            createdAt: Date.now(),
-            bytes: buffer,
-          },
-          { overlays: [], pages },
-        )
+        if (!await session.openFile(file, { save: persistActiveDraft, beforeReplace: pauseSaving, askPassword })) return
+        resetView()
         void persistActiveDraft().catch((problem) =>
           reportDraftProblem(
             problem,
@@ -293,54 +192,38 @@ export default function App() {
           ),
         )
       } catch (problem) {
-        if (documentIntentRef.current === intent)
-          setError(
-            problem instanceof IncorrectPasswordError
-              ? problem.message
-              : `„${file.name}“ konnte nicht geöffnet werden. ${problem instanceof Error && /entschlüsselt|Möglich sind/.test(problem.message) ? problem.message : 'Datei beschädigt, kein gültiges PDF oder bisheriger Entwurf nicht speicherbar. Der bisherige Stand bleibt geöffnet.'}`,
-          )
-      } finally {
-        if (openingIntent.current === intent) setOpeningFile(false)
+        setError(
+          problem instanceof IncorrectPasswordError
+            ? problem.message
+            : `„${file.name}“ konnte nicht geöffnet werden. ${problem instanceof Error && /entschlüsselt|Möglich sind/.test(problem.message) ? problem.message : 'Datei beschädigt, kein gültiges PDF oder bisheriger Entwurf nicht speicherbar. Der bisherige Stand bleibt geöffnet.'}`,
+        )
       }
     },
-    [persistActiveDraft, replaceDocument, reportDraftProblem],
+    [askPassword, pauseSaving, persistActiveDraft, reportDraftProblem, resetView, session],
   )
 
   const onOpenDraft = useCallback(
     async (id: string) => {
-      if (loadingDraftId) return
-      const intent=++documentIntentRef.current
+      if (session.loadingDraftId) return
       setError(null)
-      setLoadingDraftId(id)
       try {
-        await persistActiveDraft().catch((problem) =>
-          reportDraftProblem(problem, 'Der bisherige Entwurf konnte nicht gespeichert werden.'),
-        )
-        const record = await queuePersistence(async () => loadDraft(await ensureDraftDb(), id))
-        if(documentIntentRef.current!==intent)return
-        if (!record) {
+        const outcome = await session.openDraft(id, {
+          save: () => persistActiveDraft().catch((problem) =>
+            reportDraftProblem(problem, 'Der bisherige Entwurf konnte nicht gespeichert werden.'),
+          ),
+          read: () => queuePersistence(async () => loadDraft(await ensureDraftDb(), id)),
+          beforeReplace: pauseSaving,
+        })
+        if (outcome === 'opened') resetView()
+        if (outcome === 'missing') {
           setDrafts((current) => current.filter((draft) => draft.id !== id))
           setError('Dieser Entwurf ist nicht mehr vorhanden.')
-          return
         }
-        const bytes = record.pdfBytes.slice(0)
-        const pages = record.pages ?? await inspectPages(new Uint8Array(bytes), record.name)
-        const sources = record.pageSources ?? []
-        const base = pages.length ? await previewDocument({ original: new Uint8Array(bytes), state: { ...record, pages, pageSources: sources } }) : new Uint8Array(bytes)
-        const next = await loadPdf(record.name, base)
-        if(documentIntentRef.current!==intent){void next.destroy();return}
-        replaceDocument(
-          next,
-          { id: record.id, name: record.name, createdAt: record.createdAt, bytes },
-          { ...record, pages, pageSources: sources },
-        )
       } catch {
-        if(documentIntentRef.current===intent)setError('Der Entwurf konnte nicht geöffnet werden.')
-      } finally {
-        setLoadingDraftId(null)
+        setError('Der Entwurf konnte nicht geöffnet werden.')
       }
     },
-    [ensureDraftDb, loadingDraftId, persistActiveDraft, queuePersistence, replaceDocument, reportDraftProblem, setDrafts],
+    [ensureDraftDb, pauseSaving, persistActiveDraft, queuePersistence, reportDraftProblem, resetView, session, setDrafts],
   )
 
   const onDeleteDraft = useCallback(
@@ -349,38 +232,22 @@ export default function App() {
       if (draft && !window.confirm(`Entwurf „${draft.name}“ löschen? Das kann nicht rückgängig gemacht werden.`)) {
         return
       }
-      const isActive = id === activeDraftId
-      const pausedDraft = isActive ? draftRef.current : null
-      if (isActive) {
-        documentIntentRef.current += 1
-        // Pause auto-save while deleting; on failure it resumes and persists
-        // any edits made during the confirmation/DB round trip.
-        persistenceGenerationRef.current += 1
-        setManualSave(null)
-        manualSaveRequestRef.current = null
-        if (saveTimerRef.current) {
-          clearTimeout(saveTimerRef.current)
-          saveTimerRef.current = null
-        }
-        draftRef.current = null
-      }
+      const isActive = id === session.activeDraftId
+      // Pause auto-save while deleting; on failure it resumes and persists
+      // any edits made during the confirmation/DB round trip.
+      const pausedDraft = isActive ? session.suspend() : null
+      if (isActive) pauseSaving()
       try {
         await queuePersistence(async () => deleteDraft(await ensureDraftDb(), id))
         setDrafts((current) => current.filter((item) => item.id !== id))
         setDraftsError(null)
         if (isActive) {
-          const previous = pdfRef.current
-          pdfRef.current = null
-          setPdf(null)
-          setActiveDraftId(null)
           setSelectedId(null)
-          setSizeWarning(false)
-          store.reset()
-          void previous?.destroy()
+          session.close()
         }
       } catch (problem) {
         if (pausedDraft) {
-          draftRef.current = pausedDraft
+          session.resume(pausedDraft)
           void persistActiveDraft().catch((saveProblem) =>
             reportDraftProblem(saveProblem, 'Der Entwurf konnte nicht gespeichert werden.'),
           )
@@ -388,18 +255,18 @@ export default function App() {
         reportDraftProblem(problem, 'Der Entwurf konnte nicht gelöscht werden.')
       }
     },
-    [activeDraftId, draftRef, drafts, ensureDraftDb, manualSaveRequestRef, persistActiveDraft, persistenceGenerationRef, queuePersistence, reportDraftProblem, saveTimerRef, setDrafts, setDraftsError, setManualSave, store],
+    [drafts, ensureDraftDb, pauseSaving, persistActiveDraft, queuePersistence, reportDraftProblem, session, setDrafts, setDraftsError],
   )
 
   // Release the worker document when the app unmounts.
-  useEffect(() => () => { documentIntentRef.current += 1; passwordPending.current?.(null); void pdfRef.current?.destroy() }, [])
+  useEffect(() => () => { passwordPending.current?.(null); session.dispose() }, [session])
 
   const onImportImage = useCallback(async (file: File, targetPage?: number, dropPoint?: { x: number; y: number }) => {
-    const handle = pdfRef.current
+    const handle = session.pdf
     if (!handle) return
-    const intent = documentIntentRef.current
+    const watch = session.watch()
     const request = ++imageImportRef.current
-    const stillCurrent = () => pdfRef.current === handle && documentIntentRef.current === intent && imageImportRef.current === request
+    const stillCurrent = () => session.pdf === handle && watch.sameDocument() && imageImportRef.current === request
     setError(null)
     try {
       // Pick the page with the largest visible area, not always page one.
@@ -431,7 +298,7 @@ export default function App() {
     } catch (problem) {
       if (stillCurrent()) setError(problem instanceof Error ? problem.message : 'Das Bild konnte nicht geladen werden.')
     }
-  }, [store, zoom])
+  }, [session, store, zoom])
 
   // Global shortcuts. While a textarea is focused, it keeps its own editing
   // keys (Escape blurs there, see TextboxView).
@@ -439,7 +306,7 @@ export default function App() {
     const onKeyDown = (event: KeyboardEvent) => {
       const target = event.target as HTMLElement
       if (target.closest('dialog')) return
-      if (sourceTextOpen || loadingDraftId || exportBusy || openingFile || redactionBusy || pageBusy || (pageManagerOpen && cropActive)) return
+      if (sourceTextOpen || busy || pageBusy || (pageManagerOpen && cropActive)) return
       if (pdf && (event.ctrlKey || event.metaKey) && event.key.toLowerCase()==='f') {
         event.preventDefault();setPageManagerOpen(false);setSelectedId(null);setSearchOpen(true);return
       }
@@ -504,7 +371,7 @@ export default function App() {
     }
     window.addEventListener('keydown', onKeyDown)
     return () => window.removeEventListener('keydown', onKeyDown)
-  }, [sourceTextOpen, store, selectedId, zoom, pageBusy, pageManagerOpen, cropActive, redactionBusy, openingFile, exportBusy, loadingDraftId, pdf])
+  }, [sourceTextOpen, store, selectedId, zoom, pageBusy, pageManagerOpen, cropActive, busy, pdf])
 
   const placeStamp = useCallback((pageId: string, point: { x: number; y: number }, page: { width: number; height: number }) => {
     if (!stamp) return
@@ -577,16 +444,17 @@ export default function App() {
     requestAnimationFrame(() => workspaceRef.current?.querySelector(`.page[data-page-index="${issue.pageIndex}"]`)?.scrollIntoView({ block: 'center' }))
   }, [])
   const onApplyRedactions = async () => {
-    const draft=draftRef.current,version=store.getVersion(),intent=documentIntentRef.current
+    const draft=session.draft
     if(!draft||redactionBusy||pageBusy||!store.state.redactions?.length)return
-    setError(null);setRedactionBusy(true)
+    setError(null)
+    const task=session.begin('redacting')
     try {
       const prepared=await prepareRedaction(new Uint8Array(draft.bytes),store.state)
-      if(store.getVersion()!==version||draftRef.current!==draft||documentIntentRef.current!==intent)throw new Error('Der Stand hat sich geändert. Schwärzung bitte erneut prüfen und anwenden.')
+      if(!task.sameState())throw new Error('Der Stand hat sich geändert. Schwärzung bitte erneut prüfen und anwenden.')
       store.dispatch(applyRedactionResult(store.state,prepared.source,prepared.replacements,prepared.newText))
       setSelectedId(prepared.newText[0]?.id??null);setTool(prepared.newText.length?'text':'select')
-    } catch(problem) {if(draftRef.current===draft)setError(problem instanceof Error?problem.message:'Die Schwärzung konnte nicht angewendet werden. Der Stand bleibt unverändert.')}
-    finally {setRedactionBusy(false)}
+    } catch(problem) {if(session.draft===draft)setError(problem instanceof Error?problem.message:'Die Schwärzung konnte nicht angewendet werden. Der Stand bleibt unverändert.')}
+    finally {task.finish()}
   }
 
   const visibleSave = manualSave?.draftId === activeDraftId &&
@@ -605,7 +473,7 @@ export default function App() {
         const pdfFiles=files.filter(file=>file.type==='application/pdf'||/\.pdf$/i.test(file.name))
         if(!pdfFiles.length && (event.target as HTMLElement).closest('.page') && files.every(file=>/^image\/(png|jpeg)$/.test(file.type)))return
         event.preventDefault();event.stopPropagation()
-        if(loadingDraftId||exportBusy||openingFile||redactionBusy||pageBusy||cropActive)return
+        if(busy||pageBusy||cropActive)return
         if(files.length!==1||pdfFiles.length!==1){setError('Bitte genau eine PDF-Datei zum Öffnen ziehen. Bilder auf einer Dokumentseite ablegen.');return}
         void onOpenFile(pdfFiles[0])
       }} onChange={event => {
@@ -617,10 +485,7 @@ export default function App() {
         className="toolbar"
         inert={
           exportDialogOpen ||
-          redactionBusy ||
-          openingFile ||
-          exportBusy ||
-          !!loadingDraftId
+          busy
         }
       >
         <input
@@ -698,8 +563,8 @@ export default function App() {
                   items={[
                     { label: 'Dokumentinfo …', onSelect: () => setDocumentDialog('info') },
                     { label: 'Seitenzahlen, Kopf- und Fußzeile …', onSelect: () => { setSourceTextOpen(false); setDocumentDialog('labels') } },
-                    { label: 'Text erkennen (OCR) …', onSelect: () => { if (!sourceTextOpen) viewedPageRef.current = visiblePageIndex(); setSourceTextOpen(false); setDocumentDialog('ocr') } },
-                    { label: 'Tabelle exportieren …', onSelect: () => { if (!sourceTextOpen) viewedPageRef.current = visiblePageIndex(); setSourceTextOpen(false); setSearchOpen(false); setSelectedId(null); setTool('select'); setDocumentDialog('table') } },
+                    { label: 'Text erkennen (OCR) …', onSelect: () => { if (!sourceTextOpen) session.rememberPage(visiblePageIndex()); setSourceTextOpen(false); setDocumentDialog('ocr') } },
+                    { label: 'Tabelle exportieren …', onSelect: () => { if (!sourceTextOpen) session.rememberPage(visiblePageIndex()); setSourceTextOpen(false); setSearchOpen(false); setSelectedId(null); setTool('select'); setDocumentDialog('table') } },
                   ]}
                 />}
               </>
@@ -719,8 +584,8 @@ export default function App() {
                   aria-pressed={pageManagerOpen}
                   disabled={pageBusy || redactions.length > 0}
                   onClick={() => {
-                    if (!pageManagerOpen && !sourceTextOpen && !tableOpen) viewedPageRef.current = visiblePageIndex()
-                    if (pageManagerOpen) returnPageRef.current = viewedPageRef.current
+                    if (!pageManagerOpen && !sourceTextOpen && !tableOpen) session.rememberPage(visiblePageIndex())
+                    if (pageManagerOpen) returnPageRef.current = session.viewedPage
                     setDocumentDialog(null)
                     setSourceTextOpen(false)
                     setSearchOpen(false)
@@ -769,7 +634,7 @@ export default function App() {
                   </div>
                 )}
               </div>
-              {!pageManagerOpen && <button aria-label={sourceTextOpen ? undefined : 'Originaltext korrigieren'} title={sourceTextOpen ? 'Textkorrektur schließen und zur normalen Ansicht zurückkehren' : 'Originaltext in derselben Schrift korrigieren'} disabled={pageBusy || cropActive || !!redactions.length} aria-pressed={sourceTextOpen} onClick={() => { if (sourceTextOpen) returnPageRef.current = viewedPageRef.current; else if (!tableOpen) viewedPageRef.current = visiblePageIndex(); setDocumentDialog(null); setPageManagerOpen(false); setSearchOpen(false); setSelectedId(null); setTool('select'); setSourceTextOpen(value => !value) }}>{sourceTextOpen ? 'Zur Dokumentbearbeitung' : 'Textkorrektur'}</button>}
+              {!pageManagerOpen && <button aria-label={sourceTextOpen ? undefined : 'Originaltext korrigieren'} title={sourceTextOpen ? 'Textkorrektur schließen und zur normalen Ansicht zurückkehren' : 'Originaltext in derselben Schrift korrigieren'} disabled={pageBusy || cropActive || !!redactions.length} aria-pressed={sourceTextOpen} onClick={() => { if (sourceTextOpen) returnPageRef.current = session.viewedPage; else if (!tableOpen) session.rememberPage(visiblePageIndex()); setDocumentDialog(null); setPageManagerOpen(false); setSearchOpen(false); setSelectedId(null); setTool('select'); setSourceTextOpen(value => !value) }}>{sourceTextOpen ? 'Zur Dokumentbearbeitung' : 'Textkorrektur'}</button>}
               <div
                 className="toolbar-history"
                 role="group"
@@ -867,11 +732,11 @@ export default function App() {
         </p>
       )}
       {openingFile && <p role="status" className="hint">PDF wird geöffnet …</p>}
-      <div className="workspace" ref={workspaceRef} inert={exportDialogOpen || redactionBusy || openingFile || exportBusy || !!loadingDraftId}>
+      <div className="workspace" ref={workspaceRef} inert={exportDialogOpen || busy}>
         {pdf && searchOpen && !pageManagerOpen && !pageBusy && <SearchWindow pdf={pdf} overlays={overlays} pages={documentPages ?? []} onClose={closeSearch} onHits={onSearchHits} onJump={onSearchJump}/>}
-        {pdf && pageManagerOpen && originalBytes && <PagesManager nativeWidgets={nativeWidgets} key={activeDraftId} pdf={pdf} store={store} original={originalBytes} busy={pageBusy} onCropActive={setCropActive} initialPage={viewedPageRef.current} onPage={onViewedPage} />}
-        {pdf && sourceTextOpen && originalBytes && !pageBusy && <SourceTextPanel key={activeDraftId} store={store} original={originalBytes} initialPage={viewedPageRef.current} onPage={onViewedPage} onClose={() => { returnPageRef.current = viewedPageRef.current; setSourceTextOpen(false) }} onHistory={setSourceHistory} />}
-        {pdf && tableOpen && documentPages && <TablePanel key={activeDraftId} pdf={pdf} pages={documentPages} fileName={pdf.fileName} initialPage={viewedPageRef.current} onClose={() => { returnPageRef.current = viewedPageRef.current; setDocumentDialog(null) }} />}
+        {pdf && pageManagerOpen && originalBytes && <PagesManager nativeWidgets={nativeWidgets} key={activeDraftId} pdf={pdf} store={store} original={originalBytes} busy={pageBusy} onCropActive={setCropActive} initialPage={session.viewedPage} onPage={onViewedPage} />}
+        {pdf && sourceTextOpen && originalBytes && !pageBusy && <SourceTextPanel key={activeDraftId} store={store} original={originalBytes} initialPage={session.viewedPage} onPage={onViewedPage} onClose={() => { returnPageRef.current = session.viewedPage; setSourceTextOpen(false) }} onHistory={setSourceHistory} />}
+        {pdf && tableOpen && documentPages && <TablePanel key={activeDraftId} pdf={pdf} pages={documentPages} fileName={pdf.fileName} initialPage={session.viewedPage} onClose={() => { returnPageRef.current = session.viewedPage; setDocumentDialog(null) }} />}
         {!pageManagerOpen && !sourceTextOpen && !tableOpen && <>
         {pageBusy && <p role="status" className="hint">Seitenansicht wird aktualisiert …</p>}
         {pdf && !pageBusy && (
@@ -925,17 +790,14 @@ export default function App() {
       {exportDialogOpen && <ExportDialog onCancel={()=>setExportDialogOpen(false)} onCheck={checkExport} onJump={jumpToIssue} onPrepare={prepareExport} onDownload={downloadExport}/> }
       {documentDialog === 'info' && originalBytes && <DocumentInfoDialog original={originalBytes} edit={store.state.metadata} onApply={edit => store.dispatch(setMetadataCommand(store.state.metadata, edit))} onClose={() => setDocumentDialog(null)} />}
       {documentDialog === 'labels' && pdf && <PageLabelsDialog pdf={pdf} store={store} onClose={() => setDocumentDialog(null)} />}
-      {documentDialog === 'ocr' && pdf && <OcrDialog pdf={pdf} store={store} initialPage={viewedPageRef.current} onClose={() => setDocumentDialog(null)} />}
-      {passwordRequest && <PasswordDialog key={passwordEpoch.current} request={passwordRequest}/>}
+      {documentDialog === 'ocr' && pdf && <OcrDialog pdf={pdf} store={store} initialPage={session.viewedPage} onClose={() => setDocumentDialog(null)} />}
+      {passwordRequest && <PasswordDialog key={passwordEpoch} request={passwordRequest}/>}
       {pdf && !pageManagerOpen && !sourceTextOpen && !tableOpen && !pageBusy && (
         <footer
           className="drawing-footer"
           inert={
             exportDialogOpen ||
-            redactionBusy ||
-            openingFile ||
-            exportBusy ||
-            !!loadingDraftId
+            busy
           }
         >
           {nativeWidgets.length > 0 && (
