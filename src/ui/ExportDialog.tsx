@@ -56,7 +56,7 @@ export function ExportDialog({
   useEffect(() => {
     const controller = new AbortController()
     void onCheck(controller.signal).then(result => { if (!controller.signal.aborted) setReport(result) }).catch(() => {
-      if (!controller.signal.aborted) setReport({ rebuilt: true, textIssues: [], assessments: [{ kind: 'signature', state: 'unknown', decision: 'confirm', message: 'Die Prüfung konnte nicht abgeschlossen werden. Bitte das Ergebnis selbst kontrollieren.' }] })
+      if (!controller.signal.aborted) setReport({ rebuilt: true, textIssues: [], xmpDropped: false, assessments: [{ kind: 'signature', state: 'unknown', decision: 'confirm', message: 'Die Prüfung konnte nicht abgeschlossen werden. Bitte das Ergebnis selbst kontrollieren.' }] })
     })
     return () => controller.abort()
   }, [onCheck])
@@ -231,7 +231,8 @@ export function ExportDialog({
                 <span>Diese Zeichen im Export durch „?“ ersetzen. In Symbolfeldern werden sie weggelassen.</span>
               </label>
             </div>}
-            {report && !report.assessments.some(item => item.decision !== 'ok') && !report.textIssues.length && <p className="export-detail">Keine Risiken gefunden.</p>}
+            {report?.xmpDropped && <p className="password-warning">Die XMP-Angaben dieser Datei lassen sich nicht einzeln ändern. Sie entfallen beim Export komplett, auch solche, die nichts mit den gewählten Feldern zu tun haben.</p>}
+            {report && !report.xmpDropped && !report.assessments.some(item => item.decision !== 'ok') && !report.textIssues.length && <p className="export-detail">Keine Risiken gefunden.</p>}
             {report?.assessments.filter(item => item.decision === 'ok' && item.state === 'present').map(item => <p key={item.kind} className="export-detail">{item.message}</p>)}
             {report && <p className="export-detail">Diese Prüfung ist keine Sicherheits- oder Konformitätsbestätigung.</p>}
           </section>

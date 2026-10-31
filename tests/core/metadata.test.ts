@@ -3,6 +3,8 @@ import { PDFDocument, PDFName, PDFRawStream } from 'pdf-lib'
 import { getDocument } from 'pdfjs-dist/legacy/build/pdf.mjs'
 import { applyMetadata, effectiveField, readMetadata, setMetadataCommand } from '../../src/core/pdf/metadata'
 import { CommandStack } from '../../src/core/commands'
+import { preflightExport } from '../../src/core/pdf/preflight'
+import { inspectPages } from '../../src/core/pdf/pageOperations'
 import type { EditorState } from '../../src/core/model'
 
 const key = PDFName.of
@@ -133,6 +135,18 @@ test('removing technical data leaves no software names or dates, and saving adds
   for (const text of ['Textprogramm', 'Druckwerk', 'uuid:1234', '2024-01-02', 'pdf-lib']) expect(read.raw + read.xmp).not.toContain(text)
   const again = await PDFDocument.load(bytes, { updateMetadata: false })
   expect(new TextDecoder('latin1').decode(await again.save())).not.toContain('pdf-lib')
+})
+
+test('the check names a decision that costs the whole XMP packet', async () => {
+  const creator = '<dc:creator><rdf:Seq><rdf:li>Mira Muster</rdf:li></rdf:Seq></dc:creator>'
+  const check = async (xmp: string, metadata?: { fields: { author: null } }) => {
+    const bytes = await pdf(xmp), pages = await inspectPages(bytes, 'a.pdf')
+    return (await preflightExport({ original: bytes, sources: [], pages, overlays: [], secure: false, metadata })).xmpDropped
+  }
+  const removal = { fields: { author: null } }
+  expect(await check(xmpPacket(`${creator}<dc:rights>Mira Muster</dc:rights>`), removal)).toBe(true)
+  expect(await check(xmpPacket(creator), removal)).toBe(false)
+  expect(await check(xmpPacket(`${creator}<dc:rights>Mira Muster</dc:rights>`))).toBe(false)
 })
 
 test('a document without XMP gets none, and one without Info gets one when needed', async () => {

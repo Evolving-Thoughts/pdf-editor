@@ -6,6 +6,7 @@ import { isTextbox, type Overlay, type Textbox } from '../model'
 import type { DocumentPage, PageSource } from '../pages'
 import { embedOverlayFont, unsupportedCharacters } from './exportPdf'
 import { keepsPageTree, tagsSurvive } from './pageOperations'
+import { applyMetadata, hasMetadataEdit, type MetadataEdit } from './metadata'
 
 export type StructureKind = 'signature' | 'activeContent' | 'attachments' | 'xfa' | 'forms' | 'outline' | 'tags'
 export type StructureState = 'none' | 'present' | 'unknown'
@@ -13,7 +14,13 @@ export interface StructureFinding { kind: StructureKind; state: StructureState; 
 export type Decision = 'ok' | 'confirm' | 'reject'
 export interface Assessment { kind: StructureKind; state: StructureState; decision: Decision; message: string }
 export interface TextIssue { overlayId: string; pageIndex: number; characters: string[]; font: string; excerpt: string }
-export interface PreflightReport { rebuilt: boolean; assessments: Assessment[]; textIssues: TextIssue[] }
+export interface PreflightReport {
+  rebuilt: boolean
+  assessments: Assessment[]
+  textIssues: TextIssue[]
+  /** A decision about document info removes the whole XMP packet, not only the chosen fields. */
+  xmpDropped: boolean
+}
 
 const key = PDFName.of
 const WALK_LIMIT = 50_000
@@ -210,15 +217,18 @@ export interface PreflightInput {
   pages: DocumentPage[]
   overlays: Overlay[]
   secure: boolean
+  metadata?: MetadataEdit
 }
 
-export async function preflightExport({ original, sources, pages, overlays, secure }: PreflightInput): Promise<PreflightReport> {
+export async function preflightExport({ original, sources, pages, overlays, secure, metadata }: PreflightInput): Promise<PreflightReport> {
   const rebuilt = !await keepsPageTree(original, pages, secure)
   const used = new Set(pages.map(page => page.sourceId))
   const inputs = [...(used.has('original') ? [original] : []), ...sources.filter(source => used.has(source.id)).map(source => new Uint8Array(source.bytes))]
   const findings = mergeFindings(await Promise.all(inputs.map(inspectStructures)))
   const kept = { outline: !secure, tags: await tagsSurvive(original, sources, pages, secure) }
-  return { rebuilt, assessments: findings.map(finding => assessExport(finding, rebuilt, kept)), textIssues: await findTextIssues(overlays) }
+  // A rebuilt document has no packet that could go.
+  const xmpDropped = !rebuilt && hasMetadataEdit(metadata) && (await applyMetadata(original, metadata!)).xmpRemoved
+  return { rebuilt, assessments: findings.map(finding => assessExport(finding, rebuilt, kept)), textIssues: await findTextIssues(overlays), xmpDropped }
 }
 
 export const needsConfirmation = (report: PreflightReport) => report.assessments.filter(item => item.decision === 'confirm')

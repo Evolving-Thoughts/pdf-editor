@@ -24,6 +24,7 @@ export function useExportFlow(store: EditorStore, draftRef: RefObject<ActiveDraf
         original: new Uint8Array(draft.bytes), sources: store.state.pageSources ?? [], pages: store.state.pages,
         overlays: store.state.overlays.map(cloneOverlay),
         secure: !!store.state.redactionApplied || store.state.pages.some(page => page.redacted),
+        metadata: store.state.metadata,
       }, { signal })
     } finally {
       // A failed check is confirmed in the dialog, and that answer is about this state too.
