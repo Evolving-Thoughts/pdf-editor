@@ -11,6 +11,7 @@ export type ExportJob =
   | { jobId: string; kind: 'export'; request: ExportRequest }
   | { jobId: string; kind: 'encrypt'; bytes: Uint8Array; password: string }
   | { jobId: string; kind: 'preflight'; input: DocumentSnapshot }
+  | { jobId: string; kind: 'extract'; document: DocumentSnapshot; ids: readonly string[] }
 
 export type ExportJobMessage =
   | { jobId: string; type: 'progress'; progress: ExportProgress }
@@ -74,6 +75,9 @@ export const exportInWorker = (request: ExportRequest, options: JobOptions = {})
 
 export const preflightInWorker = (input: DocumentSnapshot, options: JobOptions = {}) =>
   runJob<PreflightReport>({ jobId: nextJobId(), kind: 'preflight', input }, options)
+
+export const extractInWorker = (document: DocumentSnapshot, ids: readonly string[], options: JobOptions = {}) =>
+  runJob<Uint8Array>({ jobId: nextJobId(), kind: 'extract', document, ids }, options)
 
 export const encryptInWorker = (bytes: Uint8Array, password: string, options: JobOptions = {}) =>
   runJob<Uint8Array>({ jobId: nextJobId(), kind: 'encrypt', bytes, password }, options)

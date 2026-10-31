@@ -1,7 +1,7 @@
 // Worker side of an export job, separated from `self` so it can run in tests.
 // Messages carry only what the user is meant to read: never document content or passwords.
 import type { ExportJob, ExportJobMessage } from './exportJob'
-import { runExport, type ExportResult } from './exportPipeline'
+import { extractPages, runExport, type ExportResult } from './exportPipeline'
 import { preflightExport, type PreflightReport } from './preflight'
 import { encodeCompressedImage } from '../images/compressImage'
 import { encryptPdf } from './unlockPdf'
@@ -20,7 +20,9 @@ export async function executeJob(job: ExportJob, post: (message: ExportJobMessag
       ? await encryptPdf(job.bytes, job.password)
       : job.kind === 'preflight'
         ? await preflightExport(job.input)
-        : await runExport(job.request, encodeCompressedImage, { onProgress: progress => post({ jobId, type: 'progress', progress }) })
+        : job.kind === 'extract'
+          ? await extractPages(job.document, job.ids)
+          : await runExport(job.request, encodeCompressedImage, { onProgress: progress => post({ jobId, type: 'progress', progress }) })
     post({ jobId, type: 'done', result }, buffersOf(result))
   } catch (problem) {
     post({ jobId, type: 'error', message: problem instanceof Error && problem.message ? problem.message : 'Der Export ist fehlgeschlagen. Es wurde keine Datei gespeichert.' })

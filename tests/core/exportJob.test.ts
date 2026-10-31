@@ -3,6 +3,7 @@ import { PDFDocument, StandardFonts } from 'pdf-lib'
 import { getDocument } from 'pdfjs-dist/legacy/build/pdf.mjs'
 import { encryptInWorker, exportInWorker, type ExportJob, type ExportJobMessage, type JobWorker } from '../../src/core/pdf/exportJob'
 import { executeJob } from '../../src/core/pdf/exportWorkerCore'
+import { isSecure, selectDocument } from '../../src/core/pdf/documentOutput'
 import type { ExportRequest } from '../../src/core/pdf/exportPipeline'
 import { inspectPages } from '../../src/core/pdf/pageOperations'
 import type { Textbox } from '../../src/core/model'
@@ -166,4 +167,24 @@ test('the worker side encrypts', async () => {
   const done = messages.at(-1)
   if (done?.type !== 'done' || !(done.result instanceof Uint8Array)) throw new Error('Kein Ergebnis')
   await expect(getDocument({ data: done.result.slice() }).promise).rejects.toMatchObject({ name: 'PasswordException' })
+})
+
+test('the worker side extracts the chosen pages', async () => {
+  const doc = await PDFDocument.create()
+  doc.addPage([100, 100])
+  doc.addPage([200, 200])
+  const original = await doc.save(), pages = await inspectPages(original, 'a.pdf')
+  const document = { original, state: { pages, overlays: [] } }, messages: ExportJobMessage[] = []
+  await executeJob({ jobId: 'j', kind: 'extract', document, ids: [pages[1].id] }, message => messages.push(message))
+  const done = messages.at(-1)
+  if (done?.type !== 'done') throw new Error('extract failed')
+  const output = await PDFDocument.load(done.result as Uint8Array)
+  expect(output.getPages().map(page => page.getWidth())).toEqual([200])
+})
+
+test('a selection of a redacted document stays secure', () => {
+  const page = { id: 'a', name: 'a', sourceId: 'original', sourceIndex: 0, box: { x: 0, y: 0, width: 1, height: 1 }, unit: 1, rotation: 0 }
+  const chosen = selectDocument({ original: new Uint8Array(), state: { overlays: [], pages: [page, { ...page, id: 'b', redacted: true }] } }, ['a'])
+  expect(isSecure(chosen.state)).toBe(true)
+  expect(chosen.state.pages?.map(item => item.id)).toEqual(['a'])
 })

@@ -229,6 +229,18 @@ export async function preparePages(bytes: Uint8Array, name: string) {
 }
 export { pageSize }
 
+/** Chosen pages in document order, with their overlays renumbered. */
+export function selectPages(pages: DocumentPage[], overlays: Overlay[], pageId: string | readonly string[]) {
+  const ids = new Set(typeof pageId === 'string' ? [pageId] : pageId), available = new Set(pages.map(page => page.id))
+  if (!ids.size || [...ids].some(id => !available.has(id)))
+    throw new Error('Bitte gültige Seiten zum Extrahieren auswählen.')
+  const chosen = pages.filter(page => ids.has(page.id))
+  const indices = new Map(chosen.map((page, index) => [page.id, index]))
+  const mapped = overlays.filter(overlay => indices.has(pages[overlay.pageIndex]?.id))
+    .map(overlay => ({ ...cloneOverlay(overlay), pageIndex: indices.get(pages[overlay.pageIndex].id)! }))
+  return { pages: chosen, overlays: mapped }
+}
+
 export async function exportPageDocument(
   original: Uint8Array,
   sources: PageSource[],
@@ -240,14 +252,8 @@ export async function exportPageDocument(
   keptTree?: boolean,
 ) {
   if (pageId !== undefined) {
-    const ids = new Set(typeof pageId === 'string' ? [pageId] : pageId), available = new Set(pages.map(page => page.id))
-    if (!ids.size || [...ids].some(id => !available.has(id)))
-      throw new Error('Bitte gültige Seiten zum Extrahieren auswählen.')
-    const chosen = pages.filter(page => ids.has(page.id))
-    const indices = new Map(chosen.map((page, index) => [page.id, index]))
-    const mapped = overlays.filter(overlay => indices.has(pages[overlay.pageIndex]?.id))
-      .map(overlay => ({ ...cloneOverlay(overlay), pageIndex: indices.get(pages[overlay.pageIndex].id)! }))
-    return exportPdf(await composePages(original, sources, chosen, formValues, secure), mapped)
+    const chosen = selectPages(pages, overlays, pageId)
+    return exportPdf(await composePages(original, sources, chosen.pages, formValues, secure), chosen.overlays)
   }
   return exportPdf(await composePages(original, sources, pages, formValues, secure, keptTree), overlays)
 }

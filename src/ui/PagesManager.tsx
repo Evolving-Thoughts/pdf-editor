@@ -18,8 +18,9 @@ import {
   type CropMargins,
 } from '../core/pages'
 import { importPageFile, preparePages, textPageBytes } from '../core/pdf/pageOperations'
-import { extractPages } from '../core/pdf/exportPipeline'
-import { snapshotDocument } from '../core/pdf/documentOutput'
+import { extractInWorker, preflightInWorker } from '../core/pdf/exportJob'
+import { selectDocument, snapshotDocument } from '../core/pdf/documentOutput'
+import { needsConfirmation, rejection } from '../core/pdf/preflight'
 import { loadPdf, type PdfHandle } from '../core/pdf/loadPdf'
 import { normalizeA4 } from '../core/pdf/normalizeA4'
 import { PageView } from './PageView'
@@ -86,6 +87,7 @@ export function PagesManager({ nativeWidgets = [], pdf, store, original, busy, o
   const [file, setFile] = useState<File | null>(null)
   const [text, setText] = useState('')
   const [working, setWorking] = useState(false)
+  const [extractCheck, setExtractCheck] = useState<{ ids: string[]; version: number; messages: string[] } | null>(null)
   const dialogRef = useRef<HTMLDialogElement>(null)
   const previewRef = useRef<HTMLDivElement>(null)
   const [available, setAvailable] = useState({ width: 600, height: 700 })
@@ -100,7 +102,7 @@ export function PagesManager({ nativeWidgets = [], pdf, store, original, busy, o
     size.width - m.left - m.right >= 20 * MM - 1e-6 &&
     size.height - m.top - m.bottom >= 20 * MM - 1e-6
   const frameMargins = activeCrop && marginsFit(activeCrop.margins) ? activeCrop.margins : zero()
-  const locked = busy || working || !!activeCrop || a4Open || !!deletePending
+  const locked = busy || working || !!activeCrop || a4Open || !!deletePending || !!extractCheck
   useEffect(() => {
     onCropActive(!!activeCrop || a4Open || !!deletePending)
     return () => onCropActive(false)
@@ -234,12 +236,39 @@ export function PagesManager({ nativeWidgets = [], pdf, store, original, busy, o
   }
   async function extract() {
     if (!selection.length || locked) return
-    const ids = [...selection]
+    const ids = [...selection], version = store.getVersion()
+    const token = ++request.current
+    setWorking(true)
+    setProblem(null)
+    let messages: string[]
+    try {
+      const report = await preflightInWorker(selectDocument(snapshotDocument(new Uint8Array(original), store.state), ids))
+      if (token !== request.current) return
+      const rejected = rejection(report)
+      if (rejected) {
+        setProblem(rejected.message)
+        setWorking(false)
+        return
+      }
+      messages = needsConfirmation(report).map(item => item.message)
+      if (report.textIssues.length) messages.push('Nicht darstellbare Zeichen werden durch „?“ ersetzt.')
+    } catch {
+      if (token !== request.current) return
+      messages = ['Die Prüfung konnte nicht abgeschlossen werden. Bitte das Ergebnis selbst kontrollieren.']
+    }
+    if (messages.length) {
+      setExtractCheck({ ids, version, messages })
+      setWorking(false)
+    } else await saveExtract(ids, version)
+  }
+  async function saveExtract(ids: string[], version: number) {
+    setExtractCheck(null)
     const token = ++request.current
     setWorking(true)
     setProblem(null)
     try {
-      const bytes = await extractPages(snapshotDocument(new Uint8Array(original), store.state), ids)
+      if (store.getVersion() !== version) throw new Error('Der Arbeitsstand hat sich geändert. Bitte erneut auswählen.')
+      const bytes = await extractInWorker(snapshotDocument(new Uint8Array(original), store.state), ids)
       if (token !== request.current) return
       downloadPdf(bytes, ids.length === 1 ? `Seite-${pages.findIndex(p => p.id === ids[0]) + 1}.pdf` : `Auswahl-${ids.length}-Seiten.pdf`)
       setMessage(ids.length === 1 ? 'Die ausgewählte Seite wurde als eigenes PDF gespeichert.' : `${ids.length} ausgewählte Seiten wurden als eigenes PDF gespeichert.`)
@@ -294,7 +323,15 @@ export function PagesManager({ nativeWidgets = [], pdf, store, original, busy, o
             <p>Vorhandene Felder können in der Dokumentbearbeitung direkt ausgefüllt werden. Die Originaldatei bleibt unverändert.</p>
           </details>
         )}
-        {deletePending ? (
+        {extractCheck ? (
+          <div className="page-delete-confirm" role="group" aria-label="Extrahieren bestätigen">
+            {extractCheck.messages.map(message => <p key={message}>{message}</p>)}
+            <div className="page-manager-actions">
+              <button onClick={() => { setExtractCheck(null); setMessage('Extrahieren abgebrochen.') }}>Abbrechen</button>
+              <button onClick={() => void saveExtract(extractCheck.ids, extractCheck.version)}>Trotzdem speichern</button>
+            </div>
+          </div>
+        ) : deletePending ? (
           <div className="page-delete-confirm">
             <p>{deletePending.ids.length} ausgewählte {deletePending.ids.length === 1 ? 'Seite' : 'Seiten'} mit allen Inhalten löschen?</p>
             <div className="page-manager-actions">
