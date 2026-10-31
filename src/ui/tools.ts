@@ -1,5 +1,5 @@
 import type { ShapeKind } from '../core/model'
-export type Tool = 'redact' | 'select' | 'text' | 'symbol' | 'pen' | 'eraser' | ShapeKind
+export type Tool = 'redact' | 'select' | 'text' | 'symbol' | 'stamp' | 'pen' | 'eraser' | ShapeKind
 export const SHAPE_TOOLS: { tool: ShapeKind; label: string; path: string }[] = [
   { tool: 'rect', label: 'Rechteck', path: 'M 4 5 H 20 V 19 H 4 Z' },
   { tool: 'ellipse', label: 'Ellipse', path: 'M 21 12 A 9 7 0 1 1 3 12 A 9 7 0 1 1 21 12' },

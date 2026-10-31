@@ -5,6 +5,7 @@ import type { DocumentPage, PageSource } from '../pages'
 // original PDF bytes plus the full overlay state, so closing the tab and
 // reopening restores everything. Multiple drafts live side by side.
 import { isImage, type ImageOverlay, type Overlay } from '../model'
+import type { MetadataEdit } from '../pdf/metadata'
 
 export interface DraftRecord {
   redactionApplied?: boolean
@@ -19,6 +20,7 @@ export interface DraftRecord {
   overlays: Overlay[]
   pages?: DocumentPage[]
   pageSources?: PageSource[]
+  metadata?: MetadataEdit
 }
 
 /** Draft metadata for the menu list; the heavy bytes stay outside this record. */
@@ -190,6 +192,7 @@ export async function loadDraft(db: IDBDatabase, id: string): Promise<DraftRecor
         redactionApplied: stored.redactionApplied,
         redactions: stored.redactions,
         pages: stored.pages,
+        metadata: stored.metadata,
         pageSources: [...sourceRequests].map(([id,request])=>({id,bytes:request.result!})),
         pdfBytes: (bytesRequest.result as ArrayBuffer | undefined) ?? new ArrayBuffer(0),
       })

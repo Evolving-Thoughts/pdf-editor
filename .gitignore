@@ -26,5 +26,8 @@ dist-ssr
 # Generierte Test-Fixtures (scripts/make-fixtures.mjs)
 tests/fixtures/
 
+# Copied and verified by scripts/copy-ocr-assets.mjs
+public/ocr/
+
 # Local QA evidence and downloaded public forms
 qa-artifacts/

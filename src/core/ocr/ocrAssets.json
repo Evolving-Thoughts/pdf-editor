@@ -1,0 +1,13 @@
+{
+  "engine": { "tesseractJs": "7.0.0", "tesseractCore": "7.0.0" },
+  "files": [
+    { "source": "tesseract.js/dist/worker.min.js", "target": "worker.min.js", "sha256": "576b7df7e3393e137e51849357c9adb53fe7ac1bb69bfa06cf3d61520f182c6d" },
+    { "source": "tesseract.js-core/tesseract-core-lstm.wasm.js", "target": "core/tesseract-core-lstm.wasm.js", "sha256": "eef5f8b2f8e20e150680b20adaec4a60babafee3adbe8a94583c81fee46e8680" },
+    { "source": "tesseract.js-core/tesseract-core-simd-lstm.wasm.js", "target": "core/tesseract-core-simd-lstm.wasm.js", "sha256": "c58b46a4c796c0b8afccf77591d5b875b6896b45d402bbce8caa6f5362447b38" },
+    { "source": "tesseract.js-core/tesseract-core-relaxedsimd-lstm.wasm.js", "target": "core/tesseract-core-relaxedsimd-lstm.wasm.js", "sha256": "861a536cf9ef8e63cb644d57bab39c388f37f7d6b6f60024b741c5f6b39a59b3" }
+  ],
+  "models": {
+    "deu": { "source": "@tesseract.js-data/deu/4.0.0_best_int/deu.traineddata.gz", "target": "lang/deu.traineddata.gz", "sha256": "306c4280d0cbed46fbff727486bd43b92730181bae80f56941a091f363bdf28b", "contentSha256": "a1b72cc25753eac167edfef5af4448a8dc34973503a2265c34c84520f896eb03" },
+    "eng": { "source": "@tesseract.js-data/eng/4.0.0_best_int/eng.traineddata.gz", "target": "lang/eng.traineddata.gz", "sha256": "45b4cb346724ac1774f1c36f42f182b887bcdb28ebe63e6fff90ac41f3fcff91", "contentSha256": "5dc5d8d640a212c9d6184921ba103b186f50e0fed9ee716c53e6b312b400d747" }
+  }
+}

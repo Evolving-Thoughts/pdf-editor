@@ -144,15 +144,48 @@ neuer Overlay-Text bleibt echter PDF-Text. Nicht betroffene Seiten bleiben
 vektorbasiert. Originaldatei, lokale Entwürfe und Undo können weiterhin vertrauliche
 Inhalte enthalten: **Nur die geprüfte exportierte Kopie weitergeben.**
 
-„Exportieren“ öffnet einen gemeinsamen Dialog:
+„Exportieren“ öffnet einen gemeinsamen Dialog. Er läuft in einem eigenen Worker,
+zeigt den Fortschritt und lässt sich jederzeit abbrechen:
 
-- Bilddaten komprimieren: optional, standardmäßig **aus**. Qualitätsstufen
-  reduzieren geeignete Bilddaten; Text, Vektoren und Formularfelder werden nicht
-  allein für die Komprimierung gerastert. Einsparung und Lesbarkeit hängen vom
-  Dokument ab; transparente/nicht unterstützte Bilder bleiben unverändert.
+- Prüfung: Signaturen, aktive Inhalte, Anhänge, XFA, Formulare, Lesezeichen, Tags
+  und nicht darstellbare Zeichen. Risiken müssen bestätigt werden, nicht Unterstütztes
+  wird abgelehnt. Die Prüfung ist keine Sicherheits- oder Konformitätsbestätigung.
+  Lesezeichen folgen ihren Seiten, Tags bleiben bei vollständigen Seiten in
+  ursprünglicher Reihenfolge erhalten, auch nach Textkorrekturen. Nach einer
+  Schwärzung werden beide bewusst nicht übernommen.
+- Dateigröße, standardmäßig **Nicht optimieren**:
+  - Struktur optimieren ist verlustfrei. Das Ergebnis wird neu eingelesen und mit
+    der Eingabe verglichen. Wird es nicht kleiner, bleibt die Datei unverändert.
+  - Bilddaten komprimieren reduziert geeignete Bilddaten in Qualitätsstufen. Text,
+    Vektoren und Formularfelder werden nicht allein dafür gerastert. Einsparung und
+    Lesbarkeit hängen vom Dokument ab; transparente/nicht unterstützte Bilder bleiben
+    unverändert.
 - Mit Passwort schützen: optional, standardmäßig **aus**, AES-256. Das
   Export-Passwort wird nicht im Entwurf gespeichert. Passwortschutz verschlüsselt
   nur die exportierte Datei, nicht die lokale Arbeitskopie.
+
+### Menü „Dokument“
+
+- **Dokumentinfo:** Titel, Autor, Betreff und Schlagwörter ansehen, ändern oder
+  entfernen, in Info und XMP gemeinsam. Das gilt für die exportierte Kopie und ist
+  keine vollständige Anonymisierung.
+- **Seitenzahlen, Kopf- und Fußzeile:** Text mit `{n}` und `{gesamt}`, Seitenbereich
+  und Position wählen und auf der echten Seite prüfen. Das Ergebnis sind normale,
+  bearbeitbare Textboxen. Die Nummern folgen automatisch, wenn Seiten umsortiert
+  oder gelöscht werden.
+- **Text erkennen (OCR):** Macht gewählte Scan-Seiten lokal durchsuchbar. Die Erkennung
+  startet nur über den Button im Dialog. Das sichtbare Bild bleibt unverändert, das
+  Ergebnis ist vor der Übernahme prüfbar. Einzelheiten stehen in
+  [docs/third-party-ocr.md](docs/third-party-ocr.md).
+- **Tabelle exportieren:** Bereich auf der Seite wählen, Spalten und Werte prüfen und
+  als XLSX oder ODS speichern. Unklare Werte bleiben Text und sind markiert. Scans
+  gehen ebenfalls, wenn vorher ihr Text erkannt wurde.
+
+Stempel liegen in der Werkzeugleiste neben den Symbolen. Sie sind Bilder, keine
+digitale Signatur. Das Datum wird beim Platzieren festgelegt.
+
+Im Auswahl-Werkzeug lässt sich Originaltext mit Maus und Tastatur markieren und
+kopieren. Scan-Seiten erklären, dass sie keine Textebene haben.
 
 ### Tastatur
 

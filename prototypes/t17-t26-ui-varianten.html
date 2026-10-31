@@ -1,0 +1,178 @@
+<title>PDF-Editor UI-Auswahl</title>
+<meta name="claude:viewport-fit-sides" content="cover">
+<style>
+/* Layout: one long decision sheet; each decision is a row of comparable mini screens, with a sticky tally on top. */
+:root{
+  --bg:#ffffff;--soft:#f6f4f8;--ink:#28262f;--muted:#625e70;--line:#ddd9e4;
+  --accent:#7936bb;--on-accent:#ffffff;--tint:#f2ebfa;--warn:#8a5a00;--warn-bg:#fdf3dc;--ok:#176944;--bad:#a42532;
+  --paper:#ffffff;--paper-ink:#2b2b30;--paper-line:#d8d6dc;--desk:#e9e6ee;
+}
+@media (prefers-color-scheme:dark){:root:not([data-theme="light"]){
+  --bg:#211f26;--soft:#2a2730;--ink:#eeeaf4;--muted:#c2bbce;--line:#51495e;
+  --accent:#b98cf2;--on-accent:#1b1422;--tint:#352944;--warn:#f2c46b;--warn-bg:#3b2f17;--ok:#75d2a0;--bad:#ff9eaa;
+  --paper:#f4f2f6;--paper-ink:#2b2b30;--paper-line:#cfccd4;--desk:#17151b;color-scheme:dark}}
+:root[data-theme="dark"]{
+  --bg:#211f26;--soft:#2a2730;--ink:#eeeaf4;--muted:#c2bbce;--line:#51495e;
+  --accent:#b98cf2;--on-accent:#1b1422;--tint:#352944;--warn:#f2c46b;--warn-bg:#3b2f17;--ok:#75d2a0;--bad:#ff9eaa;
+  --paper:#f4f2f6;--paper-ink:#2b2b30;--paper-line:#cfccd4;--desk:#17151b;color-scheme:dark}
+*{box-sizing:border-box}
+body{background:var(--bg);color:var(--ink);font:16px/1.5 system-ui,-apple-system,"Segoe UI",sans-serif;
+  padding-left:max(16px,env(safe-area-inset-left,0px));padding-right:max(16px,env(safe-area-inset-right,0px))}
+body::before{content:"";position:fixed;inset:0 0 auto;height:env(safe-area-inset-top,0px);z-index:10;background:var(--bg)}
+.wrap{max-width:1180px;margin:0 auto;display:grid;gap:40px;padding-block:24px 56px}
+header{display:grid;gap:12px}
+h1{font-size:28px;line-height:1.2;letter-spacing:-.4px;margin:0;text-wrap:balance}
+h2{font-size:20px;line-height:1.3;margin:0;text-wrap:balance}
+p{margin:0}
+.eyebrow{font-size:13px;font-weight:650;color:var(--accent);letter-spacing:.02em}
+.lead{color:var(--muted);max-width:70ch}
+.notice{padding:12px 16px;background:var(--soft);border:1px solid var(--line);border-radius:8px;font-size:14px;max-width:80ch}
+.tally{position:sticky;top:env(safe-area-inset-top,0px);z-index:5;background:var(--bg);border-block:1px solid var(--line);
+  padding-block:10px;display:flex;flex-wrap:wrap;gap:8px 16px;align-items:center;justify-content:space-between}
+.tally p{font-size:14px;color:var(--muted);min-width:0}
+.tally strong{color:var(--ink);font-variant-numeric:tabular-nums}
+button{font:inherit;min-height:40px;padding:8px 14px;border-radius:8px;border:1px solid var(--accent);background:var(--accent);color:var(--on-accent);font-weight:600;cursor:pointer}
+button:focus-visible,input:focus-visible,textarea:focus-visible{outline:3px solid var(--accent);outline-offset:2px}
+.decision{display:grid;gap:14px;border:0;padding:0;margin:0;min-width:0}
+.decision legend{display:contents}
+.head{display:grid;gap:4px;max-width:78ch}
+.tag{font-size:13px;font-weight:650;color:var(--accent)}
+.question{color:var(--muted);font-size:15px}
+.variants{display:grid;grid-template-columns:repeat(auto-fit,minmax(280px,1fr));gap:14px}
+.variant{display:grid;grid-template-rows:auto 1fr;gap:10px;padding:10px;border:1px solid var(--line);border-radius:10px;cursor:pointer;min-width:0;background:var(--bg)}
+.variant:has(input:checked){border-color:var(--accent);box-shadow:0 0 0 2px var(--accent);background:var(--tint)}
+.text{display:grid;gap:4px;align-content:start;font-size:14px;min-width:0}
+.pick{display:flex;gap:8px;align-items:flex-start;font-weight:650}
+.pick input{width:18px;height:18px;margin:2px 0 0;accent-color:var(--accent);flex:none}
+.rec{display:inline-block;font-size:12px;font-weight:650;color:var(--ok);margin-left:4px;white-space:nowrap}
+.why{color:var(--muted)}
+.note{display:grid;gap:4px;font-size:13px;color:var(--muted);max-width:640px}
+.note input{font:inherit;padding:6px 10px;border:1px solid var(--line);border-radius:6px;background:var(--bg);color:var(--ink);width:100%}
+footer{color:var(--muted);font-size:14px;max-width:80ch}
+#fallback{width:100%;min-height:150px;font:13px/1.5 ui-monospace,Consolas,monospace;padding:10px;border:1px solid var(--line);border-radius:8px;background:var(--soft);color:var(--ink)}
+/* Mini screens: a shrunken copy of the editor, built only from the classes below. */
+.m{position:relative;display:flex;flex-direction:column;height:222px;border:1px solid var(--line);border-radius:6px;overflow:hidden;background:var(--desk);font-size:10.5px;line-height:1.3;color:var(--ink)}
+.m-bar{display:flex;flex-wrap:wrap;gap:3px;padding:4px 5px;background:var(--bg);border-bottom:1px solid var(--line);flex:none}
+.b{padding:1px 5px;border:1px solid var(--line);border-radius:3px;background:var(--bg);color:var(--ink);white-space:nowrap}
+.b.on{background:var(--accent);border-color:var(--accent);color:var(--on-accent)}
+.b.x{background:#7936bb;border-color:#7936bb;color:#fff}
+.m-body{flex:1;display:flex;gap:6px;padding:6px;min-height:0;position:relative}
+.pg{flex:1;min-width:0;background:var(--paper);color:var(--paper-ink);border:1px solid var(--paper-line);padding:7px;display:flex;flex-direction:column;gap:4px;position:relative;overflow:hidden}
+.ln{height:4px;background:var(--paper-line);border-radius:1px;flex:none}
+.ln.s{width:70%}.ln.t{width:45%}
+.sel{background:#9ec5ff;height:9px;border-radius:1px;flex:none;color:#10233f;font-size:8.5px;line-height:9px;padding-inline:2px;white-space:nowrap;overflow:hidden}
+.pan{width:44%;flex:none;background:var(--bg);border:1px solid var(--line);border-radius:3px;padding:5px;display:flex;flex-direction:column;gap:3px;min-width:0;overflow:hidden}
+.pan b,.dlg b{font-size:11px}
+.dim{position:absolute;inset:0;background:rgba(30,25,40,.42);display:flex;align-items:center;justify-content:center;padding:8px}
+.dlg{background:var(--bg);color:var(--ink);border-radius:5px;padding:7px 8px;display:flex;flex-direction:column;gap:3px;width:min(92%,240px);max-height:100%;overflow:hidden}
+.dlg.wide{width:96%}
+.r{display:flex;gap:4px;align-items:center;justify-content:space-between;min-width:0}
+.r>span:first-child{min-width:0}
+.ok{color:var(--ok)}.warn{color:var(--warn)}.bad{color:var(--bad)}
+.w{background:var(--warn-bg);color:var(--warn);padding:2px 4px;border-radius:3px}
+.bar{height:6px;background:var(--line);border-radius:3px;overflow:hidden;flex:none}
+.bar i{display:block;height:100%;width:62%;background:var(--accent)}
+.acts{display:flex;gap:3px;justify-content:flex-end;margin-top:auto}
+.grid3{display:grid;grid-template-columns:repeat(3,1fr);gap:2px}
+.grid3 span{border:1px solid var(--line);height:10px;border-radius:2px}
+.grid3 .on{background:var(--accent);border-color:var(--accent)}
+.stamp{border:1.5px solid #b3261e;color:#b3261e;border-radius:2px;padding:0 3px;font-weight:700;font-size:8.5px;align-self:flex-end;transform:rotate(-4deg)}
+.cells{display:grid;grid-template-columns:1.3fr 1fr 1fr;gap:1px;background:var(--line);border:1px solid var(--line);font-size:9.5px}
+.cells span{background:var(--bg);padding:1px 2px;white-space:nowrap;overflow:hidden}
+.cells .q{background:var(--warn-bg);color:var(--warn)}
+.frame{position:absolute;border:1.5px dashed var(--accent);background:color-mix(in srgb,var(--accent) 9%,transparent)}
+.col{position:absolute;top:0;bottom:0;width:0;border-left:1px solid var(--accent)}
+.foot{position:absolute;left:6px;right:6px;bottom:4px;text-align:center;font-size:8.5px;color:var(--paper-ink)}
+.scan{background:repeating-linear-gradient(0deg,#d9d4c8 0 3px,#e8e3d8 3px 8px)}
+@media (prefers-reduced-motion:no-preference){.variant{transition:border-color .12s,background .12s}}
+</style>
+
+<div class="wrap">
+  <header>
+    <div class="eyebrow">Tickets T17 bis T26 · Sammelabstimmung</div>
+    <h1>Zehn Oberflächen-Entscheidungen auf einer Seite</h1>
+    <p class="lead">Jede Zeile zeigt drei Bedienwege für dieselbe Funktion. Meine Empfehlung ist vorausgewählt. Du änderst nur, was du anders haben möchtest, und schickst mir danach die kopierte Auswahl. T20 (große PDFs) braucht keine neue Oberfläche und fehlt deshalb.</p>
+    <div class="notice"><strong>Prototyp, nicht produktionsreif.</strong> Die Bilder sind verkleinerte Skizzen mit Beispieldaten. Hier passiert keine PDF-Verarbeitung, Klicks ändern nichts am Dokument, und die Auswahl wird nicht gespeichert.</div>
+  </header>
+
+  <div class="tally">
+    <p><strong id="changed">0</strong> von 10 Entscheidungen weichen von der Empfehlung ab. <span id="copied" role="status"></span></p>
+    <button type="button" id="copy">Auswahl kopieren</button>
+  </div>
+  <textarea id="fallback" hidden aria-label="Auswahl als Text zum Kopieren" readonly></textarea>
+
+  <main id="sheet" style="display:grid;gap:44px"></main>
+
+  <footer>Mit „Auswahl kopieren“ landet die Liste in der Zwischenablage. Füge sie im Chat ein, oder schreib einfach „alle Empfehlungen“. Anmerkungen pro Zeile werden mitkopiert.</footer>
+</div>
+
+<script>
+const bar=(...items)=>`<div class="m-bar">${items.map(i=>i[0]==='*'?`<span class="b on">${i.slice(1)}</span>`:i[0]==='!'?`<span class="b x">${i.slice(1)}</span>`:`<span class="b">${i}</span>`).join('')}</div>`
+const lines=n=>Array.from({length:n},(_,i)=>`<div class="ln${i%4===3?' s':''}"></div>`).join('')
+const page=(inner='',n=7,cls='')=>`<div class="pg ${cls}">${inner}${lines(n)}</div>`
+const screen=(top,body)=>`<div class="m" aria-hidden="true">${top}<div class="m-body">${body}</div></div>`
+const dialog=(top,title,body,wide)=>screen(top,page('',9)+`<div class="dim"><div class="dlg${wide?' wide':''}"><b>${title}</b>${body}</div></div>`)
+const row=(a,b='')=>`<div class="r"><span>${a}</span><span>${b}</span></div>`
+const acts=(...items)=>`<div class="acts">${items.map(i=>i[0]==='!'?`<span class="b x">${i.slice(1)}</span>`:`<span class="b">${i}</span>`).join('')}</div>`
+const main=['PDF öffnen','Entwürfe ▾','Seiten verwalten','Suchen']
+const ex='!Exportieren'
+
+const decisions=[
+{id:'platz',tag:'T22 · T23 · T24 · T25 · T26',title:'Wo liegen die neuen Funktionen?',q:'Die obere Leiste ist schon voll. Fünf neue Funktionen brauchen einen festen Platz.',rec:'a',variants:{
+ a:{name:'Menü „Dokument ▾“',why:'Eine Schaltfläche mehr, die Leiste bleibt ruhig. Funktionen sind einen Klick tiefer.',html:screen(bar(...main,'*Dokument ▾',ex),`<div class="pg">${lines(4)}</div><div class="dlg" style="position:absolute;left:96px;top:6px;width:150px"><span>Dokumentinfo …</span><span>Seitenzahlen, Kopf-/Fußzeile …</span><span>Text erkennen (OCR) …</span><span>Tabelle exportieren …</span><span style="border-top:1px solid var(--line);padding-top:2px">Dokumentprüfung</span></div>`)},
+ b:{name:'Neue Gruppe in der Werkzeugleiste',why:'Alles direkt sichtbar. Die Leiste bricht auf kleinen Fenstern früher um.',html:screen(bar(...main,ex)+bar('Auswahl','Text','Stift','Rechteck','Schwärzen')+bar('*Stempel','*Seitenzahlen','*Info','*OCR','*Tabelle'),page('',6))},
+ c:{name:'In „Seiten verwalten“',why:'Passt zu Seitenbezug von OCR und Seitenzahlen. Dokumentinfo und Stempel gehören dort aber kaum hin.',html:screen(bar(...main.slice(0,2),'*Zur Dokumentbearbeitung',ex),`<div class="pan"><b>Seiten verwalten</b><span>Drehen · Zuschneiden</span><span class="ok">Seitenzahlen …</span><span class="ok">Text erkennen …</span><span class="ok">Tabelle …</span><span class="ok">Dokumentinfo …</span></div>${page('',6)}`)}}},
+{id:'t17',tag:'T17',title:'Vorabprüfung vor dem Export',q:'Signaturen, Formulare, Lesezeichen und nicht darstellbare Zeichen: Wo erfährst du davon, und wo entscheidest du?',rec:'a',variants:{
+ a:{name:'Prüfbericht im Export-Dialog',why:'Kein zusätzlicher Schritt. Risiken stehen dort, wo du den Export auslöst. Warnungen brauchen einen Haken.',html:dialog(bar(...main,ex),'PDF exportieren',`<span class="w">Signatur wird ungültig ☐ verstanden</span><span class="bad">„Ω“ fehlt in Helvetica · S. 2 [Zur Stelle]</span>${row('Formulare, Lesezeichen','<span class="ok">bleiben</span>')}${row('Tags','<span class="warn">unbekannt</span>')}<span class="b" style="align-self:start">☐ Bilddaten komprimieren</span>`+acts('Abbrechen','!Exportieren'))},
+ b:{name:'Eigener Schritt vor dem Export',why:'Bewusste Prüfung als Schritt 1 von 2. Ein Klick mehr bei jedem Export, auch wenn nichts vorliegt.',html:dialog(bar(...main,ex),'Schritt 1 von 2: Prüfung',`${row('Signatur','<span class="warn">wird ungültig</span>')}${row('Aktive Inhalte','<span class="ok">keine</span>')}${row('Anhänge','<span class="ok">bleiben</span>')}${row('XFA','<span class="warn">unbekannt</span>')}${row('Zeichen','<span class="bad">1 fehlt</span>')}`+acts('Abbrechen','!Weiter'))},
+ c:{name:'Dauerhafter Status in der Leiste',why:'Du siehst Risiken schon vor dem Bearbeiten. Braucht Platz, und beim Export wird trotzdem bestätigt.',html:screen(bar(...main,'<span class="warn">⚠ 2 Hinweise</span>',ex),`${page('',7)}<div class="pan"><b>Dokumentprüfung</b><span class="w">Signatur wird beim Ändern ungültig</span><span class="w">„Ω“ fehlt · S. 2</span><span>Formulare: bleiben</span><span>Stand: aktuell</span></div>`)}}},
+{id:'t18',tag:'T18',title:'Verlustfreie Optimierung im Export',q:'Der neue Modus muss klar von der Bildkompression getrennt sein und darf keine Einsparung versprechen.',rec:'a',variants:{
+ a:{name:'Eine Auswahl „Dateigröße“',why:'Drei klare Stufen, immer nur eine aktiv. Am leichtesten zu verstehen, Kombination gibt es nicht.',html:dialog(bar(...main,ex),'PDF exportieren',`<b>Dateigröße</b><span>○ Nicht optimieren</span><span><strong>● Struktur optimieren</strong> · verlustfrei</span><span>○ Bilddaten komprimieren · Qualität kann sinken</span><span class="why">Keine Einsparung garantiert.</span>`+acts('Abbrechen','!Exportieren'))},
+ b:{name:'Zwei getrennte Schalter',why:'Lässt sich kombinieren und spart dann am meisten. Mehr Zustände, die der Dialog erklären muss.',html:dialog(bar(...main,ex),'PDF exportieren',`<span>☑ <strong>Struktur optimieren</strong> · verlustfrei</span><span>☐ <strong>Bilddaten komprimieren</strong></span><span>☐ Mit Passwort schützen</span><span class="why">Beide zusammen möglich.</span>`+acts('Abbrechen','!Vorbereiten'))},
+ c:{name:'Ergebnisse vergleichen',why:'Du wählst nach echten Dateigrößen. Dafür rechnet der Export alle Stufen und dauert länger.',html:dialog(bar(...main,ex),'Export vorbereitet',`${row('Unverändert','12,4 MiB')}${row('<strong>Struktur optimiert</strong>','<span class="ok">11,1 MiB</span>')}${row('Bilder: Ausgewogen','4,8 MiB')}<span class="why">Tatsächliche Größen dieser Datei.</span>`+acts('Zurück','!Speichern'))}}},
+{id:'t19',tag:'T19',title:'Originaltext markieren und kopieren',q:'Ziehen auf der Seite ist schon mit Werkzeugen belegt. Wann soll Ziehen Text markieren?',rec:'a',variants:{
+ a:{name:'Immer im Auswahl-Werkzeug',why:'Verhält sich wie jeder PDF-Viewer und braucht nichts Neues. Overlays liegen darüber und bleiben greifbar.',html:screen(bar(...main,ex)+bar('*Auswahl','Text','Stift','Rechteck'),page(`<div class="sel" style="width:80%">Vorhandener Text ist markiert</div>`,6))},
+ b:{name:'Eigenes Werkzeug „Text markieren“',why:'Keine Überschneidung mit Verschieben. Du musst das Werkzeug aber erst wählen.',html:screen(bar(...main,ex)+bar('Auswahl','*Text markieren','Text','Stift'),page(`<div class="sel" style="width:80%">Vorhandener Text ist markiert</div>`,6))},
+ c:{name:'Lesemodus als Schalter',why:'Klare Trennung von Lesen und Bearbeiten. Ein Moduswechsel mehr, und Overlays sind solange gesperrt.',html:screen(bar(...main,'*Lesemodus',ex),page(`<div class="sel" style="width:80%">Vorhandener Text ist markiert</div>`,6)+`<div class="pan" style="width:30%"><b>Lesen</b><span>Werkzeuge ausgeblendet</span></div>`)}}},
+{id:'t21',tag:'T21',title:'Fortschritt und Abbruch beim Export',q:'Der Export läuft künftig im Hintergrund. Wie siehst du das, und was geht währenddessen?',rec:'a',variants:{
+ a:{name:'Balken im Export-Dialog',why:'Vertrautes Verhalten, ein klarer Abbrechen-Knopf. Editor bleibt gesperrt, also kein veralteter Stand.',html:dialog(bar(...main,ex),'PDF exportieren',`<span>Bilddaten optimieren: 6 / 10</span><div class="bar"><i></i></div><span class="why">Die Bearbeitung wartet, bis der Export fertig ist.</span>`+acts('!Abbrechen'))},
+ b:{name:'Schrittliste im Dialog',why:'Zeigt genau, was gerade passiert. Mehr Text für einen meist kurzen Vorgang.',html:dialog(bar(...main,ex),'PDF exportieren',`<span class="ok">✓ Seiten zusammensetzen</span><span class="ok">✓ Overlays schreiben</span><span><strong>… Bilddaten optimieren 6 / 10</strong></span><span class="why">○ Verschlüsseln</span><span class="why">○ Speichern</span>`+acts('!Abbrechen'))},
+ c:{name:'Anzeige in der Leiste',why:'Du arbeitest weiter. Jede Änderung verwirft den Lauf, der Export startet dann neu.',html:screen(bar(...main,'<span class="b">Export 62 % ✕</span>',ex),page('',7)+`<div class="foot" style="color:var(--muted)">Weiterarbeiten möglich · Änderung verwirft den Lauf</div>`)}}},
+{id:'t22',tag:'T22',title:'Seitenzahlen, Kopf- und Fußzeilen',q:'Inhalt, Position und Seitenbereich wählen und auf echten Seitenformaten prüfen. Danach ein Undo-Schritt.',rec:'a',variants:{
+ a:{name:'Dialog mit Live-Vorschau',why:'Einstellungen und Vorschau nebeneinander, Blättern durch gedrehte oder zugeschnittene Seiten inklusive.',html:dialog(bar(...main,ex),'Seitenzahlen, Kopf- und Fußzeile',`<div style="display:flex;gap:6px"><div style="flex:1;display:flex;flex-direction:column;gap:2px;min-width:0"><span>Text: Seite {n} von {gesamt}</span><span>Seiten: 2–14</span><span>Start bei: 1</span><div class="grid3"><span></span><span></span><span></span><span></span><span class="on"></span><span></span></div></div><div class="pg" style="height:74px;flex:.8">${lines(4)}<div class="foot">Seite 1 von 13</div></div></div>`+acts('Abbrechen','!Anwenden'),true)},
+ b:{name:'Bereich in „Seiten verwalten“',why:'Nutzt deine vorhandene Seitenauswahl. Vorschau ist nur als Miniatur sichtbar.',html:screen(bar(...main.slice(0,2),'*Zur Dokumentbearbeitung',ex),`<div class="pan"><b>Seitenzahlen</b><span>Seite {n}</span><div class="grid3"><span></span><span></span><span></span><span></span><span class="on"></span><span></span></div><span>Auf 3 markierte Seiten</span><span class="b x" style="align-self:start">Anwenden</span></div><div class="pg">${lines(5)}<div class="foot">Seite 1</div></div>`)},
+ c:{name:'Leiste direkt auf der Seite',why:'Vorschau ist die echte Seite im Zoom. Ein Seitenbereich mit vielen Formaten lässt sich so schlechter prüfen.',html:screen(bar(...main,ex)+bar('Seite {n} von {gesamt}','Seiten 2–14','Unten Mitte','*Anwenden'),page(`<div class="foot">Seite 1 von 13</div>`,7))}}},
+{id:'t23',tag:'T23',title:'Stempel',q:'Kleiner Startsatz (Erledigt, Geprüft, Entwurf, Vertraulich, Kopie, Datum) plus eigene Texte, lokal gespeichert.',rec:'a',variants:{
+ a:{name:'Auswahlmenü wie bei den Symbolen',why:'Gleicher Weg wie der vorhandene Symbol-Picker: wählen, auf die Seite klicken. Eigene Stempel unten im Menü.',html:screen(bar(...main,ex)+bar('Auswahl','Text','*Stempel ▾','Stift'),page(`<div class="stamp">ERLEDIGT</div>`,7)+`<div class="dlg" style="position:absolute;left:92px;top:4px;width:120px"><span class="stamp" style="align-self:start">ERLEDIGT</span><span class="stamp" style="align-self:start">GEPRÜFT</span><span>Datum wählen …</span><span>Eigener Stempel …</span></div>`)},
+ b:{name:'Seitenleiste als Galerie',why:'Alle Stempel sichtbar, gut bei vielen eigenen Stempeln. Nimmt dauerhaft Platz neben der Seite.',html:screen(bar(...main,ex),page(`<div class="stamp">GEPRÜFT</div>`,7)+`<div class="pan"><b>Stempel</b><span class="stamp" style="align-self:start">ERLEDIGT</span><span class="stamp" style="align-self:start">GEPRÜFT</span><span class="stamp" style="align-self:start">ENTWURF</span><span>+ Eigener Stempel</span></div>`)},
+ c:{name:'Stempel im Dialog gestalten',why:'Text, Farbe und Datum vor dem Platzieren einstellen. Für den häufigen Fall ein Schritt zu viel.',html:dialog(bar(...main,ex),'Stempel',`<span>Text: Erledigt</span><span>Farbe: Rot · Rahmen: an</span><span>Datum: 30.10.2026</span><span class="stamp" style="align-self:center">ERLEDIGT 30.10.2026</span>`+acts('Abbrechen','!Platzieren'))}}},
+{id:'t24',tag:'T24',title:'Dokumentinfo (Metadaten)',q:'Titel, Autor, Betreff und Schlagwörter ansehen, ändern oder entfernen, inklusive XMP.',rec:'a',variants:{
+ a:{name:'Eigener Dialog „Dokumentinfo“',why:'Klar abgegrenzt, Bestätigung und Hinweis zur Anonymisierung passen hinein. Änderung ist ein Undo-Schritt.',html:dialog(bar(...main,ex),'Dokumentinfo',`${row('Titel','Angebot 2026')}${row('Autor','M. Muster')}${row('Betreff','<span class="why">leer</span>')}${row('Software','<span class="why">technisch</span>')}<span class="w">Entfernen ist keine Anonymisierung.</span>`+acts('Alle entfernen','Abbrechen','!Übernehmen'),true)},
+ b:{name:'Abschnitt im Export-Dialog',why:'Metadaten fallen genau beim Weitergeben auf. Der Dialog wird länger, Änderungen sind kein Undo-Schritt im Editor.',html:dialog(bar(...main,ex),'PDF exportieren',`<span>☐ Bilddaten komprimieren</span><span>☐ Mit Passwort schützen</span><b>▾ Dokumentinfo</b>${row('Titel','Angebot 2026')}${row('Autor','M. Muster')}<span>☑ Autor entfernen</span>`+acts('Abbrechen','!Exportieren'))},
+ c:{name:'Panel neben der Seite',why:'Während der Arbeit sichtbar. Für eine seltene Aufgabe viel dauerhafte Fläche.',html:screen(bar(...main,ex),page('',7)+`<div class="pan"><b>Dokumentinfo</b><span>Titel: Angebot 2026</span><span>Autor: M. Muster</span><span>Betreff: leer</span><span class="b" style="align-self:start">Entfernen</span></div>`)}}},
+{id:'t25',tag:'T25',title:'Lokale Texterkennung (OCR)',q:'Erkennung startet ausdrücklich pro ausgewählter Seite. Das Ergebnis muss vor der Übernahme prüfbar sein.',rec:'a',variants:{
+ a:{name:'Dialog mit Seitenwahl, dann Vergleich',why:'Seiten und Sprache vorab, danach Scan und Text nebeneinander. Fortschritt und Abbruch haben einen festen Platz.',html:dialog(bar(...main,ex),'Text erkennen · Seite 3',`<div style="display:flex;gap:5px"><div class="pg scan" style="height:78px;flex:1"></div><div style="flex:1;min-width:0;display:flex;flex-direction:column;gap:2px"><span>Sprache: Deutsch ▾</span><span>12 Zeilen erkannt</span><span class="w">3 Wörter unsicher</span></div></div>`+acts('Verwerfen','!Übernehmen'),true)},
+ b:{name:'Hinweis direkt an der Scan-Seite',why:'Du findest die Funktion genau dort, wo sie fehlt. Mehrere Seiten gehen nur einzeln.',html:screen(bar(...main,ex),`<div class="pg scan">${'<div class="w" style="align-self:center">Keine Textebene · <u>Text erkennen</u></div>'}</div>`)},
+ c:{name:'Eigene Spalte zum Abarbeiten',why:'Gut für viele Seiten am Stück. Mehr Oberfläche als für den Einzelfall nötig.',html:screen(bar(...main,ex),`<div class="pg scan"></div><div class="pan"><b>Texterkennung</b><span class="ok">✓ Seite 1 · geprüft</span><span>… Seite 2 · 40 %</span><span>○ Seite 3</span><div class="bar"><i></i></div><span class="b" style="align-self:start">Abbrechen</span></div>`)}}},
+{id:'t26',tag:'T26',title:'Tabelle nach XLSX oder ODS',q:'Bereich wählen, Spalten korrigieren, Werte prüfen, erst dann exportieren. Quelldokument bleibt unverändert.',rec:'a',variants:{
+ a:{name:'Arbeitsbereich wie die Textkorrektur',why:'Seite links mit Rahmen und Spaltenlinien, Tabelle rechts. Viel Platz und bekannte Bedienlogik.',html:screen(bar(...main.slice(0,2),'*Zur Dokumentbearbeitung',ex),`<div class="pg">${lines(8)}<div class="frame" style="left:10%;right:8%;top:24%;bottom:18%"><div class="col" style="left:46%"></div><div class="col" style="left:72%"></div></div></div><div class="pan" style="width:50%"><b>Tabelle prüfen</b><div class="cells"><span>Posten</span><span>Menge</span><span>Preis</span><span>Papier</span><span>0042</span><span>1.234,50</span><span>Toner</span><span class="q">12,5?</span><span>89,90</span></div><span>☐ Geprüft</span><span class="b" style="align-self:start;opacity:.6">Export gesperrt</span></div>`)},
+ b:{name:'Dialog in drei Schritten',why:'Geführter Ablauf. Ein Dialog ist für große Tabellen eng, und beim Korrigieren springst du zurück.',html:dialog(bar(...main,ex),'Tabelle · 2 von 3: Werte prüfen',`<div class="cells"><span>Posten</span><span>Menge</span><span>Preis</span><span>Papier</span><span>0042</span><span>1.234,50</span></div><span class="why">1 Bereich ✓ · 2 Werte · 3 Export</span>`+acts('Zurück','!Weiter'),true)},
+ c:{name:'Leiste unter der Seite',why:'Seite bleibt groß. Breite Tabellen passen schlecht in die flache Leiste.',html:screen(bar(...main,ex),`<div style="flex:1;display:flex;flex-direction:column;gap:4px;min-width:0"><div class="pg">${lines(4)}<div class="frame" style="left:10%;right:8%;top:30%;bottom:10%"></div></div><div class="cells"><span>Posten</span><span>Menge</span><span>Preis</span><span>Papier</span><span>0042</span><span>1.234,50</span></div></div>`)}}},
+]
+
+const sheet=document.getElementById('sheet')
+sheet.innerHTML=decisions.map(d=>`<fieldset class="decision"><legend class="head"><span class="tag">${d.tag}</span><h2>${d.title}</h2><span class="question">${d.q}</span></legend>
+<div class="variants">${Object.entries(d.variants).map(([key,v])=>`<label class="variant" for="${d.id}-${key}">${v.html}<div class="text"><span class="pick"><input type="radio" id="${d.id}-${key}" name="${d.id}" value="${key}"${key===d.rec?' checked':''}><span>${key.toUpperCase()} · ${v.name}${key===d.rec?'<span class="rec">Empfehlung</span>':''}</span></span><span class="why">${v.why}</span></div></label>`).join('')}</div>
+<div class="note"><label for="${d.id}-note">Anmerkung (optional)</label><input id="${d.id}-note" type="text" autocomplete="off"></div></fieldset>`).join('')
+
+const picked=d=>document.querySelector(`input[name="${d.id}"]:checked`).value
+const update=()=>{document.getElementById('changed').textContent=decisions.filter(d=>picked(d)!==d.rec).length;document.getElementById('copied').textContent=''}
+sheet.addEventListener('change',update)
+const summary=()=>decisions.map(d=>{const key=picked(d),note=document.getElementById(`${d.id}-note`).value.trim();return `${d.tag.split(' · ')[0]} ${d.title}: ${key.toUpperCase()} (${d.variants[key].name})${note?` · ${note}`:''}`}).join('\n')
+document.getElementById('copy').addEventListener('click',()=>{
+  const text=summary(),status=document.getElementById('copied'),box=document.getElementById('fallback')
+  const manual=()=>{box.hidden=false;box.value=text;box.focus();box.select();status.textContent='Bitte aus dem Feld unten kopieren.'}
+  if(!navigator.clipboard){manual();return}
+  navigator.clipboard.writeText(text).then(()=>{box.hidden=true;status.textContent='Kopiert. Jetzt im Chat einfügen.'},manual)
+})
+</script>

@@ -1,13 +1,16 @@
 import { sanitizeRedactedSource } from './redactionSafety'
 import type { FormValues } from '../forms'
 import { applyFormValues, updateFormAppearances } from './acroForm'
-import { PDFDict, PDFDocument, PDFName, PDFNumber, PDFObjectCopier, PDFPage, PDFPageLeaf, StandardFonts, degrees } from 'pdf-lib'
+import { PDFDict, PDFDocument, PDFName, PDFNumber, PDFObjectCopier, PDFPage, PDFPageLeaf, PDFRef, StandardFonts, degrees } from 'pdf-lib'
+import { copyOutlines, copyTags, keepsTagOrder, pageOrigin } from './preserveStructure'
 import { cloneOverlay, createId, type Overlay } from '../model'
 import { exportPdf } from './exportPdf'
 import { pageSize, type DocumentPage, type PageSource } from '../pages'
 import { importImage } from '../images/importImage'
 import { initialImageGeometry } from '../images/geometry'
 import { retainPageWidgets, namespaceFormResources, mergeAcroForm } from './preserveForms'
+import { assertFileBudget, assertPageBudget } from './documentBudget'
+import { writeOcrLayers } from '../ocr/ocrLayer'
 
 export async function inspectPages(
   bytes: Uint8Array,
@@ -15,6 +18,7 @@ export async function inspectPages(
   sourceId = 'original',
 ): Promise<DocumentPage[]> {
   const doc = await PDFDocument.load(bytes)
+  assertPageBudget(doc.getPageCount())
   const hasXfa = !!doc.catalog.lookupMaybe(PDFName.of('AcroForm'), PDFDict)?.has(PDFName.of('XFA'))
   if (hasXfa && sourceId !== 'original')
     throw new Error('XFA-Formulare werden bei Seitenoperationen noch nicht unterstützt.')
@@ -45,6 +49,27 @@ export async function inspectPages(
   })
 }
 
+/** True when an export keeps the original page tree, and so its document-level
+ * structures (forms, metadata, outlines, tags). */
+export async function keepsPageTree(original: Uint8Array, pages: DocumentPage[], secure: boolean): Promise<boolean> {
+  if (secure || !pages.every((page, index) => page.sourceId === 'original' && page.sourceIndex === index)) return false
+  const initial = await inspectPages(original, 'original')
+  return initial.length === pages.length && initial.every((page, index) =>
+    JSON.stringify(page.box) === JSON.stringify(pages[index].box) &&
+    page.unit === pages[index].unit &&
+    page.rotation === pages[index].rotation)
+}
+
+const sourceBytes = (id: string, original: Uint8Array, sources: PageSource[]) => (id === 'original' ? original : sources.find(source => source.id === id)?.bytes)
+
+/** Whether a rebuilt document can keep its tags: all pages of one source, complete and in order. */
+export async function tagsSurvive(original: Uint8Array, sources: PageSource[], pages: DocumentPage[], secure: boolean): Promise<boolean> {
+  if (secure || !pages.length) return false
+  const bytes = sourceBytes(pageOrigin(pages[0]), original, sources)
+  if (!bytes) return false
+  return keepsTagOrder(pages, (await PDFDocument.load(bytes, { updateMetadata: false })).getPageCount())
+}
+
 /** Base content only. Overlays remain editable and are applied by exportPdf afterwards. */
 export async function composePages(
   original: Uint8Array,
@@ -52,31 +77,33 @@ export async function composePages(
   pages: DocumentPage[],
   formValues: FormValues = {},
   secure = pages.some(page => page.redacted),
+  keptTree?: boolean,
+): Promise<Uint8Array> {
+  return writeOcrLayers(await composeBase(original, sources, pages, formValues, secure, keptTree), pages)
+}
+
+async function composeBase(
+  original: Uint8Array,
+  sources: PageSource[],
+  pages: DocumentPage[],
+  formValues: FormValues,
+  secure: boolean,
+  keptTree?: boolean,
 ): Promise<Uint8Array> {
   if (!pages.length) throw new Error('Ein PDF muss mindestens eine Seite enthalten.')
   // An ordinary overlay edit must not rebuild the page tree: preserve forms,
   // metadata, outlines and other document-level structures when no page changed.
-  if (!secure && pages.every((page, index) => page.sourceId === 'original' && page.sourceIndex === index)) {
-    const initial = await inspectPages(original, 'original')
-    if (
-      initial.length === pages.length &&
-      initial.every(
-        (page, index) =>
-          JSON.stringify(page.box) === JSON.stringify(pages[index].box) &&
-          page.unit === pages[index].unit &&
-          page.rotation === pages[index].rotation,
-      )
-    ) {
-      if (!Object.keys(formValues).length) return original.slice()
-      const doc = await PDFDocument.load(original)
-      if (doc.catalog.lookupMaybe(PDFName.of('AcroForm'), PDFDict)?.has(PDFName.of('XFA'))) throw new Error('XFA-Formulare werden noch nicht unterstützt.')
-      if (applyFormValues(doc, 'original', formValues)) { await updateFormAppearances(doc); return doc.save({ updateFieldAppearances: false }) }
-      return original.slice()
-    }
+  if (keptTree ?? await keepsPageTree(original, pages, secure)) {
+    if (!Object.keys(formValues).length) return original.slice()
+    const doc = await PDFDocument.load(original, { updateMetadata: false })
+    if (doc.catalog.lookupMaybe(PDFName.of('AcroForm'), PDFDict)?.has(PDFName.of('XFA'))) throw new Error('XFA-Formulare werden noch nicht unterstützt.')
+    if (applyFormValues(doc, 'original', formValues)) { await updateFormAppearances(doc); return doc.save({ updateFieldAppearances: false }) }
+    return original.slice()
   }
 
-  const output = await PDFDocument.create()
+  const output = await PDFDocument.create({ updateMetadata: false })
   const loaded = new Map<string, { doc: PDFDocument; copier: PDFObjectCopier }>()
+  const outputRefs: PDFRef[] = []
   for (const page of pages) {
     let source = loaded.get(page.sourceId)
     if (!source) {
@@ -100,14 +127,48 @@ export async function composePages(
     copied.setCropBox(page.box.x, page.box.y, page.box.width, page.box.height)
     copied.node.set(PDFName.of('UserUnit'), PDFNumber.of(page.unit))
     output.addPage(copied)
+    outputRefs.push(ref as PDFRef)
   }
   // Stable names: preserve original field names even when attachments move before them.
   for (const id of ['original', ...sources.map(s => s.id)]) {
     const source = loaded.get(id)
     if (source) mergeAcroForm(source.doc, output, source.copier)
   }
+  // A redacted export carries no navigation: it could name what was blacked out.
+  if (!secure) await carryStructure(original, sources, pages, output, outputRefs, loaded)
   return output.save({ updateFieldAppearances: false })
 }
+async function carryStructure(
+  original: Uint8Array,
+  sources: PageSource[],
+  pages: DocumentPage[],
+  output: PDFDocument,
+  outputRefs: PDFRef[],
+  loaded: Map<string, { doc: PDFDocument; copier: PDFObjectCopier }>,
+) {
+  const origins = new Map<string, { doc: PDFDocument; pages: Map<PDFRef, PDFRef> }>()
+  for (const [index, page] of pages.entries()) {
+    const id = pageOrigin(page)
+    let origin = origins.get(id)
+    if (!origin) {
+      // A fully corrected document no longer loads its origin for the page content.
+      const bytes = sourceBytes(id, original, sources)
+      const doc = loaded.get(id)?.doc ?? (bytes ? await PDFDocument.load(bytes, { updateMetadata: false }) : undefined)
+      if (!doc) continue
+      origin = { doc, pages: new Map() }
+      origins.set(id, origin)
+    }
+    const ref = origin.doc.getPage(page.sourceIndex).ref
+    if (!origin.pages.has(ref)) origin.pages.set(ref, outputRefs[index])
+  }
+  copyOutlines([...origins.values()], output)
+  const [origin] = origins.values()
+  if (origins.size === 1 && keepsTagOrder(pages, origin.doc.getPageCount())) {
+    const copier = loaded.get(pageOrigin(pages[0]))?.copier ?? PDFObjectCopier.for(origin.doc.context, output.context)
+    copyTags(origin.doc, output, copier, origin.pages)
+  }
+}
+
 /** A white sheet; the actual image is an editable overlay, not baked into the PDF. */
 export async function imagePageBytes(size: { width: number; height: number }): Promise<Uint8Array> {
   const doc = await PDFDocument.create()
@@ -151,6 +212,7 @@ export async function textPageBytes(text: string, size = { width: 595.28, height
   return doc.save()
 }
 export async function importPageFile(file: File, size = { width: 595.28, height: 841.89 }) {
+  assertFileBudget(file.size)
   if (/\.pdf$/i.test(file.name) || file.type === 'application/pdf')
     return preparePages(new Uint8Array(await file.arrayBuffer()), file.name)
   const image = await importImage(file)
@@ -175,6 +237,7 @@ export async function exportPageDocument(
   pageId?: string | readonly string[],
   formValues: FormValues = {},
   secure = pages.some(page => page.redacted),
+  keptTree?: boolean,
 ) {
   if (pageId !== undefined) {
     const ids = new Set(typeof pageId === 'string' ? [pageId] : pageId), available = new Set(pages.map(page => page.id))
@@ -186,5 +249,5 @@ export async function exportPageDocument(
       .map(overlay => ({ ...cloneOverlay(overlay), pageIndex: indices.get(pages[overlay.pageIndex].id)! }))
     return exportPdf(await composePages(original, sources, chosen, formValues, secure), mapped)
   }
-  return exportPdf(await composePages(original, sources, pages, formValues, secure), overlays)
+  return exportPdf(await composePages(original, sources, pages, formValues, secure, keptTree), overlays)
 }

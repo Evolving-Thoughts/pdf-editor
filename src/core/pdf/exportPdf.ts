@@ -41,25 +41,26 @@ const FONT_VARIANTS: Record<Exclude<OverlayFont, BundledFont>, { plain: Standard
   },
 }
 
+/** Characters without a glyph, in text order and once each. The preflight shows these before export. */
+export function unsupportedCharacters(font: PDFFont, text: string): string[] {
+  const supported = new Set(font.getCharacterSet()), missing = new Set<string>()
+  for (const char of text.replace(/\r\n?/g, '\n'))
+    // A line break is layout, not a font glyph.
+    if (char !== '\n' && !supported.has(char.codePointAt(0)!)) missing.add(char)
+  return [...missing]
+}
+
 /**
- * Keeps only characters the embedded font can encode, so one bad box can
- * never abort the whole export: unencodable characters become '?' in text
- * fonts (WinAnsi) and are dropped in ZapfDingbats (e.g. a letter typed into
- * a symbol box). Checked per character against the font itself.
+ * Keeps only characters the embedded font has, so one bad box can never abort
+ * the whole export: others become '?' in text fonts and are dropped in
+ * ZapfDingbats (e.g. a letter typed into a symbol box). The export dialog
+ * lists them first and asks before anything is replaced.
  */
 function sanitizeFor(font: PDFFont, text: string, fontKey: OverlayFont): string {
   const fallback = fontKey === 'zapfdingbats' ? '' : '?'
+  const missing = new Set(unsupportedCharacters(font, text))
   let out = ''
-  for (const char of text.replace(/\r\n?/g, '\n')) {
-    // A line break is layout, not a font glyph; don't replace it with '?'.
-    if (char === '\n') { out += char; continue }
-    try {
-      font.encodeText(char)
-      out += char
-    } catch {
-      out += fallback
-    }
-  }
+  for (const char of text.replace(/\r\n?/g, '\n')) out += missing.has(char) ? fallback : char
   return out
 }
 
@@ -72,8 +73,25 @@ function variantFor(overlay: Textbox): StandardFonts {
   return variants.plain
 }
 
+/** The one place that picks an overlay's font, shared by export and preflight. */
+export async function embedOverlayFont(doc: PDFDocument, overlay: Textbox, fonts: Map<string, PDFFont>): Promise<PDFFont> {
+  const custom = isBundledFont(overlay.font)
+  const variant = custom ? bundledFontUrl(overlay) : variantFor(overlay)
+  let font = fonts.get(variant)
+  if (!font) {
+    if (custom) {
+      const { default: fontkit } = await import('@pdf-lib/fontkit')
+      doc.registerFontkit(fontkit)
+      font = await doc.embedFont(await loadBundledFont(variant), { subset: true })
+    } else font = await doc.embedFont(variant)
+    fonts.set(variant, font)
+  }
+  return font
+}
+
 export async function exportPdf(bytes: Uint8Array, overlays: Overlay[] = []): Promise<Uint8Array> {
-  const doc = await PDFDocument.load(bytes)
+  // No library entries: metadata is decided in T24 and must not come back by itself.
+  const doc = await PDFDocument.load(bytes, { updateMetadata: false })
   const fonts = new Map<string, PDFFont>()
   const images = new Map<string, PDFImage>()
   for (const overlay of overlays) {
@@ -118,17 +136,7 @@ export async function exportPdf(bytes: Uint8Array, overlays: Overlay[] = []): Pr
         continue
       }
       if (overlay.text.trim().length === 0) continue
-      const custom = isBundledFont(overlay.font)
-      const variant = custom ? bundledFontUrl(overlay) : variantFor(overlay)
-      let font = fonts.get(variant)
-      if (!font) {
-        if (custom) {
-          const { default: fontkit } = await import('@pdf-lib/fontkit')
-          doc.registerFontkit(fontkit)
-          font = await doc.embedFont(await loadBundledFont(variant), { subset: true })
-        } else font = await doc.embedFont(variant)
-        fonts.set(variant, font)
-      }
+      const font = await embedOverlayFont(doc, overlay, fonts)
       const text = sanitizeFor(font, overlay.text, overlay.font)
       if (text.length === 0) continue
       const space = displayedPageSpace(page)

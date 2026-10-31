@@ -1,14 +1,16 @@
 // Core module: load, render and release PDFs (PDF.js).
 // The UI only ever talks to the PdfHandle, never to pdfjs-dist directly
 // (core/UI boundary, ADR-004).
-import { getDocument, GlobalWorkerOptions } from 'pdfjs-dist'
+import { getDocument, GlobalWorkerOptions, TextLayer } from 'pdfjs-dist'
 import workerUrl from 'pdfjs-dist/build/pdf.worker.min.mjs?url'
 import type { OverlayFont } from '../model'
 import type { Redaction } from '../redactions'
-import { renderPlan, validatePageSize } from './renderBudget'
+import { MAX_RENDER_PIXELS, renderPlan, validatePageSize } from './renderBudget'
+import { RenderQueue } from './renderQueue'
 import type { SearchFragment } from '../search'
 
 GlobalWorkerOptions.workerSrc = workerUrl
+const OCR_DPI = 300
 
 export interface PageSize {
   width: number
@@ -23,14 +25,20 @@ export interface RasterizedPage { png: Uint8Array; replacements: {markId:string;
 export interface PdfHandle {
   readonly fileName: string
   readonly pageCount: number
-  /** Renders a page (1-based) into the canvas; renders per canvas are serialized internally. */
-  renderPage(pageNumber: number, canvas: HTMLCanvasElement, zoom: number): Promise<void>
+  /** Renders a page (1-based) into the canvas. Per canvas in order; all canvases share a parallelism limit. */
+  renderPage(pageNumber: number, canvas: HTMLCanvasElement, zoom: number, signal?: AbortSignal): Promise<void>
+  /** Measurable render load, used by large-document checks. */
+  renderStats(): { active: number; queued: number; peak: number }
   /** Page size in PDF points (1-based page number), cached after first call. */
   getPageSize(pageNumber: number): Promise<PageSize>
   /** Opt-in source mapping; keep the existing size-only contract unchanged. */
   getPageGeometry(pageNumber: number): Promise<SourcePageGeometry>
+  /** Fills the container with transparent, selectable spans over the page. Says whether the page has text. */
+  renderTextLayer(pageNumber: number, container: HTMLElement, zoom: number, signal: AbortSignal): Promise<boolean>
   /** Text and geometry from PDF.js; raster/image pages return no text. */
   getSearchText(pageNumber: number): Promise<SearchFragment[]>
+  /** The displayed page as a picture for text recognition. `scale` is pixels per page point. */
+  renderForOcr(pageNumber: number): Promise<{ image: Blob; scale: number }>
   /** Lossless 300-dpi pixels with outward-rounded opaque masks; never returns source content. */
   rasterizePage(pageNumber:number, marks:Redaction[]):Promise<RasterizedPage>
   /** Releases worker resources; call when switching or closing documents. */
@@ -50,15 +58,16 @@ export async function loadPdf(fileName: string, bytes: Uint8Array): Promise<PdfH
   // Offscreen thumbnails unmount their canvases; do not retain those canvases here.
   const renderQueues = new WeakMap<HTMLCanvasElement, Promise<void>>()
   const sizeCache = new Map<number, PageSize>()
+  const queue = new RenderQueue()
 
   return {
     fileName,
     pageCount: pdfDocument.numPages,
 
-    renderPage(pageNumber, canvas, zoom) {
+    renderPage(pageNumber, canvas, zoom, signal) {
       canvas.dataset.renderState = 'loading'
       const queued = renderQueues.get(canvas) ?? Promise.resolve()
-      const run = queued.catch(() => undefined).then(async () => {
+      const run = queued.catch(() => undefined).then(() => queue.run(async active => {
         const page = await pdfDocument.getPage(pageNumber)
         const base = page.getViewport({ scale: 1 })
         const plan = renderPlan(base.width, base.height, zoom, window.devicePixelRatio ?? 1)
@@ -67,11 +76,46 @@ export async function loadPdf(fileName: string, bytes: Uint8Array): Promise<PdfH
         canvas.height = Math.max(1, Math.floor(viewport.height))
         canvas.style.width = `${Math.floor(plan.cssWidth)}px`
         canvas.style.height = `${Math.floor(plan.cssHeight)}px`
-        await page.render({ canvas, viewport }).promise
+        const task = page.render({ canvas, viewport })
+        const cancel = () => task.cancel()
+        if (active.aborted) cancel()
+        active.addEventListener('abort', cancel, { once: true })
+        try { await task.promise } finally { active.removeEventListener('abort', cancel) }
         if (renderQueues.get(canvas) === run) canvas.dataset.renderState = 'ready'
-      })
+      }, signal))
       renderQueues.set(canvas, run)
       return run
+    },
+
+    renderStats: () => queue.stats(),
+
+    renderForOcr: pageNumber => queue.run(async () => {
+      const page = await pdfDocument.getPage(pageNumber)
+      const base = page.getViewport({ scale: 1 })
+      const scale = Math.min(OCR_DPI / 72, Math.sqrt(MAX_RENDER_PIXELS / base.width / base.height))
+      const viewport = page.getViewport({ scale })
+      const canvas = document.createElement('canvas')
+      canvas.width = Math.ceil(viewport.width)
+      canvas.height = Math.ceil(viewport.height)
+      try {
+        await page.render({ canvas, viewport, background: 'rgb(255,255,255)' }).promise
+        const image = await new Promise<Blob>((resolve, reject) => canvas.toBlob(blob => blob ? resolve(blob) : reject(new Error('Die Seite konnte nicht für die Erkennung vorbereitet werden.')), 'image/png'))
+        return { image, scale }
+      } finally { canvas.width = 1; canvas.height = 1; page.cleanup() }
+    }),
+
+    async renderTextLayer(pageNumber, container, zoom, signal) {
+      const page = await pdfDocument.getPage(pageNumber)
+      if (signal.aborted) return false
+      const viewport = page.getViewport({ scale: zoom })
+      const content = await page.getTextContent()
+      if (signal.aborted) return false
+      container.style.setProperty('--total-scale-factor', String(viewport.scale * viewport.userUnit))
+      const layer = new TextLayer({ textContentSource: content, container, viewport })
+      const cancel = () => layer.cancel()
+      signal.addEventListener('abort', cancel, { once: true })
+      try { await layer.render() } finally { signal.removeEventListener('abort', cancel) }
+      return content.items.some(item => 'str' in item && item.str.trim().length > 0)
     },
 
     async getPageSize(pageNumber) {
@@ -155,6 +199,9 @@ export async function loadPdf(fileName: string, bytes: Uint8Array): Promise<PdfH
       } finally {canvas.width=1;canvas.height=1;page.cleanup()}
     },
 
-    destroy: () => loadingTask.destroy(),
+    destroy() {
+      queue.clear()
+      return loadingTask.destroy()
+    },
   }
 }

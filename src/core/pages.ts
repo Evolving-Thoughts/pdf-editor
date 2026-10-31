@@ -1,5 +1,7 @@
 import type { Command } from './commands'
 import { cloneOverlay, isStroke, isTextbox, type Overlay, type EditorState } from './model'
+import { assertPageBudget, assertSourceBudget } from './pdf/documentBudget'
+import { renumberLabels } from './labelNumbers'
 
 export const A4_WIDTH = 210 * 72 / 25.4
 export const A4_HEIGHT = 297 * 72 / 25.4
@@ -22,7 +24,13 @@ export interface DocumentPage {
   hasForms?: boolean
   /** XFA is not supported by pdf-lib; refuse page edits rather than lose it. */
   hasXfa?: boolean
+  /** Set by text corrections: the source this page is a revision of, for its outlines and tags. */
+  revisionOf?: string
+  /** Recognized words, written as invisible text whenever the page is composed. */
+  ocr?: OcrSourceWord[]
 }
+/** One recognized word in source coordinates: baseline start, direction and height. */
+export interface OcrSourceWord { text: string; x: number; y: number; dx: number; dy: number; height: number }
 export interface PageSource {
   id: string
   bytes: ArrayBuffer
@@ -63,6 +71,7 @@ function pageCommand(
   const before = snapshot(state),
     after = snapshot(state)
   mutate(after)
+  renumberLabels(after.overlays)
   const assign = (target: EditorState, value: typeof before) => {
     target.redactionApplied = value.redactionApplied
     target.redactions = structuredClone(value.redactions)
@@ -104,12 +113,23 @@ export function deletePages(state: EditorState, ids: readonly string[]): Command
 export function deletePage(state: EditorState, id: string): Command {
   return deletePages(state, [id])
 }
+/** One undo step for all pages of a recognition run. */
+export function setPageOcr(state: EditorState, words: ReadonlyMap<string, OcrSourceWord[]>): Command {
+  return pageCommand(state, 'Add recognized text', next => {
+    next.pages.forEach(page => {
+      const recognized = words.get(page.id)
+      if (recognized) page.ocr = structuredClone(recognized)
+    })
+  })
+}
 export function insertPages(
   state: EditorState,
   index: number,
   pages: DocumentPage[],
   source: PageSource,
   overlays: Overlay[] = [],
+  /** The document's own file, which the state does not hold. */
+  originalBytes = 0,
 ): Command {
   if (!Number.isInteger(index) || index < 0 || index > (state.pages?.length ?? 0) || pages.length === 0)
     throw new Error('Ungültige Einfügeposition.')
@@ -119,6 +139,9 @@ export function insertPages(
   )
     throw new Error('Doppelte Seitenkennung.')
   if (pages.some(p => p.hasXfa)) throw new Error('XFA-Formulare werden bei Seitenoperationen noch nicht unterstützt.')
+  assertPageBudget((state.pages?.length ?? 0) + pages.length)
+  if (!state.pageSources?.some(existing => existing.id === source.id))
+    assertSourceBudget((state.pageSources ?? []).reduce((total, existing) => total + existing.bytes.byteLength, originalBytes), source.bytes.byteLength)
   if (overlays.some((o) => !Number.isInteger(o.pageIndex) || o.pageIndex < 0 || o.pageIndex >= pages.length))
     throw new Error('Ungültige Overlay-Seite.')
   return pageCommand(state, 'Insert pages', (next) => {
