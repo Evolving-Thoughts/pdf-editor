@@ -4,7 +4,7 @@ import { encryptInWorker, exportInWorker, preflightInWorker } from '../core/pdf/
 import type { ExportProgress, ExportSize } from '../core/pdf/exportPipeline'
 import { downloadPdf } from '../core/pdf/downloadPdf'
 import type { EditorStore } from '../core/editorStore'
-import { cloneOverlay } from '../core/model'
+import { snapshotDocument } from '../core/pdf/documentOutput'
 import type { PreparedExport } from './ExportDialog'
 import type { ActiveDraft } from './useDraftPersistence'
 
@@ -20,12 +20,7 @@ export function useExportFlow(store: EditorStore, draftRef: RefObject<ActiveDraf
     if (!draft || !store.state.pages?.length) throw new Error('Der Export ist gerade nicht verfügbar.')
     const version = store.getVersion()
     try {
-      return await preflightInWorker({
-        original: new Uint8Array(draft.bytes), sources: store.state.pageSources ?? [], pages: store.state.pages,
-        overlays: store.state.overlays.map(cloneOverlay),
-        secure: !!store.state.redactionApplied || store.state.pages.some(page => page.redacted),
-        metadata: store.state.metadata,
-      }, { signal })
+      return await preflightInWorker(snapshotDocument(new Uint8Array(draft.bytes), store.state), { signal })
     } finally {
       // A failed check is confirmed in the dialog, and that answer is about this state too.
       checkedVersionRef.current = version
@@ -45,12 +40,7 @@ export function useExportFlow(store: EditorStore, draftRef: RefObject<ActiveDraf
           throw new Error('Vorgemerkte Schwärzungen zuerst anwenden oder verwerfen; sie sind noch nicht sicher entfernt.')
         if (checkedVersionRef.current !== store.getVersion())
           throw new Error('Der Stand hat sich seit der Prüfung geändert. Bitte den Export neu öffnen.')
-        const result = await exportInWorker({
-          original: new Uint8Array(draft.bytes), sources: store.state.pageSources ?? [], pages: store.state.pages,
-          overlays: store.state.overlays.map(cloneOverlay), formValues: store.state.formValues,
-          secure: !!store.state.redactionApplied || store.state.pages.some(page => page.redacted), size,
-          metadata: store.state.metadata,
-        }, { signal, onProgress })
+        const result = await exportInWorker({ ...snapshotDocument(new Uint8Array(draft.bytes), store.state), size }, { signal, onProgress })
         checkExportAbort(signal)
         // An outdated result is thrown away, whatever changed in the meantime.
         if (draftRef.current !== draft || documentIntentRef.current !== intent || store.getVersion() !== version)

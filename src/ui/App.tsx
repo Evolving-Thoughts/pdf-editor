@@ -38,7 +38,8 @@ import { DrawingToolbar } from './DrawingToolbar'
 import { PageView } from './PageView'
 import { VirtualPage } from './VirtualPage'
 import { PagesManager } from './PagesManager'
-import { composePages, inspectPages } from '../core/pdf/pageOperations'
+import { inspectPages } from '../core/pdf/pageOperations'
+import { previewDocument, snapshotDocument } from '../core/pdf/documentOutput'
 import { pageSize, type DocumentPage } from '../core/pages'
 import type { ChosenStamp } from './StampPicker'
 import { renderStampImage } from './stampImage'
@@ -161,13 +162,13 @@ export default function App() {
   const { exportBusy, checkExport, prepareExport, downloadExport } = useExportFlow(store, draftRef, documentIntentRef, pageBusy)
   useEffect(() => {
     if (!documentPages || !draftRef.current || pdfPagesRef.current === documentPages) return
-    const draft = draftRef.current, sources = [...(store.state.pageSources ?? [])]
+    const draft = draftRef.current
     let cancelled = false
     if (!documentPages.length) {
       pdfPagesRef.current = documentPages
       return
     }
-    void composePages(new Uint8Array(draft.bytes), sources, documentPages, undefined, store.state.redactionApplied||documentPages.some(page=>page.redacted)).then(bytes => loadPdf(draft.name, bytes)).then(next => {
+    void previewDocument(snapshotDocument(new Uint8Array(draft.bytes), store.state)).then(bytes => loadPdf(draft.name, bytes)).then(next => {
       if (cancelled || draftRef.current !== draft) { void next.destroy(); return }
       const old = pdfRef.current
       pdfRef.current = next; pdfPagesRef.current = documentPages
@@ -325,7 +326,7 @@ export default function App() {
         const bytes = record.pdfBytes.slice(0)
         const pages = record.pages ?? await inspectPages(new Uint8Array(bytes), record.name)
         const sources = record.pageSources ?? []
-        const base = pages.length ? await composePages(new Uint8Array(bytes), sources, pages, undefined, record.redactionApplied||pages.some(page=>page.redacted)) : new Uint8Array(bytes)
+        const base = pages.length ? await previewDocument({ original: new Uint8Array(bytes), state: { ...record, pages, pageSources: sources } }) : new Uint8Array(bytes)
         const next = await loadPdf(record.name, base)
         if(documentIntentRef.current!==intent){void next.destroy();return}
         replaceDocument(

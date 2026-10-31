@@ -4,21 +4,12 @@ import { compressPdf, checkExportAbort, type CompressionPreset, type Compression
 import { optimizePdfStructure, type OptimizationResult } from './optimizePdf'
 import { applyMetadata, effectiveField, hasMetadataEdit, METADATA_FIELDS, readMetadata, type MetadataEdit } from './metadata'
 import { exportPageDocument, keepsPageTree } from './pageOperations'
-import type { Overlay } from '../model'
-import type { FormValues } from '../forms'
-import type { DocumentPage, PageSource } from '../pages'
+import { isSecure, type DocumentSnapshot } from './documentOutput'
 
 export type ExportSize = { mode: 'none' } | { mode: 'structure' } | { mode: 'images'; preset: CompressionPreset }
 
-export interface ExportRequest {
-  original: Uint8Array
-  sources: PageSource[]
-  pages: DocumentPage[]
-  overlays: Overlay[]
-  formValues?: FormValues
-  secure: boolean
+export interface ExportRequest extends DocumentSnapshot {
   size: ExportSize
-  metadata?: MetadataEdit
 }
 
 export interface ExportResult {
@@ -34,12 +25,12 @@ export type ExportProgress =
 
 /** A rebuilt document starts empty, so its info is carried over. After a redaction
  * nothing is carried: that info may describe what was blacked out. */
-async function finalMetadata(request: ExportRequest, output: Uint8Array, rebuilt: boolean): Promise<Uint8Array> {
-  const edit = request.metadata
+async function finalMetadata({ original, state }: DocumentSnapshot, output: Uint8Array, rebuilt: boolean): Promise<Uint8Array> {
+  const edit = state.metadata
   if (!rebuilt && !hasMetadataEdit(edit)) return output
   const fields: MetadataEdit['fields'] = {}
-  if (rebuilt && !request.secure) {
-    const known = await readMetadata(request.original)
+  if (rebuilt && !isSecure(state)) {
+    const known = await readMetadata(original)
     for (const field of METADATA_FIELDS) {
       const text = effectiveField(known.fields[field])
       if (text) fields[field] = text
@@ -50,9 +41,9 @@ async function finalMetadata(request: ExportRequest, output: Uint8Array, rebuilt
 }
 
 /** Chosen pages as their own file. Info is not carried over, but a decision about it holds here too. */
-export async function extractPages(request: Omit<ExportRequest, 'size'>, ids: readonly string[]): Promise<Uint8Array> {
-  const bytes = await exportPageDocument(request.original, request.sources, request.pages, request.overlays, ids, request.formValues, request.secure)
-  return hasMetadataEdit(request.metadata) ? (await applyMetadata(bytes, request.metadata!)).bytes : bytes
+export async function extractPages({ original, state }: DocumentSnapshot, ids: readonly string[]): Promise<Uint8Array> {
+  const bytes = await exportPageDocument(original, state.pageSources ?? [], state.pages ?? [], state.overlays, ids, state.formValues, isSecure(state))
+  return hasMetadataEdit(state.metadata) ? (await applyMetadata(bytes, state.metadata!)).bytes : bytes
 }
 
 export async function runExport(
@@ -63,8 +54,9 @@ export async function runExport(
   const { signal, onProgress } = options
   checkExportAbort(signal)
   onProgress?.({ stage: 'compose' })
-  const keptTree = await keepsPageTree(request.original, request.pages, request.secure)
-  const exported = await exportPageDocument(request.original, request.sources, request.pages, request.overlays, undefined, request.formValues, request.secure, keptTree)
+  const { original: input, state } = request, secure = isSecure(state), pages = state.pages ?? []
+  const keptTree = await keepsPageTree(input, pages, secure)
+  const exported = await exportPageDocument(input, state.pageSources ?? [], pages, state.overlays, undefined, state.formValues, secure, keptTree)
   checkExportAbort(signal)
   const original = await finalMetadata(request, exported, !keptTree)
   checkExportAbort(signal)

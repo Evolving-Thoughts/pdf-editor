@@ -2,14 +2,15 @@
 // PDF.js keeps its separate worker for viewing. Each job gets a fresh worker, so
 // terminating it releases everything, including work pdf-lib cannot interrupt.
 import type { ExportProgress, ExportRequest, ExportResult } from './exportPipeline'
-import type { PreflightInput, PreflightReport } from './preflight'
+import type { PreflightReport } from './preflight'
+import type { DocumentSnapshot } from './documentOutput'
 
 export const EXPORT_TIMEOUT_MS = 10 * 60 * 1000
 
 export type ExportJob =
   | { jobId: string; kind: 'export'; request: ExportRequest }
   | { jobId: string; kind: 'encrypt'; bytes: Uint8Array; password: string }
-  | { jobId: string; kind: 'preflight'; input: PreflightInput }
+  | { jobId: string; kind: 'preflight'; input: DocumentSnapshot }
 
 export type ExportJobMessage =
   | { jobId: string; type: 'progress'; progress: ExportProgress }
@@ -71,7 +72,7 @@ const nextJobId = () => `export-${Date.now().toString(36)}-${++jobs}`
 export const exportInWorker = (request: ExportRequest, options: JobOptions = {}) =>
   runJob<ExportResult>({ jobId: nextJobId(), kind: 'export', request }, options)
 
-export const preflightInWorker = (input: PreflightInput, options: JobOptions = {}) =>
+export const preflightInWorker = (input: DocumentSnapshot, options: JobOptions = {}) =>
   runJob<PreflightReport>({ jobId: nextJobId(), kind: 'preflight', input }, options)
 
 export const encryptInWorker = (bytes: Uint8Array, password: string, options: JobOptions = {}) =>

@@ -76,7 +76,7 @@ test('identical names in an attached PDF use separate stable source keys', async
 test('A4 bakes values into a new editable source and undo restores the original source keys', async () => {
   const { bytes, pages, info } = await fixture(), store = new EditorStore(); store.restore({ overlays: [], pages: pages })
   const field = info.widgets.find(w => w.name === 'name')!; store.dispatch(setNativeFieldValue(store.state, field, 'Grace'))
-  const normalized = await normalizeA4(bytes, [], pages, [], store.state.formValues)
+  const normalized = await normalizeA4({ original: bytes, state: { pages: pages, overlays: [], formValues: store.state.formValues } })
   store.dispatch(replacePageDocument(store.state, normalized.pages, normalized.source, [])); expect(store.state.formValues).toBeUndefined()
   expect((await PDFDocument.load(normalized.source.bytes)).getForm().getTextField('name').getText()).toBe('Grace')
   store.undo(); expect(store.state.formValues?.[field.key]).toBe('Grace')

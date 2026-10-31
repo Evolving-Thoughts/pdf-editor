@@ -2,6 +2,8 @@ import { expect, test, vi } from 'vitest'
 import { PDFDocument } from 'pdf-lib'
 import { extractPages, runExport, type ExportRequest } from '../../src/core/pdf/exportPipeline'
 import { inspectPages } from '../../src/core/pdf/pageOperations'
+import type { EditorState } from '../../src/core/model'
+import { isSecure } from '../../src/core/pdf/documentOutput'
 
 const titled = async () => {
   const doc = await PDFDocument.create({ updateMetadata: false })
@@ -10,8 +12,8 @@ const titled = async () => {
   doc.setTitle('Bericht')
   return doc.save()
 }
-const request = (original: Uint8Array, pages: ExportRequest['pages'], extra: Partial<ExportRequest> = {}): ExportRequest =>
-  ({ original, sources: [], pages, overlays: [], secure: false, size: { mode: 'none' }, ...extra })
+const request = (original: Uint8Array, pages: EditorState['pages'], extra: Partial<EditorState> = {}): ExportRequest =>
+  ({ original, state: { pages, overlays: [], ...extra }, size: { mode: 'none' } })
 const encodeImage = () => { throw new Error('not used') }
 const title = async (bytes: Uint8Array) => (await PDFDocument.load(bytes, { updateMetadata: false })).getTitle()
 
@@ -44,4 +46,10 @@ test('pages saved on their own follow the decision about document info', async (
   expect(await author(await extractPages(request(original, pages, { metadata }), ids))).toBeUndefined()
   expect(await author(await extractPages(request(original, pages), ids))).toBe('Mira Muster')
   expect(await author(await extractPages(request(original, pages), [ids[0]]))).toBeUndefined()
+})
+
+test('a redacted document stays secure after its rasterized pages are deleted', () => {
+  expect(isSecure({ overlays: [] })).toBe(false)
+  expect(isSecure({ overlays: [], pages: [{ redacted: true }] as EditorState['pages'] })).toBe(true)
+  expect(isSecure({ overlays: [], pages: [], redactionApplied: true })).toBe(true)
 })

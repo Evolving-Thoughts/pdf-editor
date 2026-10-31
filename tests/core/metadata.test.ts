@@ -141,7 +141,7 @@ test('the check names a decision that costs the whole XMP packet', async () => {
   const creator = '<dc:creator><rdf:Seq><rdf:li>Mira Muster</rdf:li></rdf:Seq></dc:creator>'
   const check = async (xmp: string, metadata?: { fields: { author: null } }) => {
     const bytes = await pdf(xmp), pages = await inspectPages(bytes, 'a.pdf')
-    return (await preflightExport({ original: bytes, sources: [], pages, overlays: [], secure: false, metadata })).xmpDropped
+    return (await preflightExport({ original: bytes, state: { pageSources: [], pages, overlays: [], metadata } })).xmpDropped
   }
   const removal = { fields: { author: null } }
   expect(await check(xmpPacket(`${creator}<dc:rights>Mira Muster</dc:rights>`), removal)).toBe(true)

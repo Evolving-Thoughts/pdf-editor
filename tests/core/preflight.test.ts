@@ -146,7 +146,7 @@ test('report on an unchanged document: structures stay, and they really are stil
   await doc.attach(new Uint8Array([1]), 'a.txt', { mimeType: 'text/plain' })
   const bytes = await doc.save()
   const pages = await inspectPages(bytes, 'a.pdf')
-  const report = await preflightExport({ original: bytes, sources: [], pages, overlays: [], secure: false })
+  const report = await preflightExport({ original: bytes, state: { pageSources: [], pages, overlays: [] } })
   expect(report.rebuilt).toBe(false)
   expect(needsConfirmation(report)).toEqual([])
   const output = await inspectStructures(await exportPageDocument(bytes, [], pages, [box({ text: 'Neu' })]))
@@ -160,7 +160,7 @@ test('report on reordered pages names the lost tags, keeps the outline, and the 
   addTags(doc)
   const bytes = await doc.save()
   const pages = (await inspectPages(bytes, 'a.pdf')).reverse()
-  const report = await preflightExport({ original: bytes, sources: [], pages, overlays: [], secure: false })
+  const report = await preflightExport({ original: bytes, state: { pageSources: [], pages, overlays: [] } })
   expect(report.rebuilt).toBe(true)
   expect(needsConfirmation(report).map(item => item.kind)).toEqual(['tags'])
   const output = await inspectStructures(await exportPageDocument(bytes, [], pages, []))
@@ -175,7 +175,7 @@ test('an appended source counts: its signature needs confirmation even when the 
   const appended = await preparePages(await save(signed), 'b.pdf')
   const bytes = await save(await blank())
   const pages = [...await inspectPages(bytes, 'a.pdf'), ...appended.pages]
-  const report = await preflightExport({ original: bytes, sources: [appended.source], pages, overlays: [], secure: false })
+  const report = await preflightExport({ original: bytes, state: { pageSources: [appended.source], pages, overlays: [] } })
   expect(needsConfirmation(report).map(item => item.kind)).toContain('signature')
 })
 
@@ -184,7 +184,7 @@ test('XFA with page changes is rejected', async () => {
   doc.catalog.set(key('AcroForm'), doc.context.obj({ Fields: [], XFA: PDFString.of('<xdp/>') }))
   const bytes = await save(doc)
   const pages = await inspectPages(bytes, 'a.pdf')
-  const report = await preflightExport({ original: bytes, sources: [], pages: [pages[1], pages[0]], overlays: [], secure: false })
+  const report = await preflightExport({ original: bytes, state: { pageSources: [], pages: [pages[1], pages[0]], overlays: [] } })
   expect(rejection(report)?.message).toMatch(/nicht möglich/)
 })
 
@@ -192,7 +192,7 @@ test('the check never changes its input', async () => {
   const doc = await withForm()
   addSignature(doc)
   const bytes = await save(doc), before = bytes.slice()
-  await preflightExport({ original: bytes, sources: [], pages: await inspectPages(bytes, 'a.pdf'), overlays: [box({ text: 'Ω' })], secure: false })
+  await preflightExport({ original: bytes, state: { pageSources: [], pages: await inspectPages(bytes, 'a.pdf'), overlays: [box({ text: 'Ω' })] } })
   expect(bytes).toEqual(before)
 })
 
@@ -230,6 +230,6 @@ test('a report does not touch overlays', async () => {
   const doc = await PDFDocument.create()
   doc.addPage()
   const bytes = await doc.save()
-  await preflightExport({ original: bytes, sources: [], pages: await inspectPages(bytes, 'a.pdf'), overlays: [overlay], secure: false })
+  await preflightExport({ original: bytes, state: { pageSources: [], pages: await inspectPages(bytes, 'a.pdf'), overlays: [overlay] } })
   expect(overlay).toEqual(copy)
 })

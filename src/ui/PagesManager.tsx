@@ -19,6 +19,7 @@ import {
 } from '../core/pages'
 import { importPageFile, preparePages, textPageBytes } from '../core/pdf/pageOperations'
 import { extractPages } from '../core/pdf/exportPipeline'
+import { snapshotDocument } from '../core/pdf/documentOutput'
 import { loadPdf, type PdfHandle } from '../core/pdf/loadPdf'
 import { normalizeA4 } from '../core/pdf/normalizeA4'
 import { PageView } from './PageView'
@@ -178,7 +179,7 @@ export function PagesManager({ nativeWidgets = [], pdf, store, original, busy, o
     const token = ++request.current, version = store.getVersion()
     setA4Open(true); setWorking(true); setProblem(null)
     try {
-      const prepared = await normalizeA4(new Uint8Array(original), store.state.pageSources ?? [], pages, store.state.overlays, store.state.formValues, store.state.redactionApplied||pages.some(page=>page.redacted))
+      const prepared = await normalizeA4(snapshotDocument(new Uint8Array(original), store.state))
       if (request.current !== token) return
       const previewPdf = await loadPdf('A4-Vorschau', new Uint8Array(prepared.source.bytes))
       if (request.current !== token) { await previewPdf.destroy(); return }
@@ -238,15 +239,7 @@ export function PagesManager({ nativeWidgets = [], pdf, store, original, busy, o
     setWorking(true)
     setProblem(null)
     try {
-      const bytes = await extractPages({
-        original: new Uint8Array(original),
-        sources: store.state.pageSources ?? [],
-        pages,
-        overlays: store.state.overlays,
-        formValues: store.state.formValues,
-        secure: !!store.state.redactionApplied || pages.some(page => page.redacted),
-        metadata: store.state.metadata,
-      }, ids)
+      const bytes = await extractPages(snapshotDocument(new Uint8Array(original), store.state), ids)
       if (token !== request.current) return
       downloadPdf(bytes, ids.length === 1 ? `Seite-${pages.findIndex(p => p.id === ids[0]) + 1}.pdf` : `Auswahl-${ids.length}-Seiten.pdf`)
       setMessage(ids.length === 1 ? 'Die ausgewählte Seite wurde als eigenes PDF gespeichert.' : `${ids.length} ausgewählte Seiten wurden als eigenes PDF gespeichert.`)
