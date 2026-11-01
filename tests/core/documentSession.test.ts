@@ -135,20 +135,41 @@ test('an abandoned page rebuild does not reach the viewer', async () => {
   expect(session.pagesStale).toBe(true)
 })
 
-test('deleting pauses saving; a failed delete resumes the same draft, a success closes', async () => {
+test('a failed delete keeps the same draft and saves it again', async () => {
   await session.openFile(await file('a.pdf'), ports())
-  const running = session.watch()
-  const draft = session.suspend()!
-  expect(session.draft).toBeNull()
-  expect(session.activeDraftId).toBe(draft.id)
-  expect(running.sameDocument()).toBe(false)
-  session.resume(draft)
+  const running = session.watch(), draft = session.draft
+  const calls: string[] = []
+  await expect(session.deleteDraft({
+    pauseSaving: () => calls.push('pause'),
+    remove: async () => {
+      calls.push('remove')
+      expect(session.draft).toBeNull()
+      expect(session.activeDraftId).toBe(draft!.id)
+      throw new Error('voll')
+    },
+    save: () => calls.push(`save:${session.draft === draft}`),
+  })).rejects.toThrow('voll')
+  expect(calls).toEqual(['pause', 'remove', 'save:true'])
   expect(session.draft).toBe(draft)
+  expect(running.sameDocument()).toBe(false)
+})
+
+test('a successful delete closes the document', async () => {
+  await session.openFile(await file('a.pdf'), ports())
   const shown = handles[0]
-  session.close()
+  await session.deleteDraft({ pauseSaving: () => undefined, remove: async () => undefined, save: () => { throw new Error('not expected') } })
   expect([session.pdf, session.draft, session.activeDraftId, session.original]).toEqual([null, null, null, null])
   expect(store.state.pages).toBeUndefined()
   expect(shown.destroy).toHaveBeenCalledOnce()
+})
+
+test('a snapshot copies the state and needs an open document', async () => {
+  expect(() => session.snapshot()).toThrow()
+  await session.openFile(await file('a.pdf'), ports())
+  const taken = session.snapshot()
+  store.dispatch(addOverlay(box(store.state.pages![0].id)))
+  expect(taken.state.overlays).toHaveLength(0)
+  expect(taken.original.byteLength).toBe(session.original!.byteLength)
 })
 
 test('opening a draft reports a missing one and an outdated one', async () => {

@@ -42,7 +42,7 @@ async function finalMetadata({ original, state }: DocumentSnapshot, output: Uint
 
 /** Chosen pages as their own file. Info is not carried over, but a decision about it holds here too. */
 export async function extractPages({ original, state }: DocumentSnapshot, ids: readonly string[]): Promise<Uint8Array> {
-  const bytes = await exportPageDocument(original, state.pageSources ?? [], state.pages ?? [], state.overlays, ids, state.formValues, isSecure(state))
+  const bytes = await exportPageDocument(original, state.pageSources ?? [], state.pages ?? [], state.overlays, { pageId: ids, formValues: state.formValues, secure: isSecure(state) })
   return hasMetadataEdit(state.metadata) ? (await applyMetadata(bytes, state.metadata!)).bytes : bytes
 }
 
@@ -56,7 +56,7 @@ export async function runExport(
   onProgress?.({ stage: 'compose' })
   const { original: input, state } = request, secure = isSecure(state), pages = state.pages ?? []
   const keptTree = await keepsPageTree(input, pages, secure)
-  const exported = await exportPageDocument(input, state.pageSources ?? [], pages, state.overlays, undefined, state.formValues, secure, keptTree)
+  const exported = await exportPageDocument(input, state.pageSources ?? [], pages, state.overlays, { formValues: state.formValues, secure, keptTree })
   checkExportAbort(signal)
   const original = await finalMetadata(request, exported, !keptTree)
   checkExportAbort(signal)

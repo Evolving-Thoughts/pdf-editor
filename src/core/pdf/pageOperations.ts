@@ -5,12 +5,14 @@ import { PDFDict, PDFDocument, PDFName, PDFNumber, PDFObjectCopier, PDFPage, PDF
 import { copyOutlines, copyTags, keepsTagOrder, pageOrigin } from './preserveStructure'
 import { cloneOverlay, createId, type Overlay } from '../model'
 import { exportPdf } from './exportPdf'
-import { pageSize, type DocumentPage, type PageSource } from '../pages'
+import { pageSize, XFA_UNSUPPORTED, type DocumentPage, type PageSource } from '../pages'
 import { importImage } from '../images/importImage'
 import { initialImageGeometry } from '../images/geometry'
 import { retainPageWidgets, namespaceFormResources, mergeAcroForm } from './preserveForms'
 import { assertFileBudget, assertPageBudget } from './documentBudget'
 import { writeOcrLayers } from '../ocr/ocrLayer'
+
+export const carriesXfa = (doc: PDFDocument) => !!doc.catalog.lookupMaybe(PDFName.of('AcroForm'), PDFDict)?.has(PDFName.of('XFA'))
 
 export async function inspectPages(
   bytes: Uint8Array,
@@ -19,9 +21,9 @@ export async function inspectPages(
 ): Promise<DocumentPage[]> {
   const doc = await PDFDocument.load(bytes)
   assertPageBudget(doc.getPageCount())
-  const hasXfa = !!doc.catalog.lookupMaybe(PDFName.of('AcroForm'), PDFDict)?.has(PDFName.of('XFA'))
+  const hasXfa = carriesXfa(doc)
   if (hasXfa && sourceId !== 'original')
-    throw new Error('XFA-Formulare werden bei Seitenoperationen noch nicht unterstützt.')
+    throw new Error(XFA_UNSUPPORTED)
   const hasForms = !hasXfa && doc.getForm().getFields().length > 0
   return doc.getPages().map((page, index) => {
     const media = page.getMediaBox(),
@@ -70,14 +72,19 @@ export async function tagsSurvive(original: Uint8Array, sources: PageSource[], p
   return keepsTagOrder(pages, (await PDFDocument.load(bytes, { updateMetadata: false })).getPageCount())
 }
 
+export interface ComposeOptions {
+  formValues?: FormValues
+  /** Leaves out everything that could carry removed content. */
+  secure?: boolean
+  keptTree?: boolean
+}
+
 /** Base content only. Overlays remain editable and are applied by exportPdf afterwards. */
 export async function composePages(
   original: Uint8Array,
   sources: PageSource[],
   pages: DocumentPage[],
-  formValues: FormValues = {},
-  secure = pages.some(page => page.redacted),
-  keptTree?: boolean,
+  { formValues = {}, secure = pages.some(page => page.redacted), keptTree }: ComposeOptions = {},
 ): Promise<Uint8Array> {
   return writeOcrLayers(await composeBase(original, sources, pages, formValues, secure, keptTree), pages)
 }
@@ -96,7 +103,7 @@ async function composeBase(
   if (keptTree ?? await keepsPageTree(original, pages, secure)) {
     if (!Object.keys(formValues).length) return original.slice()
     const doc = await PDFDocument.load(original, { updateMetadata: false })
-    if (doc.catalog.lookupMaybe(PDFName.of('AcroForm'), PDFDict)?.has(PDFName.of('XFA'))) throw new Error('XFA-Formulare werden noch nicht unterstützt.')
+    if (carriesXfa(doc)) throw new Error('XFA-Formulare werden noch nicht unterstützt.')
     if (applyFormValues(doc, 'original', formValues)) { await updateFormAppearances(doc); return doc.save({ updateFieldAppearances: false }) }
     return original.slice()
   }
@@ -110,7 +117,7 @@ async function composeBase(
       const bytes = page.sourceId === 'original' ? original : sources.find(s => s.id === page.sourceId)?.bytes
       if (!bytes) throw new Error('Quelldaten einer Seite fehlen.')
       const doc = await PDFDocument.load(bytes)
-      if (doc.catalog.lookupMaybe(PDFName.of('AcroForm'), PDFDict)?.has(PDFName.of('XFA')))
+      if (carriesXfa(doc))
         throw new Error('XFA-Formulare werden bei Seitenoperationen noch nicht unterstützt. Die Originaldatei bleibt unverändert.')
       if (applyFormValues(doc, page.sourceId, formValues)) await updateFormAppearances(doc)
       const indices = new Set(pages.filter(p => p.sourceId === page.sourceId).map(p => p.sourceIndex))
@@ -243,14 +250,12 @@ export async function exportPageDocument(
   sources: PageSource[],
   pages: DocumentPage[],
   overlays: Overlay[],
-  pageId?: string | readonly string[],
-  formValues: FormValues = {},
-  secure = pages.some(page => page.redacted),
-  keptTree?: boolean,
+  { pageId, ...options }: ComposeOptions & { pageId?: string | readonly string[] } = {},
 ) {
   if (pageId !== undefined) {
     const chosen = selectPages(pages, overlays, pageId)
-    return exportPdf(await composePages(original, sources, chosen.pages, formValues, secure), chosen.overlays, chosen.pages.map(page => page.id))
+    const secure = options.secure ?? pages.some(page => page.redacted)
+    return exportPdf(await composePages(original, sources, chosen.pages, { formValues: options.formValues, secure }), chosen.overlays, chosen.pages.map(page => page.id))
   }
-  return exportPdf(await composePages(original, sources, pages, formValues, secure, keptTree), overlays, pages.map(page => page.id))
+  return exportPdf(await composePages(original, sources, pages, options), overlays, pages.map(page => page.id))
 }

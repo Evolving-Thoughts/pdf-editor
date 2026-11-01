@@ -5,7 +5,6 @@ import type { ExportProgress, ExportSize } from '../core/pdf/exportPipeline'
 import { downloadPdf } from '../core/pdf/downloadPdf'
 import type { DocumentSession } from '../core/documentSession'
 import type { EditorStore } from '../core/editorStore'
-import { snapshotDocument } from '../core/pdf/documentOutput'
 import type { PreparedExport } from './ExportDialog'
 
 /** The export dialog's three steps. Each runs in a worker and refuses an outdated state. */
@@ -14,11 +13,10 @@ export function useExportFlow(store: EditorStore, session: DocumentSession, page
   const checkedVersionRef = useRef<number | null>(null)
 
   const checkExport = useCallback(async (signal: AbortSignal) => {
-    const draft = session.draft
-    if (!draft || !store.state.pages?.length) throw new Error('Der Export ist gerade nicht verfügbar.')
+    if (!session.draft || !store.state.pages?.length) throw new Error('Der Export ist gerade nicht verfügbar.')
     const version = store.getVersion()
     try {
-      return await preflightInWorker(snapshotDocument(new Uint8Array(draft.bytes), store.state), { signal })
+      return await preflightInWorker(session.snapshot(), { signal })
     } finally {
       // A failed check is confirmed in the dialog, and that answer is about this state too.
       checkedVersionRef.current = version
@@ -36,7 +34,7 @@ export function useExportFlow(store: EditorStore, session: DocumentSession, page
           throw new Error('Vorgemerkte Schwärzungen zuerst anwenden oder verwerfen; sie sind noch nicht sicher entfernt.')
         if (checkedVersionRef.current !== store.getVersion())
           throw new Error('Der Stand hat sich seit der Prüfung geändert. Bitte den Export neu öffnen.')
-        const result = await exportInWorker({ ...snapshotDocument(new Uint8Array(draft.bytes), store.state), size }, { signal, onProgress })
+        const result = await exportInWorker({ ...session.snapshot(), size }, { signal, onProgress })
         checkExportAbort(signal)
         // An outdated result is thrown away, whatever changed in the meantime.
         if (!task.sameState())

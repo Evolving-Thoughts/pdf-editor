@@ -4,7 +4,9 @@ import { nudgeOverlay, removeOverlay, updateOverlay, type ImageChanges, type Ima
 import type { EditorStore } from '../core/editorStore'
 import { imageGeometry, mmToPts, moveImage, ptsToMm, resizeImage, rotateImage, setImageSize, type Bounds, type Corner } from '../core/images/geometry'
 import type { ImageOverlay } from '../core/model'
+import { arrowStep, arrowTurn, pointerAngle, type GestureStep } from '../core/overlayGesture'
 import type { Tool } from './tools'
+import { useOverlayGesture } from './useOverlayGesture'
 
 interface Props {
   image: ImageOverlay
@@ -16,74 +18,36 @@ interface Props {
   onSelect: (id: string | null) => void
 }
 interface Gesture {
-  pointerId: number
-  x: number
-  y: number
-  zoom: number
-  version: number
   before: ImageChanges
   corner?: Corner
   rotating: boolean
-  centerX: number
-  centerY: number
+  center: { x: number; y: number }
   startAngle: number
 }
 const cornerNames: Record<Corner, string> = { nw: 'oben links', ne: 'oben rechts', sw: 'unten links', se: 'unten rechts' }
 
 export function ImageView({ image, zoom, pageSize, selected, tool, store, onSelect }: Props) {
   const anchor = useRef<HTMLDivElement>(null)
-  const gesture = useRef<Gesture | null>(null)
-  const [preview, setPreview] = useState<{ geometry: ImageChanges; zoom: number; version: number } | null>(null)
   const active = selected && tool === 'select'
-  const validGesture = preview && preview.zoom === zoom && preview.version === store.getVersion() && active
-  const geometry = validGesture && preview ? preview.geometry : imageGeometry(image)
   const commit = (next: ImageChanges, keyboardAction?: ImageKeyboardAction) => {
     const before = imageGeometry(image)
     if (JSON.stringify(before) !== JSON.stringify(next)) store.dispatch(keyboardAction ? nudgeOverlay(image.id, before, next, keyboardAction) : updateOverlay(image.id, before, next))
   }
-  const cancel = () => { gesture.current = null; setPreview(null) }
+  const nextGeometry = ({ data, dx, dy, sample }: GestureStep<Gesture>) => {
+    if (data.rotating) return rotateImage(data.before, (data.before.rotation ?? 0) + pointerAngle(data.center, sample) - data.startAngle, pageSize, sample.shiftKey)
+    return data.corner ? resizeImage(data.before, data.corner, dx, dy, pageSize) : moveImage(data.before, dx, dy, pageSize)
+  }
+  const gesture = useOverlayGesture<Gesture, ImageChanges>(() => ({ zoom, version: store.getVersion(), tool, active }), nextGeometry, next => commit(next))
+  const geometry = gesture.shown ?? imageGeometry(image)
   const onImagePointerDown = (event: React.PointerEvent<HTMLElement>) => {
     const corner = event.currentTarget.dataset.corner as Corner | undefined
     const rotating = event.currentTarget.dataset.rotate === 'true'
-    if (tool !== 'select' || !event.isPrimary || event.button !== 0 || gesture.current) return
-    event.stopPropagation()
-    event.preventDefault()
+    if (tool !== 'select') return
+    const rect = anchor.current!.getBoundingClientRect()
+    const center = { x: rect.left + rect.width / 2, y: rect.top + rect.height / 2 }
+    if (!gesture.begin(event, { before: imageGeometry(image), corner, rotating, center, startAngle: pointerAngle(center, event) })) return
     onSelect(image.id)
     ;(corner || rotating ? event.currentTarget : anchor.current)?.focus({ preventScroll: true })
-    const rect = anchor.current!.getBoundingClientRect()
-    const centerX = rect.left + rect.width / 2
-    const centerY = rect.top + rect.height / 2
-    gesture.current = { pointerId: event.pointerId, x: event.clientX, y: event.clientY, zoom,
-      version: store.getVersion(), before: imageGeometry(image), corner, rotating, centerX, centerY,
-      startAngle: Math.atan2(event.clientY - centerY, event.clientX - centerX) * 180 / Math.PI }
-    event.currentTarget.setPointerCapture(event.pointerId)
-  }
-  const nextGeometry = (event: React.PointerEvent, current: Gesture) => {
-    if (current.rotating) {
-      const pointerAngle = Math.atan2(event.clientY - current.centerY, event.clientX - current.centerX) * 180 / Math.PI
-      return rotateImage(current.before, (current.before.rotation ?? 0) + pointerAngle - current.startAngle, pageSize, event.shiftKey)
-    }
-    const dx = (event.clientX - current.x) / current.zoom
-    const dy = (current.y - event.clientY) / current.zoom
-    return current.corner ? resizeImage(current.before, current.corner, dx, dy, pageSize)
-      : moveImage(current.before, dx, dy, pageSize)
-  }
-  const move = (event: React.PointerEvent) => {
-    const current = gesture.current
-    if (!current || current.pointerId !== event.pointerId) return
-    event.stopPropagation()
-    if (current.zoom !== zoom || current.version !== store.getVersion() || !active) { cancel(); return }
-    setPreview({ geometry: nextGeometry(event, current), zoom: current.zoom, version: current.version })
-  }
-  const finish = (event: React.PointerEvent) => {
-    const current = gesture.current
-    if (!current || current.pointerId !== event.pointerId) return
-    event.stopPropagation()
-    const valid = current.zoom === zoom && current.version === store.getVersion() && active
-    const next = nextGeometry(event, current)
-    cancel()
-    if (event.currentTarget.hasPointerCapture(event.pointerId)) event.currentTarget.releasePointerCapture(event.pointerId)
-    if (valid) commit(next)
   }
   return (
     <div ref={anchor} className={`image-overlay${active ? ' selected' : ''}`} tabIndex={tool === 'select' ? 0 : -1}
@@ -91,29 +55,26 @@ export function ImageView({ image, zoom, pageSize, selected, tool, store, onSele
       style={{ left: geometry.x * zoom, top: (pageSize.height - geometry.y - geometry.height) * zoom,
         width: geometry.width * zoom, height: geometry.height * zoom, transform: `rotate(${geometry.rotation ?? 0}deg)` }}
       onFocus={() => { if (tool === 'select') onSelect(image.id) }}
-      onPointerDown={onImagePointerDown} onPointerMove={move} onPointerUp={finish}
-      onPointerCancel={cancel} onLostPointerCapture={cancel}>
+      onPointerDown={onImagePointerDown} {...gesture.pointer}>
       <img src={image.dataUrl} alt={image.name} draggable={false} />
       {active && (Object.keys(cornerNames) as Corner[]).map(corner => (
         <button key={corner} className={`image-handle ${corner}`} type="button"
           aria-label={`Bild skalieren: ${cornerNames[corner]}`} title="Ziehen zum Skalieren · Pfeiltasten für Feinschritte"
           data-corner={corner} onPointerDown={onImagePointerDown}
           onKeyDown={event => {
-            if (!event.key.startsWith('Arrow')) return
+            const step = arrowStep(event)
+            if (!step) return
             event.preventDefault(); event.stopPropagation()
-            const step = event.shiftKey ? 10 : 1
-            commit(resizeImage(imageGeometry(image), corner,
-              event.key === 'ArrowLeft' ? -step : event.key === 'ArrowRight' ? step : 0,
-              event.key === 'ArrowUp' ? step : event.key === 'ArrowDown' ? -step : 0, pageSize), `resize:${corner}`)
+            commit(resizeImage(imageGeometry(image), corner, step.dx, step.dy, pageSize), `resize:${corner}`)
           }}><span /></button>
       ))}
       {active && <button type="button" className="image-rotate-handle" data-rotate="true"
         aria-label="Bild frei drehen" title="Ziehen zum Drehen · Shift: 15°-Schritte · Pfeiltasten: 1°"
         onPointerDown={onImagePointerDown} onKeyDown={event => {
-          if (!event.key.startsWith('Arrow')) return
+          const turn = arrowTurn(event)
+          if (turn === null) return
           event.preventDefault(); event.stopPropagation()
-          const direction = event.key === 'ArrowLeft' || event.key === 'ArrowDown' ? -1 : 1
-          commit(rotateImage(imageGeometry(image), (image.rotation ?? 0) + direction * (event.shiftKey ? 15 : 1), pageSize), 'rotate')
+          commit(rotateImage(imageGeometry(image), (image.rotation ?? 0) + turn, pageSize), 'rotate')
         }}><span><RotationIcon clockwise /></span></button>}
       {active && <ImageOptions image={image} geometry={geometry} anchor={anchor} pageSize={pageSize}
         onChange={commit} onDelete={() => { store.dispatch(removeOverlay(image)); onSelect(null) }} />}

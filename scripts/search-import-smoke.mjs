@@ -325,7 +325,8 @@ try {
     'protected.pdf',
   )
   await assert.rejects(() => PDFDocument.load(protectedBytes))
-  assert.equal(await p.locator('.password-dialog').count(), 0)
+  // The dialog closes just after the download has started.
+  await p.locator('.password-dialog').waitFor({ state: 'detached' })
   // Verify browser PDF.js can open the AES output using the provided password.
   const result = await p.evaluate(async (data) => {
     const { getDocument, GlobalWorkerOptions } =

@@ -1,6 +1,6 @@
 // Command stack for unlimited undo/redo (ADR-002).
 // Every state change goes through a reversible Command; no direct mutations
-// from the UI except store.preview() for transient gestures.
+// from the UI. A running gesture is only a preview in its view.
 import type { EditorState, ImageOverlay, Overlay, Textbox } from './model'
 import type { ShapeChanges } from './shapes'
 import { cloneOverlay, isMarker, isStroke } from './model'

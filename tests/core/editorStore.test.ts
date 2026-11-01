@@ -7,24 +7,6 @@ function makeBox(id: string, text = ''): Textbox {
   return { id, pageId: 'p0', x: 50, y: 700, text, font: 'helvetica', fontSize: 14, bold: false, italic: false, underline: false }
 }
 
-test('preview mutates state and notifies without recording history', () => {
-  const store = new EditorStore()
-  store.dispatch(addOverlay(makeBox('a', 'Hallo')))
-  const notify = vi.fn()
-  store.subscribe(notify)
-
-  store.preview((state) => {
-    state.overlays[0].text = 'Live-Drag'
-  })
-  expect(store.state.overlays[0].text).toBe('Live-Drag')
-  expect(notify).toHaveBeenCalledTimes(1)
-
-  // Not in history: undo reverts the add, not the preview.
-  store.undo()
-  expect(store.state.overlays).toHaveLength(0)
-  expect(store.canRedo).toBe(true)
-})
-
 test('reset clears overlays and history', () => {
   const store = new EditorStore()
   store.dispatch(addOverlay(makeBox('a')))

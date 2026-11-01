@@ -6,7 +6,7 @@ test('editing a native text value exports a live editable field without changing
   const doc = await PDFDocument.create(), page = doc.addPage([400, 600])
   const field = doc.getForm().createTextField('name'); field.setText('Ada'); field.addToPage(page, { x: 40, y: 480, width: 160, height: 26 })
   const bytes = await doc.save(), original = bytes.slice(), pages = await inspectPages(bytes, 'form')
-  const result = await exportPageDocument(bytes, [], pages, [], undefined, { [JSON.stringify(['original', 'name'])]: 'Grace' })
+  const result = await exportPageDocument(bytes, [], pages, [], { formValues: { [JSON.stringify(['original', 'name'])]: 'Grace' } })
   const exported = await PDFDocument.load(result)
   expect(exported.getForm().getTextField('name').getText()).toBe('Grace')
   exported.getForm().getTextField('name').setText('Further edit')
@@ -55,11 +55,11 @@ test('native edits share values across widgets, coalesce one typing session and 
 test('exports text, checkbox, radio and multiple choices as live values, including subset extraction', async () => {
   const { bytes, pages } = await fixture()
   const values = { [formKey('original', 'name')]: 'Grace', [formKey('original', 'agree')]: true, [formKey('original', 'contact')]: 'Phone', [formKey('original', 'choice')]: ['B'], [formKey('original', 'list')]: ['Two', 'Three'] }
-  const full = (await PDFDocument.load(await exportPageDocument(bytes, [], pages, [], undefined, values))).getForm()
+  const full = (await PDFDocument.load(await exportPageDocument(bytes, [], pages, [], { formValues: values }))).getForm()
   expect(full.getTextField('name').getText()).toBe('Grace'); expect(full.getCheckBox('agree').isChecked()).toBe(true)
   expect(full.getRadioGroup('contact').getSelected()).toBe('Phone'); expect(full.getDropdown('choice').getSelected()).toEqual(['B']); expect(full.getOptionList('list').getSelected()).toEqual(['Two', 'Three'])
   expect(full.getTextField('reference').getText()).toBe('LOCK')
-  const subset = await PDFDocument.load(await exportPageDocument(bytes, [], pages, [], pages[1].id, values))
+  const subset = await PDFDocument.load(await exportPageDocument(bytes, [], pages, [], { pageId: pages[1].id, formValues: values }))
   expect(subset.getForm().getTextField('name').getText()).toBe('Grace'); expect(subset.getForm().getTextField('name').acroField.getWidgets()).toHaveLength(1)
 })
 test('maps widgets through crop origin, rotation and UserUnit with literal expected display coordinates', async () => {
@@ -69,7 +69,7 @@ test('maps widgets through crop origin, rotation and UserUnit with literal expec
 })
 test('identical names in an attached PDF use separate stable source keys', async () => {
   const { bytes, pages } = await fixture(), imported = await preparePages(bytes, 'attachment')
-  const result = await PDFDocument.load(await exportPageDocument(bytes, [imported.source], [...pages, ...imported.pages], [], undefined, { [formKey(imported.source.id, 'name')]: 'Attached' }))
+  const result = await PDFDocument.load(await exportPageDocument(bytes, [imported.source], [...pages, ...imported.pages], [], { formValues: { [formKey(imported.source.id, 'name')]: 'Attached' } }))
   expect(result.getForm().getTextField('name').getText()).toBe('Ada')
   expect(result.getForm().getFields().filter(f => f.constructor.name === 'PDFTextField').map(f => (f as import('pdf-lib').PDFTextField).getText())).toContain('Attached')
 })
@@ -90,7 +90,7 @@ test('checkbox changes are separate undo steps even while focus stays on the con
 })
 test('unsupported export glyphs fail clearly and never change the source or stored value', async () => {
   const { bytes, pages } = await fixture(), copy = bytes.slice(), value = { [formKey('original', 'name')]: 'Unsupported 🙂' }
-  await expect(exportPageDocument(bytes, [], pages, [], undefined, value)).rejects.toThrow(/Standardschrift/)
+  await expect(exportPageDocument(bytes, [], pages, [], { formValues: value })).rejects.toThrow(/Standardschrift/)
   expect(value[formKey('original', 'name')]).toBe('Unsupported 🙂'); expect(bytes).toEqual(copy)
 })
 
@@ -100,7 +100,7 @@ test('automatic native text font size follows the generated editable field appea
   const auto = await doc.save({ updateFieldAppearances: false }), widget = (await inspectNativeForms(auto, [], pages)).widgets.find(w => w.name === 'name')!
   const value = 'A long native name fitting its original field'
   const { nativeDisplayFontSize } = await import('../../src/core/pdf/acroForm')
-  const result = await PDFDocument.load(await exportPageDocument(auto, [], pages, [], undefined, { [widget.key]: value }))
+  const result = await PDFDocument.load(await exportPageDocument(auto, [], pages, [], { formValues: { [widget.key]: value } }))
   const actual = Number(/([\d.]+)\s+Tf/.exec(result.getForm().getTextField('name').acroField.getDefaultAppearance()!)![1])
   expect(widget.autoFont).toBe(true); expect(nativeDisplayFontSize(widget, value)).toBe(actual)
 })

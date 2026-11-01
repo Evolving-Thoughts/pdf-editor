@@ -89,7 +89,7 @@ test('a filled form on unchanged pages keeps the document program info and adds 
   doc.setModificationDate(modified)
   doc.getForm().createTextField('name').addToPage(page, { x: 20, y: 100, width: 120, height: 20 })
   const bytes = await doc.save({ updateFieldAppearances: false }), plan = await inspectPages(bytes, 'original')
-  const composed = await composePages(bytes, [], plan, { [formKey('original', 'name')]: 'Ada' })
+  const composed = await composePages(bytes, [], plan, { formValues: { [formKey('original', 'name')]: 'Ada' } })
   const out = await PDFDocument.load(composed, { updateMetadata: false })
   expect(out.getForm().getTextField('name').getText()).toBe('Ada')
   expect(out.getProducer()).toBe('Druckwerk 3')

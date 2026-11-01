@@ -9,7 +9,7 @@ test('multi-page extraction follows document order, remaps overlays and retains 
   const bytes = await doc.save(), pages = await inspectPages(bytes,'base')
   const overlays: Textbox[] = ['one','two','three'].map((text,index)=>({ id: text, text, pageId: pages[index].id, x: 10, y: 100, font: 'helvetica', fontSize: 12, bold: false, italic: false, underline: false }))
   const before = structuredClone(overlays)
-  const output = await PDFDocument.load(await exportPageDocument(bytes,[],pages,overlays,[pages[2].id,pages[0].id]))
+  const output = await PDFDocument.load(await exportPageDocument(bytes,[],pages,overlays,{pageId:[pages[2].id,pages[0].id]}))
   expect(output.getPages().map(p=>p.getWidth())).toEqual([201,203])
   const widgets = output.getForm().getTextField('shared').acroField.getWidgets()
   expect(widgets).toHaveLength(2); expect(widgets.map(w=>w.P())).toEqual(output.getPages().map(p=>p.ref))
@@ -24,6 +24,6 @@ test('multi-page extraction follows document order, remaps overlays and retains 
 })
 test('empty and obsolete extraction selections fail rather than accidentally exporting all pages', async () => {
   const doc = await PDFDocument.create(); doc.addPage([200,300]); const bytes = await doc.save(), pages = await inspectPages(bytes,'base')
-  await expect(exportPageDocument(bytes,[],pages,[],[])).rejects.toThrow()
-  await expect(exportPageDocument(bytes,[],pages,[],[pages[0].id,'missing'])).rejects.toThrow()
+  await expect(exportPageDocument(bytes,[],pages,[],{pageId:[]})).rejects.toThrow()
+  await expect(exportPageDocument(bytes,[],pages,[],{pageId:[pages[0].id,'missing']})).rejects.toThrow()
 })

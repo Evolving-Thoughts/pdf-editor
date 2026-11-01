@@ -39,12 +39,6 @@ export class EditorStore {
     if (this.stack.redo()) this.notify()
   }
 
-  /** Mutates state without recording history (transient gestures like live dragging). */
-  preview(mutate: (state: EditorState) => void): void {
-    mutate(this.state)
-    this.notify()
-  }
-
   /** Clears all overlays and history, e.g. when a new document is loaded. */
   reset(): void {
     assignEditorState(this.state, { overlays: [] })

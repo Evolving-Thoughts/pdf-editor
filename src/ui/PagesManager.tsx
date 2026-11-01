@@ -19,8 +19,8 @@ import {
 } from '../core/pages'
 import { importPageFile, preparePages, textPageBytes } from '../core/pdf/pageOperations'
 import { extractInWorker, preflightInWorker } from '../core/pdf/exportJob'
-import { selectDocument, snapshotDocument } from '../core/pdf/documentOutput'
-import { needsConfirmation, rejection } from '../core/pdf/preflight'
+import { selectDocument, type DocumentSnapshot } from '../core/pdf/documentOutput'
+import { reviewExtraction } from '../core/pdf/preflight'
 import { loadPdf, type PdfHandle } from '../core/pdf/loadPdf'
 import { normalizeA4 } from '../core/pdf/normalizeA4'
 import { PageView } from './PageView'
@@ -58,8 +58,9 @@ interface Props {
   /** Page index shown first (the page viewed before opening). */
   initialPage?: number
   onPage?: (index: number) => void
+  snapshot: () => DocumentSnapshot
 }
-export function PagesManager({ nativeWidgets = [], pdf, store, original, busy, onCropActive, initialPage = 0, onPage }: Props) {
+export function PagesManager({ nativeWidgets = [], pdf, store, original, snapshot, busy, onCropActive, initialPage = 0, onPage }: Props) {
   const pages = store.state.pages ?? []
   const first = pages[initialPage] ?? pages[0]
   const [selected, setSelected] = useState(first?.id ?? '')
@@ -181,7 +182,7 @@ export function PagesManager({ nativeWidgets = [], pdf, store, original, busy, o
     const token = ++request.current, version = store.getVersion()
     setA4Open(true); setWorking(true); setProblem(null)
     try {
-      const prepared = await normalizeA4(snapshotDocument(new Uint8Array(original), store.state))
+      const prepared = await normalizeA4(snapshot())
       if (request.current !== token) return
       const previewPdf = await loadPdf('A4-Vorschau', new Uint8Array(prepared.source.bytes))
       if (request.current !== token) { await previewPdf.destroy(); return }
@@ -242,19 +243,18 @@ export function PagesManager({ nativeWidgets = [], pdf, store, original, busy, o
     setProblem(null)
     let messages: string[]
     try {
-      const report = await preflightInWorker(selectDocument(snapshotDocument(new Uint8Array(original), store.state), ids))
+      const report = await preflightInWorker(selectDocument(snapshot(), ids))
       if (token !== request.current) return
-      const rejected = rejection(report)
-      if (rejected) {
-        setProblem(rejected.message)
+      const review = reviewExtraction(report)
+      if (review.rejected) {
+        setProblem(review.rejected)
         setWorking(false)
         return
       }
-      messages = needsConfirmation(report).map(item => item.message)
-      if (report.textIssues.length) messages.push('Nicht darstellbare Zeichen werden durch „?“ ersetzt.')
+      messages = review.confirm
     } catch {
       if (token !== request.current) return
-      messages = ['Die Prüfung konnte nicht abgeschlossen werden. Bitte das Ergebnis selbst kontrollieren.']
+      messages = reviewExtraction(null).confirm
     }
     if (messages.length) {
       setExtractCheck({ ids, version, messages })
@@ -268,7 +268,7 @@ export function PagesManager({ nativeWidgets = [], pdf, store, original, busy, o
     setProblem(null)
     try {
       if (store.getVersion() !== version) throw new Error('Der Arbeitsstand hat sich geändert. Bitte erneut auswählen.')
-      const bytes = await extractInWorker(snapshotDocument(new Uint8Array(original), store.state), ids)
+      const bytes = await extractInWorker(snapshot(), ids)
       if (token !== request.current) return
       downloadPdf(bytes, ids.length === 1 ? `Seite-${pages.findIndex(p => p.id === ids[0]) + 1}.pdf` : `Auswahl-${ids.length}-Seiten.pdf`)
       setMessage(ids.length === 1 ? 'Die ausgewählte Seite wurde als eigenes PDF gespeichert.' : `${ids.length} ausgewählte Seiten wurden als eigenes PDF gespeichert.`)
