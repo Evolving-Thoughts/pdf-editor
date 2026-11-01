@@ -47,6 +47,9 @@ import { stampOverlay } from '../core/stamps'
 import type { Tool } from './tools'
 import './app.css'
 
+/** The current draft could not be saved: it stays open, and that has been reported. */
+class UnsavedDraftError extends Error {}
+
 export default function App() {
   const [views] = useState(() => new EditorViews())
   useSyncExternalStore(views.subscribe, views.getVersion)
@@ -120,9 +123,8 @@ export default function App() {
   const redactionBusy = session.running('redacting'), openingFile = session.running('opening')
   const sizeWarning = (originalBytes?.byteLength ?? 0) > DRAFT_SIZE_WARN_BYTES
   const {
-    drafts, setDrafts, draftsError, setDraftsError, manualSave, setManualSave, inputEpochRef,
-    pauseSaving, ensureDraftDb, queuePersistence, reportDraftProblem,
-    persistActiveDraft, onManualSave, onDraftsMenuOpen,
+    drafts, draftsError, manualSave, saver, forgetDraft, noteInput,
+    pauseSaving, reportDraftProblem, persistActiveDraft, onManualSave, onDraftsMenuOpen,
   } = useDraftPersistence(store, session)
   const redactions = store.state.redactions ?? []
   const overlays = store.state.overlays
@@ -206,22 +208,23 @@ export default function App() {
       setError(null)
       try {
         const outcome = await session.openDraft(id, {
-          save: () => persistActiveDraft().catch((problem) =>
-            reportDraftProblem(problem, 'Der bisherige Entwurf konnte nicht gespeichert werden.'),
-          ),
-          read: () => queuePersistence(async () => loadDraft(await ensureDraftDb(), id)),
+          save: () => persistActiveDraft().catch((problem) => {
+            reportDraftProblem(problem, 'Der bisherige Entwurf konnte nicht gespeichert werden. Er bleibt geöffnet.')
+            throw new UnsavedDraftError()
+          }),
+          read: () => saver.queue(db => loadDraft(db, id)),
           beforeReplace: pauseSaving,
         })
         if (outcome === 'opened') resetView()
         if (outcome === 'missing') {
-          setDrafts((current) => current.filter((draft) => draft.id !== id))
+          forgetDraft(id)
           setError('Dieser Entwurf ist nicht mehr vorhanden.')
         }
-      } catch {
-        setError('Der Entwurf konnte nicht geöffnet werden.')
+      } catch (problem) {
+        if (!(problem instanceof UnsavedDraftError)) setError('Der Entwurf konnte nicht geöffnet werden.')
       }
     },
-    [ensureDraftDb, pauseSaving, persistActiveDraft, queuePersistence, reportDraftProblem, resetView, session, setDrafts],
+    [forgetDraft, pauseSaving, persistActiveDraft, reportDraftProblem, resetView, saver, session],
   )
 
   const onDeleteDraft = useCallback(
@@ -231,7 +234,7 @@ export default function App() {
         return
       }
       const isActive = id === session.activeDraftId
-      const remove = () => queuePersistence(async () => deleteDraft(await ensureDraftDb(), id))
+      const remove = () => saver.queue(db => deleteDraft(db, id))
       try {
         if (isActive) {
           await session.deleteDraft({
@@ -244,13 +247,12 @@ export default function App() {
           })
           setSelectedId(null)
         } else await remove()
-        setDrafts((current) => current.filter((item) => item.id !== id))
-        setDraftsError(null)
+        forgetDraft(id)
       } catch (problem) {
         reportDraftProblem(problem, 'Der Entwurf konnte nicht gelöscht werden.')
       }
     },
-    [drafts, ensureDraftDb, pauseSaving, persistActiveDraft, queuePersistence, reportDraftProblem, session, setDrafts, setDraftsError],
+    [drafts, forgetDraft, pauseSaving, persistActiveDraft, reportDraftProblem, saver, session],
   )
 
   // Release the worker document when the app unmounts.
@@ -454,8 +456,7 @@ export default function App() {
         void onOpenFile(pdfFiles[0])
       }} onChange={event => {
       if ((event.target as HTMLElement).closest('.export-dialog')) return
-      inputEpochRef.current += 1
-      setManualSave(current => current?.status === 'saved' ? null : current)
+      noteInput()
     }}>
       <header
         className="toolbar"

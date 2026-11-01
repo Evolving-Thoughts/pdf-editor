@@ -190,6 +190,16 @@ test('opening a draft reports a missing one and an outdated one', async () => {
   expect(session.draft?.name).toBe('a.pdf')
 })
 
+test('a draft stays closed when the current one cannot be saved', async () => {
+  await session.openFile(await file('a.pdf'), ports())
+  const before = session.draft
+  const read = vi.fn(async () => null)
+  await expect(session.openDraft('d', { save: async () => { throw new Error('voll') }, beforeReplace: () => undefined, read })).rejects.toThrow('voll')
+  expect(read).not.toHaveBeenCalled()
+  expect(session.draft).toBe(before)
+  expect(session.loadingDraftId).toBeNull()
+})
+
 test('after disposal nothing publishes, and the document is released', async () => {
   await session.openFile(await file('a.pdf'), ports())
   let release = () => {}

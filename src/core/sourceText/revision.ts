@@ -9,14 +9,21 @@ import type { PageSource } from '../pages'
 export function sourceRevision(state: EditorState, pageId: string, bytes: ArrayBuffer): Command {
   return sourceRevisions(state, [{ pageId, bytes }])
 }
+/** Why this page's source text cannot be corrected right now. Null when it can. */
+export function sourceTextBlocker(state: EditorState, pageId: string): string | null {
+  const page = state.pages?.find(value => value.id === pageId)
+  if (page?.hasForms || page?.hasXfa) return 'PDFs mit Formularfeldern können derzeit nicht im Originaltext korrigiert werden.'
+  if (!page || page.cropped || page.rotation !== 0 || page.unit !== 1 || page.redacted || state.redactions?.length || state.overlays.some(overlay => overlay.pageId === pageId))
+    return 'Diese Seite ist derzeit nicht unterstützt: Drehung, Zuschnitt, Schwärzungen oder Overlays verhindern eine sichere Originaltext-Korrektur.'
+  return null
+}
+
 /** Several pages corrected together: one command, so one undo step. */
 export function sourceRevisions(state: EditorState, revisions: readonly { pageId: string; bytes: ArrayBuffer }[]): Command {
   if (!revisions.length || new Set(revisions.map(r => r.pageId)).size !== revisions.length) throw new Error('Ungültige Originaltext-Korrektur.')
   for (const { pageId } of revisions) {
-    const page = state.pages?.find(value => value.id === pageId)
-    if (!page || state.redactions?.length || page.hasForms || page.hasXfa || page.redacted || state.overlays.some(overlay => overlay.pageId === pageId)) {
-      throw new Error('Originaltext-Korrektur ist auf dieser Seite derzeit nicht sicher möglich. Overlays oder vorgemerkte Schwärzungen zuerst entfernen.')
-    }
+    const blocker = sourceTextBlocker(state, pageId)
+    if (blocker) throw new Error(blocker)
   }
   const beforePages = state.pages!, beforeSources = state.pageSources ?? []
   const sources = new Map(revisions.map(r => [r.pageId, { id: createId(), bytes: r.bytes.slice(0) } as PageSource]))

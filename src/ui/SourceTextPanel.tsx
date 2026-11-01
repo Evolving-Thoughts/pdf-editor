@@ -13,7 +13,7 @@ import type { Box } from '../core/sourceText/space'
 import { emptyHistory, recordEdit, recordStep, redoDraft, undoDraft, withDraft } from '../core/sourceText/draftHistory'
 import type { DraftHistory, DraftState } from '../core/sourceText/draftHistory'
 import { fitMessage } from './sourceFit'
-import { sourceRevisions } from '../core/sourceText/revision'
+import { sourceRevisions, sourceTextBlocker } from '../core/sourceText/revision'
 import type { SourcePageGeometry } from '../core/pdf/loadPdf'
 import type { SearchFragment } from '../core/search'
 import { SourceTextSelection } from './SourceTextSelection'
@@ -262,10 +262,9 @@ export function SourceTextPanel({ store, original, onClose, onHistory, initialPa
       if (changed) { setCandidate(null); setShowOriginal(false); setReady(false); setDraft(NONE); setMetas({}); history.current = emptyHistory(); bump() }
       setAnalysis(null); setSelection(null); setPending(null); setText(''); setParagraph(false); setError(''); setBusy(true)
     })
-    const supported = (p: typeof page) =>
-      !!p && !p.cropped && p.rotation === 0 && p.unit === 1 && !p.redacted && !store.state.redactions?.length && !store.state.overlays.some(overlay => overlay.pageId === p.id)
-    if (!source || !supported(page)) {
-      queueMicrotask(() => { if (!controller.signal.aborted) { setAnalysis({ ...EMPTY_ANALYSIS, pageId }); setError('Diese Seite ist derzeit nicht unterstützt: Drehung, Zuschnitt, Schwärzungen oder Overlays verhindern eine sichere Originaltext-Korrektur.'); setBusy(false) } }); return () => controller.abort()
+    const blocker = sourceTextBlocker(store.state, pageId)
+    if (!source || blocker) {
+      queueMicrotask(() => { if (!controller.signal.aborted) { setAnalysis({ ...EMPTY_ANALYSIS, pageId }); setError(blocker ?? 'Diese Seite ist derzeit nicht unterstützt.'); setBusy(false) } }); return () => controller.abort()
     }
     void cachedInspection(source, page!.sourceIndex, controller.signal).then(result => {
       if (controller.signal.aborted || analysisEpoch.current !== currentEpoch) return
@@ -274,7 +273,7 @@ export function SourceTextPanel({ store, original, onClose, onHistory, initialPa
       if (!runs.some(value => value.selection)) setError('Keine sicher markierbaren Originaltextstellen nachgewiesen. Bei Scans ist zunächst OCR nötig; Text-PDFs können nicht unterstützte Schriften oder Strukturen enthalten.')
       // The neighbours are the likely next pages: analyze them in the background.
       const all = store.state.pages ?? [], at = all.findIndex(value => value.id === page!.id)
-      for (const next of [all[at + 1], all[at - 1]]) { const bytes = next && supported(next) ? sourceOf(next.id) : undefined; if (bytes) prefetchInspection(bytes, next.sourceIndex) }
+      for (const next of [all[at + 1], all[at - 1]]) { const bytes = next && !sourceTextBlocker(store.state, next.id) ? sourceOf(next.id) : undefined; if (bytes) prefetchInspection(bytes, next.sourceIndex) }
     }).catch(problem => { if (!controller.signal.aborted) { setAnalysis({ ...EMPTY_ANALYSIS, pageId }); setError(problem instanceof Error ? problem.message : 'Textanalyse fehlgeschlagen.') } }).finally(() => { if (!controller.signal.aborted && analysisEpoch.current === currentEpoch) setBusy(false) })
     return () => { controller.abort() }
   }, [version, pageId, page, source, store, sourceOf])
