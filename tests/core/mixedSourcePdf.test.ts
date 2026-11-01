@@ -260,7 +260,7 @@ test('original ligature glyphs stay byte-identical and are never silently split 
   expect(a.runs.some((r) => r.text === 'safe text')).toBe(true)
   const r = a.runs.find((x) => x.text === 'office')!
   // Only the block path may touch ligature glyphs; the fragment path refuses.
-  expect(r.paragraph?.automatic).toBe(true)
+  expect(r.paragraph).toBeDefined()
   const s = { digest: a.digest, runId: r.id, expectedText: r.text }
   await expect(previewPageSource(b, s, 'ofice')).rejects.toThrow(/nicht sicher bearbeitbar/)
   // Splitting the ligature would need an unembedded "i": rejected, not faked.
@@ -292,3 +292,36 @@ test('structure-tree replacement text is not left as a stale accessibility cache
   )
   await expect(inspectPageSource(await d.save(), 0)).rejects.toThrow(/Keine sicher/)
 })
+
+async function leadingOffset() {
+  const d = await PDFDocument.create(),
+    p = d.addPage([600, 800]),
+    font = await d.embedFont(StandardFonts.Helvetica)
+  p.node.set(n('Resources'), d.context.obj({ Font: { F1: font.ref } }))
+  p.node.set(
+    n('Contents'),
+    d.context.register(
+      d.context.flateStream('BT /F1 12 Tf 1 0 0 1 60 700 Tm [-5000 (Foo bar)] TJ ET\n'),
+    ),
+  )
+  return d.save()
+}
+async function inkStart(bytes: Uint8Array) {
+  const page = await (await getDocument({ data: bytes.slice() }).promise).getPage(1),
+    items = (await page.getTextContent()).items as { str: string; transform: number[] }[]
+  return items.find((item) => item.str.trim())!.transform[4]
+}
+test.each(['Foo baz', 'Goo bar'])(
+  'a fragment keeps the offset before its first glyph (%s)',
+  async (replacement) => {
+    const bytes = await leadingOffset(),
+      { digest, runs } = await inspectPageSource(bytes, 0),
+      out = await previewPageSource(
+        bytes,
+        { digest, runId: runs[0].id, expectedText: runs[0].text },
+        replacement,
+      )
+    expect(await inkStart(bytes)).toBeCloseTo(120, 3)
+    expect(await inkStart(out)).toBeCloseTo(120, 3)
+  },
+)

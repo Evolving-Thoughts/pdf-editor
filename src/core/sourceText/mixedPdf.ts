@@ -1122,10 +1122,6 @@ export async function inspectPageSource(bytes: Uint8Array, pageIndex: number) {
       paragraphs.set(block, (p = {
         text: block.text,
         lineCount: block.lines.length,
-        leading: block.leading,
-        width: block.right - block.lines[0].left,
-        separator: '',
-        automatic: true,
       }))
     return p
   }
@@ -1256,6 +1252,8 @@ export async function previewPageSource(
     suffix++
   // Preserve kerning only inside unchanged prefix/suffix pairs. Never copy a
   // numeric TJ correction onto a newly introduced glyph pair or squeeze to fit.
+  // An offset before the first glyph belongs to no pair: it places the text.
+  adjustments[0] = run.adjustments[0] ?? 0
   for (let i = 1; i < codes.length; i++) {
     if (i < prefix) adjustments[i] = run.adjustments[i] ?? 0
     else if (i > chars.length - suffix)
@@ -1323,26 +1321,47 @@ export async function previewPageSource(
   writeStreams(doc, page, refs, [{ stream: run.stream, text: changed }])
   const bytes = await doc.save({ updateFieldAppearances: false }),
     checked = await analyze(bytes, pageIndex)
-  if (checked.runs.length !== runs.length)
-    fail('Die Ergebnisprüfung fand eine unerwartete Anzahl von Textstellen.')
-  for (let i = 0; i < runs.length; i++) {
-    const before = runs[i],
-      after = checked.runs[i]
-    if (
-      after.view.text !== (before === run ? replacement : before.view.text) ||
-      after.view.fontName !== before.view.fontName ||
-      Math.abs(after.view.x - before.view.x) > 1e-5 ||
-      Math.abs(after.view.baseline - before.view.baseline) > 1e-5 ||
-      Math.abs(after.advance - before.advance) > 1e-5
-    )
-      fail(
-        'Die Ergebnisprüfung fand eine unerwartete Text- oder Positionsänderung.',
-      )
-  }
+  verifyResult(
+    checked,
+    runs.map((r) => (r === run ? { ...expectedRun(r), text: replacement } : expectedRun(r))),
+    obstacles,
+  )
   return bytes
 }
 
 type Analysis = Awaited<ReturnType<typeof analyze>>
+interface ExpectedRun { text: string; fontName: string; fontRaw: string; fill: string; x: number; baseline: number; advance?: number; lead?: number }
+
+/** What a run untouched by an edit must still look like afterwards. */
+const expectedRun = (r: Analysis['runs'][number]): ExpectedRun => ({
+  text: r.view.text, fontName: r.view.fontName, fontRaw: r.fontRaw, fill: r.fill, x: r.view.x, baseline: r.view.baseline, advance: r.advance, lead: r.adjustments[0] ?? 0,
+})
+
+/** Every edit ends here: the written PDF is analyzed again and has to match, text by text. */
+function verifyResult(checked: Analysis, expected: readonly ExpectedRun[], obstacles: Analysis['obstacles']) {
+  if (checked.runs.length !== expected.length)
+    fail('Die Ergebnisprüfung fand eine unerwartete Anzahl von Textstellen.')
+  checked.runs.forEach((after, i) => {
+    const e = expected[i]
+    if (
+      after.view.text !== e.text ||
+      after.view.fontName !== e.fontName ||
+      after.fontRaw !== e.fontRaw ||
+      after.fill !== e.fill ||
+      Math.abs(after.view.x - e.x) > 1e-4 ||
+      Math.abs(after.view.baseline - e.baseline) > 1e-4 ||
+      (e.advance !== undefined && Math.abs(after.advance - e.advance) > 1e-5) ||
+      (e.lead !== undefined && Math.abs((after.adjustments[0] ?? 0) - e.lead) > 1e-5)
+    )
+      fail('Die Ergebnisprüfung fand eine unerwartete Text- oder Positionsänderung.')
+  })
+  // Images, graphics and annotations are untouched by construction; prove it.
+  if (
+    checked.obstacles.length !== obstacles.length ||
+    checked.obstacles.some((o, i) => (['left', 'right', 'bottom', 'top'] as const).some((k) => Math.abs(o[k] - obstacles[i][k]) > 1e-6))
+  )
+    fail('Die Ergebnisprüfung fand eine Veränderung an Bildern, Grafiken oder Anmerkungen.')
+}
 /** Replace changed content streams in place when unshared, copy-on-write otherwise. */
 function writeStreams(
   doc: PDFDocument,
@@ -1527,32 +1546,11 @@ export async function previewBlock(result: Analysis, block: SourceBlock, replace
   writeStreams(doc, page, refs, changes)
   const bytes = await doc.save({ updateFieldAppearances: false }),
     checked = await analyze(bytes, pageIndex)
-  const expected: { text: string; fontName: string; fontRaw: string; fill: string; x: number; baseline: number; advance?: number }[] = []
+  const expected: ExpectedRun[] = []
   runs.forEach((r, i) => {
     if (i === block.members[0]) expected.push(...emitted.expected)
-    else if (!members.has(i))
-      expected.push({ text: r.view.text, fontName: r.view.fontName, fontRaw: r.fontRaw, fill: r.fill, x: r.view.x, baseline: r.view.baseline, advance: r.advance })
+    else if (!members.has(i)) expected.push(expectedRun(r))
   })
-  if (checked.runs.length !== expected.length)
-    fail('Die Ergebnisprüfung fand eine unerwartete Anzahl von Textstellen.')
-  checked.runs.forEach((after, i) => {
-    const e = expected[i]
-    if (
-      after.view.text !== e.text ||
-      after.view.fontName !== e.fontName ||
-      after.fontRaw !== e.fontRaw ||
-      after.fill !== e.fill ||
-      Math.abs(after.view.x - e.x) > 1e-4 ||
-      Math.abs(after.view.baseline - e.baseline) > 1e-4 ||
-      (e.advance !== undefined && Math.abs(after.advance - e.advance) > 1e-5)
-    )
-      fail('Die Ergebnisprüfung fand eine unerwartete Text- oder Positionsänderung.')
-  })
-  // Images, graphics and annotations are untouched by construction; prove it.
-  if (
-    checked.obstacles.length !== obstacles.length ||
-    checked.obstacles.some((o, i) => (['left', 'right', 'bottom', 'top'] as const).some((k) => Math.abs(o[k] - obstacles[i][k]) > 1e-6))
-  )
-    fail('Die Ergebnisprüfung fand eine Veränderung an Bildern, Grafiken oder Anmerkungen.')
+  verifyResult(checked, expected, obstacles)
   return bytes
 }

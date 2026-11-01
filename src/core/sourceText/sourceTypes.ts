@@ -10,9 +10,9 @@ export interface SourceRun {
   baseline: number
   width: number
   selection?: { characters: { offset: number; width: number }[]; groupId?: string }
-  paragraph?: { text: string; lineCount: number; leading: number; width: number; separator?: string; automatic?: boolean }
+  paragraph?: { text: string; lineCount: number }
 }
-export interface SourceSelection { digest: string; runId: string; expectedText: string; scope?: 'line' | 'paragraph'; confirmReflow?: boolean }
+export interface SourceSelection { digest: string; runId: string; expectedText: string; scope?: 'line' | 'paragraph' }
 
 export interface SourceFont {
   codec: SourceFontCodec; decode: Map<number, string>; codeBytes: 1 | 2; name: string; bbox: number[]; advances?: Map<number, number>; boxes?: Map<number, number[]>

@@ -1212,8 +1212,6 @@
 .source-editor label { display:block; margin:16px 0; font-size:14px; }
 .source-editor select,.source-editor textarea { display:block; width:100%; margin-top:6px; padding:10px; border:1px solid #aaa; border-radius:6px; font:inherit; background:inherit; color:inherit; }
 .source-editor textarea { min-height:150px; resize:vertical; }
-.source-editor .source-check { display:flex; gap:10px; align-items:start; }
-.source-check input { flex-shrink:0; width:20px; height:20px; }
 .source-editor button { min-height:44px; }
 .source-actions { display:flex; flex-wrap:wrap; gap:8px; }
 .source-context { min-width:0; padding:20px; background:#f4f2ec; color:#28232e; }
@@ -1255,7 +1253,6 @@
 .source-run-hit.source-member { border-color:transparent; }
 .source-run-hit.source-member:hover,.source-run-hit.source-member:focus-visible { outline:none; background:transparent; }
 .source-block:hover .source-block-outline,.source-block:focus-within .source-block-outline { outline:2px solid #7936bb; outline-offset:2px; background:#ad75db12; }
-.source-block-outline.source-picked { outline:2px solid #7936bb; outline-offset:2px; }
 .source-unknown-hit { position:absolute; z-index:1; opacity:0; border:0; padding:0; background:transparent; cursor:not-allowed; }
 .source-unknown-hit:focus-visible { opacity:1; outline:2px dotted #555; background:#7772; }
 .source-legend { display:flex; flex-wrap:wrap; gap:8px 16px; padding:12px; margin:12px 0; border:1px solid #d8d1de; border-radius:6px; font-size:13px; background:#fff9; }

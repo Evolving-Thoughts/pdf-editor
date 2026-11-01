@@ -174,7 +174,7 @@ export function SourceTextPanel({ store, original, onClose, onHistory, initialPa
   const [analysis, setAnalysis] = useState<(SourceAnalysis & { pageId: string }) | null>(null)
   // Fragment flow (text without a proved paragraph): side-panel textarea.
   const [selection, setSelection] = useState<DirectSelection | null>(null), [pending, setPending] = useState<DirectSelection | null>(null)
-  const [text, setText] = useState(''), [paragraph, setParagraph] = useState(false)
+  const [text, setText] = useState('')
   // Inline flow: proved paragraphs edited directly on the page, several at once, on several pages.
   const [draft, setDraft] = useState<DraftState>(NONE)
   const [metas, setMetas] = useState<Readonly<Record<string, DraftMeta>>>({})
@@ -244,8 +244,6 @@ export function SourceTextPanel({ store, original, onClose, onHistory, initialPa
   const okOf = (k: string) => { const { pageId: p, blockId } = splitKey(k); return p === pageId && models.has(blockId) ? fitOk(views.get(blockId)) : !!metas[k]?.ok }
   const checkable = allKeys.length > 0 && allKeys.every(k => !!metas[k] && okOf(k))
   const draftPages = useMemo(() => new Set(allKeys.map(k => splitKey(k).pageId)), [allKeys])
-  // Simple single-stream PDFs keep the confirmed reflow of the older adapter.
-  const automatic = !!run?.paragraph?.automatic, reflow = paragraph || automatic
   const fragmentDirty = !!selection && text !== selection.text
   const dirty = allKeys.length > 0 || fragmentDirty
   const invalid = () => { request.current?.abort(); epoch.current++; setCandidate(null); setShowOriginal(false); setReady(false); setBusy(false); setChecking(false) }
@@ -260,7 +258,7 @@ export function SourceTextPanel({ store, original, onClose, onHistory, initialPa
     queueMicrotask(() => {
       if (controller.signal.aborted) return
       if (changed) { setCandidate(null); setShowOriginal(false); setReady(false); setDraft(NONE); setMetas({}); history.current = emptyHistory(); bump() }
-      setAnalysis(null); setSelection(null); setPending(null); setText(''); setParagraph(false); setError(''); setBusy(true)
+      setAnalysis(null); setSelection(null); setPending(null); setText(''); setError(''); setBusy(true)
     })
     const blocker = sourceTextBlocker(store.state, pageId)
     if (!source || blocker) {
@@ -312,7 +310,7 @@ export function SourceTextPanel({ store, original, onClose, onHistory, initialPa
   }, [undo, redo, store])
 
   const discard = () => !dirty || window.confirm(allKeys.length > 1 ? `${allKeys.length} ungeprüfte Absatzänderungen verwerfen?` : 'Ungesicherte Korrektur verwerfen?')
-  function accept(value: DirectSelection) { invalid(); setDraft(NONE); setMetas({}); history.current = emptyHistory(); bump(); setSelection(value); setText(value.text); setParagraph(false); setPending(null); setError('') }
+  function accept(value: DirectSelection) { invalid(); setDraft(NONE); setMetas({}); history.current = emptyHistory(); bump(); setSelection(value); setText(value.text); setPending(null); setError('') }
   function select(value: DirectSelection) {
     if (allKeys.length) { if (!window.confirm('Ungeprüfte Absatzänderungen verwerfen und dieses Textfragment bearbeiten?')) return; accept(value); return }
     if (selection && text !== selection.text) { setPending(value); return }
@@ -386,8 +384,8 @@ export function SourceTextPanel({ store, original, onClose, onHistory, initialPa
         }
       } else {
         if (!source || !current || !page || !run || !selection || pending) return
-        const replacement = selectedReplacement(run, selection, text, reflow)
-        out.push({ pageId, pageNumber: page.sourceIndex + 1, bytes: await previewSource(source, { digest: current.digest, runId: run.id, expectedText: run.text, scope: reflow ? 'paragraph' : 'line', confirmReflow: paragraph }, replacement, controller.signal) })
+        const replacement = selectedReplacement(run, selection, text)
+        out.push({ pageId, pageNumber: page.sourceIndex + 1, bytes: await previewSource(source, { digest: current.digest, runId: run.id, expectedText: run.text }, replacement, controller.signal) })
       }
       // Every result page must render before it can be applied, not only the one on screen.
       for (const o of out) { if (controller.signal.aborted) return; const pdf = await docs.get(o.bytes); await pdf.renderPage(o.pageNumber, document.createElement('canvas'), .25) }
@@ -457,14 +455,12 @@ export function SourceTextPanel({ store, original, onClose, onHistory, initialPa
         </li> })}
       </ul></div>}
       {pending && <div className="source-pending" role="alert"><p>Die aktuelle Korrektur ist noch nicht übernommen. Verwerfen und die neue Auswahl bearbeiten?</p><button onClick={() => accept(pending)}>Auswahl wechseln</button><button onClick={() => { setPending(null); textarea.current?.focus() }}>Weiter bearbeiten</button></div>}
-      {!active && run && <p className="source-font">{run.fontName} · {run.fontSize} pt · {automatic ? (run.paragraph!.lineCount > 1 ? `Absatz mit ${run.paragraph!.lineCount} Zeilen – wird bei Bedarf automatisch neu umbrochen` : 'Zeile wird als Ganzes bearbeitet – Folgetext rückt nach') : run.paragraph ? 'Absatzumbruch nach Bestätigung möglich' : 'Nur dieses Textfragment – kein Absatzumbruch'}</p>}
-      {!active && run?.paragraph && current && <>{run.paragraph.lineCount > 1 && <button onClick={() => { const members = current.runs.filter(value => value.selection?.groupId === run.selection?.groupId); const value = directSelection(current.runs, members[0].id, 0, members.at(-1)!.id); if (value) select(value) }}>Ganzen Absatz auswählen</button>}{!automatic && <label className="source-check"><input type="checkbox" checked={paragraph} onChange={event => { invalid(); setParagraph(event.target.checked) }} />Diese {run.paragraph.lineCount} Zeilen sind ein Fließtextabsatz mit automatischen, nicht absichtlichen Umbrüchen. Absatz neu umbrechen.</label>}</>}
-      {!active && selection?.requiresReflow && !reflow && <p>Die Auswahl umfasst mehrere Zeilen. Zum Ändern zuerst den automatischen Absatzumbruch bestätigen.</p>}
+      {!active && run && <p className="source-font">{run.fontName} · {run.fontSize} pt · Nur dieses Textfragment – kein Absatzumbruch</p>}
       {!active && selection && <><label htmlFor="source-replacement">Ersatztext</label><textarea ref={textarea} id="source-replacement" maxLength={4096} value={text} disabled={!run || busy || !!pending || !!candidate} onChange={event => { invalid(); setText(event.target.value) }} /></>}
       {checking && <p role="status">{allKeys.length > 1 ? `${allKeys.length} Absätze${scope} werden isoliert in der PDF geprüft …` : 'Text wird isoliert in der PDF geprüft …'}</p>}{error && <p role="alert">{error}</p>}
       {candidate && <p role="status">{!result ? `Ergebnis${resultPages} bereit. Geprüfte Seiten sind in der Seitenliste markiert.` : ready ? (candidate.paragraphs > 1 ? `Ergebnis mit ${candidate.paragraphs} geänderten Absätzen${resultPages} in der echten PDF bereit. Absätze und Übergänge ansehen.` : 'Ergebnis in der echten PDF bereit. Absatz und Übergang zum Folgeinhalt ansehen.') : 'PDF-Ergebnis wird gerendert …'}</p>}
       <div className="source-actions">
-        {!candidate && (allKeys.length > 0 || selection) && <button className="export-button" disabled={busy || !!pending || (allKeys.length ? !checkable : !run || !text.trim() || text === selection?.text || (!!selection?.requiresReflow && !reflow))} onClick={() => void check()}>In PDF prüfen</button>}
+        {!candidate && (allKeys.length > 0 || selection) && <button className="export-button" disabled={busy || !!pending || (allKeys.length ? !checkable : !run || !text.trim() || text === selection?.text)} onClick={() => void check()}>In PDF prüfen</button>}
         {candidate && <><button onClick={keepEditing}>Weiter bearbeiten</button><button className="export-button" disabled={!canApply} onClick={apply}>Übernehmen</button></>}
         {allKeys.length > 1 && !candidate && <button onClick={discardAll} disabled={checking}>Alle Änderungen verwerfen</button>}
         <button onClick={() => { if (discard()) onClose() }}>Schließen</button>

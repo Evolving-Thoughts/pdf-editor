@@ -38,7 +38,7 @@ async function paragraphFixture(follow = 540) {
 function paragraphSelection(analysis: Awaited<ReturnType<typeof inspectPage>>) {
   const run = analysis.runs[0]
   expect(run.paragraph).toBeDefined()
-  return { digest: analysis.digest, runId: run.id, expectedText: run.text, scope: 'paragraph' as const, confirmReflow: true }
+  return { digest: analysis.digest, runId: run.id, expectedText: run.text, scope: 'paragraph' as const }
 }
 
 test('real paragraph shrinks naturally while neighbour baseline and first baseline remain fixed', async () => {
