@@ -10,12 +10,11 @@
  * and when re-wrapping the original text reproduces every original line break
  * exactly. Line breaks without a space glyph get an inferred word space; a
  * line-end hyphen between lowercase letters is treated as a hyphenation point. */
-import type { SourceFont } from './sourceFonts'
+import { baseFontName, type SourceFont } from './sourceTypes'
 
 export interface BlockRect { left: number; right: number; bottom: number; top: number }
 export interface BlockInput {
   index: number
-  text: string
   codes: number[]
   /** Character(s) per code; an ActualText glyph carries its whole replacement text. */
   chars: string[]
@@ -77,7 +76,6 @@ export interface SourceBlock {
   leading: number
   glyphs: BlockGlyph[]
   text: string
-  tagged: boolean
   /** Page-space size of the first glyph (display only; glyphs carry their own). */
   size: number
   justified: boolean
@@ -103,7 +101,6 @@ export const glyphAdvance = (g: Metric) =>
   ((codeAdvance(g.font, g.code, g.char) * g.tf) / 1000 + g.tc + (g.font.codeBytes === 1 && g.code === 32 ? g.tw : 0)) * g.scale
 const sameStyle = (a: BlockGlyph, b: BlockGlyph) =>
   a.fontRaw === b.fontRaw && a.fill === b.fill && a.tc === b.tc && a.tw === b.tw && a.tf === b.tf && !a.actual && !b.actual
-export const baseFontName = (name: string) => name.replace(/^[A-Z]{6}\+/, '')
 
 /** A word space in the font of `after`, used for inferred line-break spaces. */
 export function spaceGlyph(after: Omit<BlockGlyph, 'width' | 'kern' | 'startKern' | 'orig' | 'lineStart' | 'char' | 'code'>): BlockGlyph | undefined {
@@ -231,7 +228,7 @@ function makeBlock(inputs: readonly BlockInput[], lines: number[][], pageIndex: 
     full.every(e => right - e <= tolerance) && glyphs.some(g => g.char === ' ')
   return {
     id: `mixed-block:${pageIndex}:${first.index}`, members: lines.flat(), lines: blockLines, right, leading,
-    glyphs, text: glyphs.map(g => g.char).join(''), tagged: lines.flat().every(i => inputs[i].tagged), size: first.size, justified,
+    glyphs, text: glyphs.map(g => g.char).join(''), size: first.size, justified,
   }
 }
 
@@ -394,7 +391,7 @@ function justify(glyphs: readonly BlockGlyph[], line: PlacedLine, right: number)
 }
 
 export type EditLayout =
-  | { ok: true; glyphs: BlockGlyph[]; lines: PlacedLine[]; changedFrom: number }
+  | { ok: true; glyphs: BlockGlyph[]; lines: PlacedLine[] }
   | { ok: false; reason: 'char'; char: string }
   | { ok: false; reason: 'wide' }
 /** Lay out an edited block. Lines before the line above the first change stay exact;
@@ -431,16 +428,19 @@ export function layoutEdit(block: SourceBlock, replacement: string): EditLayout 
     return { ...p, left, baseline, ...placeLine(glyphs, p.from, p.to, left) }
   })
   if (block.justified) lines.forEach((l, i) => { if (i >= reflowFrom && i < lines.length - 1 && !restored.has(i)) justify(glyphs, l, block.right) })
-  return { ok: true, glyphs, lines, changedFrom }
+  return { ok: true, glyphs, lines }
 }
 
+export function glyphBox(g: Pick<BlockGlyph, 'font' | 'code' | 'size'>, x: number, baseline: number) {
+  const b = g.font.boxes?.get(g.code) ?? g.font.bbox
+  return { left: x + (b[0] * g.size) / 1000, right: x + (b[2] * g.size) / 1000, bottom: baseline + (b[1] * g.size) / 1000, top: baseline + (b[3] * g.size) / 1000 }
+}
 export function inkBox(glyphs: readonly BlockGlyph[], line: PlacedLine): BlockRect | undefined {
   let r: BlockRect | undefined
   for (let k = line.from; k < line.to; k++) {
     const g = glyphs[k]
     if (!g.char.trim() || hidden(glyphs, k, line.to)) continue
-    const b = g.font.boxes?.get(g.code) ?? g.font.bbox, x = line.positions[k - line.from]
-    const box = { left: x + (b[0] * g.size) / 1000, right: x + (b[2] * g.size) / 1000, bottom: line.baseline + (b[1] * g.size) / 1000, top: line.baseline + (b[3] * g.size) / 1000 }
+    const box = glyphBox(g, line.positions[k - line.from], line.baseline)
     r = r ? { left: Math.min(r.left, box.left), right: Math.max(r.right, box.right), bottom: Math.min(r.bottom, box.bottom), top: Math.max(r.top, box.top) } : box
   }
   return r

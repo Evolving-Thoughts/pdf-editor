@@ -7,6 +7,8 @@ import { ToolbarTools } from './ToolbarTools'
 import { inspectStructures, type TextIssue } from '../core/pdf/preflight'
 import { setMetadataCommand } from '../core/pdf/metadata'
 import { IncorrectPasswordError } from '../core/pdf/unlockPdf'
+import { DocumentProblem } from '../core/pdf/documentBudget'
+import { historyStep } from '../core/sourceText/draftHistory'
 import { PasswordDialog, type PasswordRequest } from './PasswordDialog'
 import { SearchWindow } from './SearchWindow'
 import type { SearchHit } from '../core/search'
@@ -19,9 +21,9 @@ import { useCallback, useEffect, useRef, useState, useSyncExternalStore } from '
 import { addOverlay, clearDrawing, removeOverlay } from '../core/commands'
 import { EditorStore } from '../core/editorStore'
 import { DocumentSession } from '../core/documentSession'
-import { createId, isImage, isMarker, isShape, isStroke, isTextbox, overlayPageIndex } from '../core/model'
+import { createId, isImage, isMarker, isShape, isStroke, isTextbox } from '../core/model'
 import { deleteDraft, DRAFT_SIZE_WARN_BYTES, loadDraft } from '../core/persistence/drafts'
-import { loadPdf, type PdfHandle } from '../core/pdf/loadPdf'
+import { loadPdf } from '../core/pdf/loadPdf'
 import { importImage } from '../core/images/importImage'
 import { initialImageGeometry } from '../core/images/geometry'
 import type { ShapeStyle } from '../core/shapes'
@@ -38,6 +40,8 @@ import { DrawingToolbar } from './DrawingToolbar'
 import { PageView } from './PageView'
 import { VirtualPage } from './VirtualPage'
 import { EditorViews } from '../core/editorViews'
+import { saveBeforeLeaving, UnsavedDraftError } from '../core/persistence/draftSaver'
+import { largestVisiblePage, polygonCenter, scrollToPoint, visibleCenter } from '../core/pageViewport'
 import { arrowStep, nudgeCommand } from '../core/overlayGesture'
 import { PagesManager } from './PagesManager'
 import { pageSize, type DocumentPage } from '../core/pages'
@@ -87,7 +91,6 @@ export default function App() {
   const [strokeWidth, setStrokeWidth] = useState(3)
   const [shapeStyle,setShapeStyle] = useState<ShapeStyle>({fill:null,strokeColor:'#2455c7',strokeWidth:3})
   const [markerStyle,setMarkerStyle] = useState<ShapeStyle>({fill:null,strokeColor:'#ffe34d',strokeWidth:24})
-  const [shapePageSize,setShapePageSize] = useState<{pdf:PdfHandle;pageIndex:number;size:{width:number;height:number}}|null>(null)
   const [eraserRadius, setEraserRadius] = useState(8)
   const [error, setError] = useState<string | null>(null)
   const [selectedId, setSelectedId] = useState<string | null>(null)
@@ -99,20 +102,19 @@ export default function App() {
   // React re-renders on store notifications.
   const [store] = useState(() => new EditorStore())
   useSyncExternalStore(store.subscribe, store.getVersion)
+  const undoStep = historyStep(!!sourceHistory?.canUndo, !!sourceHistory?.dirty, store.canUndo)
+  const redoStep = historyStep(!!sourceHistory?.canRedo, !!sourceHistory?.dirty, store.canRedo)
   const [session] = useState(() => new DocumentSession(store, loadPdf))
   useSyncExternalStore(session.subscribe, session.getVersion)
+  const scrollerBox = useCallback(() => workspaceRef.current?.querySelector<HTMLElement>('.pages') ?? null, [])
+  const pageElement = useCallback((index: number) => scrollerBox()?.querySelector<HTMLElement>(`.page[data-page-index="${index}"]`) ?? null, [scrollerBox])
   const visiblePageIndex = useCallback(() => {
-    const scroller = workspaceRef.current?.querySelector<HTMLElement>('.pages')
+    const scroller = scrollerBox()
     if (!scroller) return views.viewedPage
-    const view = scroller.getBoundingClientRect()
-    let best = views.viewedPage, area = 0
-    for (const page of scroller.querySelectorAll<HTMLElement>('.page[data-page-index]')) {
-      const rect = page.getBoundingClientRect()
-      const visible = Math.max(0, Math.min(rect.bottom, view.bottom) - Math.max(rect.top, view.top)) * Math.max(0, Math.min(rect.right, view.right) - Math.max(rect.left, view.left))
-      if (visible > area) { area = visible; best = Number(page.dataset.pageIndex) }
-    }
-    return best
-  }, [views])
+    const pages = Array.from(scroller.querySelectorAll<HTMLElement>('.page[data-page-index]'), page =>
+      ({ index: Number(page.dataset.pageIndex), box: page.getBoundingClientRect() }))
+    return largestVisiblePage(pages, scroller.getBoundingClientRect(), views.viewedPage)
+  }, [scrollerBox, views])
   const takeSnapshot = useCallback(() => session.snapshot(), [session])
   const onViewedPage = useCallback((index: number) => { views.rememberPage(index) }, [views])
 
@@ -120,9 +122,8 @@ export default function App() {
   const redactionBusy = session.running('redacting'), openingFile = session.running('opening')
   const sizeWarning = (originalBytes?.byteLength ?? 0) > DRAFT_SIZE_WARN_BYTES
   const {
-    drafts, setDrafts, draftsError, setDraftsError, manualSave, setManualSave, inputEpochRef,
-    pauseSaving, ensureDraftDb, queuePersistence, reportDraftProblem,
-    persistActiveDraft, onManualSave, onDraftsMenuOpen,
+    drafts, draftsError, manualSave, saver, forgetDraft, noteInput,
+    pauseSaving, reportDraftProblem, persistActiveDraft, onManualSave, onDraftsMenuOpen,
   } = useDraftPersistence(store, session)
   const redactions = store.state.redactions ?? []
   const overlays = store.state.overlays
@@ -150,12 +151,7 @@ export default function App() {
     setError(problem instanceof Error ? problem.message : 'Die Seiten konnten nicht aktualisiert werden.')
   }), [documentPages, session])
   const selectedShape = overlays.find(o=>o.id===selectedId && isShape(o))
-  const shapePage = selectedShape ? overlayPageIndex(store.state, selectedShape) : -1
-  useEffect(()=>{
-    let cancelled=false
-    if(pdf && shapePage>=0) void pdf.getPageSize(shapePage+1).then(size=>{if(!cancelled)setShapePageSize({pdf,pageIndex:shapePage,size})})
-    return ()=>{cancelled=true}
-  },[pdf,shapePage])
+  const shapePage = selectedShape ? documentPages?.find(page => page.id === selectedShape.pageId) : undefined
 
   const resetView = useCallback(() => {
     views.reset()
@@ -176,12 +172,17 @@ export default function App() {
     setPasswordRequest({ fileName, error: problem, resolve: finish })
   }), [])
 
+  const saveCurrentDraft = useCallback(() => saveBeforeLeaving(persistActiveDraft, (problem) => {
+    reportDraftProblem(problem, 'Der bisherige Entwurf konnte nicht gespeichert werden.')
+    return window.confirm('Der bisherige Entwurf konnte nicht gespeichert werden, zum Beispiel weil der Speicher voll ist. Ungespeicherte Änderungen verwerfen und trotzdem öffnen?')
+  }), [persistActiveDraft, reportDraftProblem])
+
   const onOpenFile = useCallback(
     async (file: File) => {
       passwordPending.current?.(null)
       setError(null)
       try {
-        if (!await session.openFile(file, { save: persistActiveDraft, beforeReplace: pauseSaving, askPassword })) return
+        if (!await session.openFile(file, { save: saveCurrentDraft, beforeReplace: pauseSaving, askPassword })) return
         resetView()
         void persistActiveDraft().catch((problem) =>
           reportDraftProblem(
@@ -190,14 +191,15 @@ export default function App() {
           ),
         )
       } catch (problem) {
+        if (problem instanceof UnsavedDraftError) return
         setError(
           problem instanceof IncorrectPasswordError
             ? problem.message
-            : `„${file.name}“ konnte nicht geöffnet werden. ${problem instanceof Error && /entschlüsselt|Möglich sind/.test(problem.message) ? problem.message : 'Datei beschädigt, kein gültiges PDF oder bisheriger Entwurf nicht speicherbar. Der bisherige Stand bleibt geöffnet.'}`,
+            : `„${file.name}“ konnte nicht geöffnet werden. ${problem instanceof DocumentProblem ? problem.message : 'Datei beschädigt, kein gültiges PDF oder bisheriger Entwurf nicht speicherbar. Der bisherige Stand bleibt geöffnet.'}`,
         )
       }
     },
-    [askPassword, pauseSaving, persistActiveDraft, reportDraftProblem, resetView, session],
+    [askPassword, pauseSaving, persistActiveDraft, reportDraftProblem, resetView, saveCurrentDraft, session],
   )
 
   const onOpenDraft = useCallback(
@@ -206,22 +208,20 @@ export default function App() {
       setError(null)
       try {
         const outcome = await session.openDraft(id, {
-          save: () => persistActiveDraft().catch((problem) =>
-            reportDraftProblem(problem, 'Der bisherige Entwurf konnte nicht gespeichert werden.'),
-          ),
-          read: () => queuePersistence(async () => loadDraft(await ensureDraftDb(), id)),
+          save: saveCurrentDraft,
+          read: () => saver.queue(db => loadDraft(db, id)),
           beforeReplace: pauseSaving,
         })
         if (outcome === 'opened') resetView()
         if (outcome === 'missing') {
-          setDrafts((current) => current.filter((draft) => draft.id !== id))
+          forgetDraft(id)
           setError('Dieser Entwurf ist nicht mehr vorhanden.')
         }
-      } catch {
-        setError('Der Entwurf konnte nicht geöffnet werden.')
+      } catch (problem) {
+        if (!(problem instanceof UnsavedDraftError)) setError('Der Entwurf konnte nicht geöffnet werden.')
       }
     },
-    [ensureDraftDb, pauseSaving, persistActiveDraft, queuePersistence, reportDraftProblem, resetView, session, setDrafts],
+    [forgetDraft, pauseSaving, resetView, saveCurrentDraft, saver, session],
   )
 
   const onDeleteDraft = useCallback(
@@ -231,7 +231,7 @@ export default function App() {
         return
       }
       const isActive = id === session.activeDraftId
-      const remove = () => queuePersistence(async () => deleteDraft(await ensureDraftDb(), id))
+      const remove = () => saver.queue(db => deleteDraft(db, id))
       try {
         if (isActive) {
           await session.deleteDraft({
@@ -244,13 +244,12 @@ export default function App() {
           })
           setSelectedId(null)
         } else await remove()
-        setDrafts((current) => current.filter((item) => item.id !== id))
-        setDraftsError(null)
+        forgetDraft(id)
       } catch (problem) {
         reportDraftProblem(problem, 'Der Entwurf konnte nicht gelöscht werden.')
       }
     },
-    [drafts, ensureDraftDb, pauseSaving, persistActiveDraft, queuePersistence, reportDraftProblem, session, setDrafts, setDraftsError],
+    [drafts, forgetDraft, pauseSaving, persistActiveDraft, reportDraftProblem, saver, session],
   )
 
   // Release the worker document when the app unmounts.
@@ -265,26 +264,15 @@ export default function App() {
     setError(null)
     try {
       // Pick the page with the largest visible area, not always page one.
-      const workspace = workspaceRef.current!.getBoundingClientRect()
-      const pages = Array.from(workspaceRef.current!.querySelectorAll<HTMLElement>('[data-page-index]'))
-      const visibleArea = (element: HTMLElement) => {
-        const rect = element.getBoundingClientRect()
-        return Math.max(0, Math.min(rect.bottom, workspace.bottom) - Math.max(rect.top, workspace.top)) *
-          Math.max(0, Math.min(rect.right, workspace.right) - Math.max(rect.left, workspace.left))
-      }
-      const visiblePage = pages.sort((a, b) => visibleArea(b) - visibleArea(a))[0]
-      const pageIndex = targetPage ?? Number(visiblePage?.dataset.pageIndex ?? 0)
+      const pageIndex = targetPage ?? visiblePageIndex()
       const pageId = store.state.pages![pageIndex].id
-      const element = pages.find(page => Number(page.dataset.pageIndex) === pageIndex)
-      const rect = element?.getBoundingClientRect()
+      const rect = pageElement(pageIndex)?.getBoundingClientRect()
+      const view = scrollerBox()?.getBoundingClientRect()
       const source = await importImage(file)
       if (!stillCurrent()) return
       const pageSize = await handle.getPageSize(pageIndex + 1)
       if (!stillCurrent()) return
-      const center = dropPoint ?? (rect ? {
-        x: (Math.max(rect.left, workspace.left) + Math.min(rect.right, workspace.right)) / 2 / zoom - rect.left / zoom,
-        y: pageSize.height - ((Math.max(rect.top, workspace.top) + Math.min(rect.bottom, workspace.bottom)) / 2 - rect.top) / zoom,
-      } : { x: pageSize.width / 2, y: pageSize.height / 2 })
+      const center = dropPoint ?? (rect && view ? visibleCenter(rect, view, zoom, pageSize.height) : { x: pageSize.width / 2, y: pageSize.height / 2 })
       const image = { ...source, ...initialImageGeometry(source.pixelWidth, source.pixelHeight, pageSize, center),
         kind: 'image' as const, id: createId(), pageId }
       store.dispatch(addOverlay(image))
@@ -293,7 +281,7 @@ export default function App() {
     } catch (problem) {
       if (stillCurrent()) setError(problem instanceof Error ? problem.message : 'Das Bild konnte nicht geladen werden.')
     }
-  }, [session, store, zoom])
+  }, [pageElement, scrollerBox, session, store, visiblePageIndex, zoom])
 
   // Global shortcuts. While a textarea is focused, it keeps its own editing
   // keys (Escape blurs there, see TextboxView).
@@ -361,36 +349,15 @@ export default function App() {
 
   const onSearchJump = useCallback(
     (hit: SearchHit) => {
-      const scroller = workspaceRef.current?.querySelector<HTMLElement>('.pages')
-      const page = workspaceRef.current?.querySelector<HTMLElement>(
-        `.page[data-page-index="${hit.pageIndex}"]`,
-      )
+      const scroller = scrollerBox()
+      const page = pageElement(hit.pageIndex)
       if (!scroller || !page || !hit.polygons[0]?.length) return
-      const polygon = hit.polygons[0],
-        x = polygon.reduce((sum, p) => sum + p.x, 0) / polygon.length,
-        y = polygon.reduce((sum, p) => sum + p.y, 0) / polygon.length
-      const rect = page.getBoundingClientRect(),
-        view = scroller.getBoundingClientRect()
-      const panel=workspaceRef.current?.querySelector<HTMLElement>('.search-window')?.getBoundingClientRect()
-      const centeredX=view.left+scroller.clientWidth/2
-      const coveredTop=panel && centeredX>=panel.left && centeredX<=panel.right ? Math.max(0,Math.min(scroller.clientHeight,panel.bottom-view.top+8)) : 0
-      const centerY=coveredTop+(scroller.clientHeight-coveredTop)/2
-      scroller.scrollTo({
-        left:
-          scroller.scrollLeft +
-          rect.left -
-          view.left +
-          x * zoom -
-          scroller.clientWidth / 2,
-        top:
-          scroller.scrollTop +
-          rect.top -
-          view.top +
-          y * zoom -
-          centerY,
-      })
+      const panel = workspaceRef.current?.querySelector<HTMLElement>('.search-window')?.getBoundingClientRect()
+      const distance = scrollToPoint(polygonCenter(hit.polygons[0]), page.getBoundingClientRect(), scroller.getBoundingClientRect(), zoom,
+        { width: scroller.clientWidth, height: scroller.clientHeight }, panel)
+      scroller.scrollTo({ left: scroller.scrollLeft + distance.left, top: scroller.scrollTop + distance.top })
     },
-    [zoom],
+    [pageElement, scrollerBox, zoom],
   )
 
   useEffect(() => {
@@ -399,8 +366,8 @@ export default function App() {
     let frame = 0, tries = 0
     // Page boxes get their size once the page geometry is known: retry briefly.
     const scroll = () => {
-      const scroller = workspaceRef.current?.querySelector<HTMLElement>('.pages')
-      const page = scroller?.querySelector<HTMLElement>(`.page[data-page-index="${index}"]`)
+      const scroller = scrollerBox()
+      const page = pageElement(index)
       if (scroller && page && page.offsetHeight > 0) {
         scroller.scrollTop += page.getBoundingClientRect().top - scroller.getBoundingClientRect().top - 12
         views.returned()
@@ -410,15 +377,15 @@ export default function App() {
     }
     frame = requestAnimationFrame(scroll)
     return () => cancelAnimationFrame(frame)
-  }, [pageManagerOpen, sourceTextOpen, tableOpen, pageBusy, pdf, views])
+  }, [pageElement, pageManagerOpen, scrollerBox, sourceTextOpen, tableOpen, pageBusy, pdf, views])
 
   const jumpToIssue = useCallback((issue: TextIssue) => {
     setExportDialogOpen(false)
     views.showDocument()
     setTool('select')
     setSelectedId(issue.overlayId)
-    requestAnimationFrame(() => workspaceRef.current?.querySelector(`.page[data-page-index="${issue.pageIndex}"]`)?.scrollIntoView({ block: 'center' }))
-  }, [views])
+    requestAnimationFrame(() => pageElement(issue.pageIndex)?.scrollIntoView({ block: 'center' }))
+  }, [pageElement, views])
   const onApplyRedactions = async () => {
     const draft=session.draft
     if(!draft||redactionBusy||pageBusy||!store.state.redactions?.length)return
@@ -454,8 +421,7 @@ export default function App() {
         void onOpenFile(pdfFiles[0])
       }} onChange={event => {
       if ((event.target as HTMLElement).closest('.export-dialog')) return
-      inputEpochRef.current += 1
-      setManualSave(current => current?.status === 'saved' ? null : current)
+      noteInput()
     }}>
       <header
         className="toolbar"
@@ -611,8 +577,8 @@ export default function App() {
                 <button
                   type="button"
                   aria-label="Rückgängig"
-                  disabled={!(sourceHistory?.canUndo || (store.canUndo && !sourceHistory?.dirty)) || pageBusy || cropActive}
-                  onClick={() => { if (sourceHistory?.canUndo) sourceHistory.undo(); else if (!sourceHistory?.dirty) store.undo() }}
+                  disabled={!undoStep || pageBusy || cropActive}
+                  onClick={() => { if (undoStep === 'draft') sourceHistory?.undo(); else if (undoStep === 'document') store.undo() }}
                   title="Rückgängig (Strg+Z)"
                 >
                   <svg
@@ -631,8 +597,8 @@ export default function App() {
                 <button
                   type="button"
                   aria-label="Wiederholen"
-                  disabled={!(sourceHistory?.canRedo || (store.canRedo && !sourceHistory?.dirty)) || pageBusy || cropActive}
-                  onClick={() => { if (sourceHistory?.canRedo) sourceHistory.redo(); else if (!sourceHistory?.dirty) store.redo() }}
+                  disabled={!redoStep || pageBusy || cropActive}
+                  onClick={() => { if (redoStep === 'draft') sourceHistory?.redo(); else if (redoStep === 'document') store.redo() }}
                   title="Wiederholen (Strg+Y)"
                 >
                   <svg
@@ -711,8 +677,8 @@ export default function App() {
           <DrawingToolbar workspaceRef={workspaceRef} tool={tool} color={strokeColor} width={strokeWidth}
             eraserRadius={eraserRadius} onColor={setStrokeColor} onWidth={setStrokeWidth} onEraserRadius={setEraserRadius} />
         )}
-        {pdf && !pageBusy && (tool==='select' || isShapeTool(tool)) && selectedShape && isShape(selectedShape) && shapePageSize?.pdf===pdf && shapePageSize.pageIndex===shapePage && <ShapeToolbar
-          key={activeDraftId} workspaceRef={workspaceRef} shape={selectedShape} pageSize={shapePageSize.size} store={store} onSelect={setSelectedId}
+        {pdf && !pageBusy && (tool==='select' || isShapeTool(tool)) && selectedShape && isShape(selectedShape) && shapePage && <ShapeToolbar
+          key={activeDraftId} workspaceRef={workspaceRef} shape={selectedShape} pageSize={pageSize(shapePage)} store={store} onSelect={setSelectedId}
           onStyle={shape=>{const next={fill:shape.fill,strokeColor:shape.strokeColor,strokeWidth:shape.strokeWidth};if(shape.shape==='marker')setMarkerStyle(next);else setShapeStyle(next)}} />}
         {formInfo?.pages === documentPages && !!formInfo?.unsupported.length && <p className="hint" role="status">Nicht unterstützte Formularfelder bleiben unverändert: {formInfo.unsupported.join(', ')}. Signaturen, XFA und PDF-JavaScript werden nicht ausgeführt oder neu erstellt.</p>}
         <div className="pages">

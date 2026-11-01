@@ -155,8 +155,7 @@ state is restored, so operators between members keep their effect.
 - `InlineSourceEditor.tsx`: in-page editor (mask, SVG glyphs, caret, hidden
   textarea); `SourceTextSelection.tsx`: outlines and native selection;
   `SourceTextPanel.tsx`: analysis/check/apply flow and the fit display.
-- `simplePdf.ts`, `layout.ts`, `directSelection.ts`: older single-stream adapter
-  and fragment selection.
+- `directSelection.ts`: fragment selection. `sourceTypes.ts`: shared types.
 - `sourceText.worker.ts` / `client.ts`: one worker per job (up to two warm idle
   workers are reused; abort/timeout terminates), a 30-second deadline and a
   per-buffer analysis cache. `draftHistory.ts`: unchecked draft history;

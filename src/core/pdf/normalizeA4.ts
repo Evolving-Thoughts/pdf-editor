@@ -5,7 +5,8 @@ import { a4Size, pageSize, XFA_UNSUPPORTED } from '../pages'
 import { cloneOverlay, isShape, isStroke, isTextbox } from '../model'
 import { capturePageClip } from '../overlayClipping'
 import { clipAnnotation } from './clipAnnotation'
-import { carriesXfa, composePages, preparePages } from './pageOperations'
+import { carriesXfa } from './acroForm'
+import { composePages, preparePages } from './pageOperations'
 import { isSecure, type DocumentSnapshot } from './documentOutput'
 
 /** Normalize a derived source, never the user's original bytes or live state. */

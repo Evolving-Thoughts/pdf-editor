@@ -118,9 +118,10 @@ test('forms, outline, tags and attachments survive', async () => {
 
 test('the description notices changed text content, even when only compression differs elsewhere', async () => {
   const make = async (text: string) => {
-    const doc = await PDFDocument.create(), font = await doc.embedFont(StandardFonts.Helvetica)
+    // No time stamps: the description reads them, and two calls can fall into different seconds.
+    const doc = await PDFDocument.create({ updateMetadata: false }), font = await doc.embedFont(StandardFonts.Helvetica)
     doc.addPage([200, 200]).drawText(text, { x: 10, y: 100, size: 12, font })
-    return PDFDocument.load(await doc.save())
+    return PDFDocument.load(await doc.save(), { updateMetadata: false })
   }
   expect(describeDocument(await make('gleich'))).toBe(describeDocument(await make('gleich')))
   expect(describeDocument(await make('gleich'))).not.toBe(describeDocument(await make('anders')))

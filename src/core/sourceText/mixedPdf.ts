@@ -15,13 +15,9 @@ import {
 import { contentTokens } from './contentTokens'
 import type { ContentToken } from './contentTokens'
 import { readPageFont, UnmeasurableFont } from './fontReader'
-import type { SourceFont } from './sourceFonts'
+import type { SourceFont } from './sourceTypes'
 import { streamText } from './streams'
-import {
-  inspectSimpleSourceText,
-  previewSimpleSourceCorrection,
-} from './simplePdf'
-import type { SimpleSourceRun, SourceSelection } from './simplePdf'
+import type { SourceRun, SourceSelection } from './sourceTypes'
 import { supportedSourceText } from './encoding'
 import { blockedBy, contains, overlap, separation, slotBox, union } from './space'
 import type { BlockSpace, Box } from './space'
@@ -30,6 +26,7 @@ import {
   codeAdvance,
   emitBlock,
   hidden,
+  glyphBox,
   inkBox,
   layoutEdit,
   pdfNumber,
@@ -74,7 +71,7 @@ interface State {
   gs: string
 }
 interface Run {
-  view: SimpleSourceRun
+  view: SourceRun
   bounds: Rect
   clip?: Rect
   font: SourceFont
@@ -424,7 +421,7 @@ export async function analyze(input: Uint8Array, pageIndex: number) {
     total += text.length
     if (total > 2 * 1024 * 1024)
       fail('Die entpackten Seiteninhalte überschreiten 2 MiB.')
-    for (const token of contentTokens(text, true)) {
+    for (const token of contentTokens(text)) {
       if (token.kind !== 'operator') {
         if (ops.length >= 32) fail('Ein PDF-Operator hat zu viele Argumente.')
         ops.push(token)
@@ -673,7 +670,7 @@ export async function analyze(input: Uint8Array, pageIndex: number) {
             (lockAllTagged && structural?.tagged
               ? 'Der Strukturbaum ist zu groß für eine sichere Prüfung von Ersatztexten.'
               : undefined)
-          const view: SimpleSourceRun = {
+          const view: SourceRun = {
             id: `mixed:${pageIndex}:${runs.length}`,
             pageIndex,
             text: measured.text,
@@ -999,7 +996,6 @@ export async function analyze(input: Uint8Array, pageIndex: number) {
     const scale = run.scale ?? 1
     return {
       index,
-      text: run.view.text,
       codes: run.codes,
       chars: run.actual !== undefined ? [run.actual] : run.codes.map((c) => run.font.decode.get(c) ?? '\ufffd'),
       actual: run.actual !== undefined,
@@ -1076,20 +1072,7 @@ function editable(run: Run) {
   )
 }
 export async function inspectPageSource(bytes: Uint8Array, pageIndex: number) {
-  let result: Analysis
-  try {
-    result = await analyze(bytes, pageIndex)
-  } catch (error) {
-    // The older single-stream adapter still covers its own verified subset.
-    try {
-      const simple = await inspectSimpleSourceText(bytes)
-      const runs = simple.runs.filter((r) => r.pageIndex === pageIndex)
-      if (runs.length) return { ...simple, runs, blocks: [], fonts: [] }
-    } catch {
-      /* report the page-scoped reason below */
-    }
-    throw error
-  }
+  const result: Analysis = await analyze(bytes, pageIndex)
   const geometry = (r: Run) => {
     const scale = r.scale ?? 1,
       chars = runChars(r)
@@ -1132,21 +1115,17 @@ export async function inspectPageSource(bytes: Uint8Array, pageIndex: number) {
   for (const block of offered) for (const i of block.members) member.set(i, block)
   // One shared object per block: structured clone sends shared objects once,
   // not once per member run (HTML renderers emit one run per character).
-  const paragraphs = new Map<SourceBlock, NonNullable<SimpleSourceRun['paragraph']>>()
+  const paragraphs = new Map<SourceBlock, NonNullable<SourceRun['paragraph']>>()
   const paragraphOf = (block: SourceBlock) => {
     let p = paragraphs.get(block)
     if (!p)
       paragraphs.set(block, (p = {
         text: block.text,
         lineCount: block.lines.length,
-        leading: block.leading,
-        width: block.right - block.lines[0].left,
-        separator: '',
-        automatic: true,
       }))
     return p
   }
-  const runs: SimpleSourceRun[] = []
+  const runs: SourceRun[] = []
   result.runs.forEach((r, i) => {
     const block = member.get(i)
     if (!block && !editable(r)) return
@@ -1221,8 +1200,7 @@ export async function previewPageSource(
   replacement: string,
 ) {
   selection = { ...selection }
-  if (!selection.runId.startsWith('mixed:'))
-    return previewSimpleSourceCorrection(input, selection, replacement)
+  if (!selection.runId.startsWith('mixed:')) throw new Error('Ungültige Textauswahl.')
   const pageIndex = Number(selection.runId.split(':')[1]),
     result = await analyze(input, pageIndex),
     { doc, page, runs, obstacles, revision, refs } = result
@@ -1274,6 +1252,8 @@ export async function previewPageSource(
     suffix++
   // Preserve kerning only inside unchanged prefix/suffix pairs. Never copy a
   // numeric TJ correction onto a newly introduced glyph pair or squeeze to fit.
+  // An offset before the first glyph belongs to no pair: it places the text.
+  adjustments[0] = run.adjustments[0] ?? 0
   for (let i = 1; i < codes.length; i++) {
     if (i < prefix) adjustments[i] = run.adjustments[i] ?? 0
     else if (i > chars.length - suffix)
@@ -1306,17 +1286,7 @@ export async function previewPageSource(
         )
       continue
     }
-    const gapX = Math.max(
-        other.left - run.bounds.right,
-        run.bounds.left - other.right,
-        0,
-      ),
-      gapY = Math.max(
-        other.bottom - run.bounds.top,
-        run.bounds.bottom - other.top,
-        0,
-      )
-    const gap = Math.min(3, Math.max(gapX, gapY))
+    const gap = Math.min(3, separation(run.bounds, other))
     if (overlap(bounds, other, Math.max(0, gap - 0.001)))
       fail(
         'Die Korrektur würde den geschützten Abstand zu benachbartem Text, Bild, Link oder einer Grafik unterschreiten.',
@@ -1341,26 +1311,47 @@ export async function previewPageSource(
   writeStreams(doc, page, refs, [{ stream: run.stream, text: changed }])
   const bytes = await doc.save({ updateFieldAppearances: false }),
     checked = await analyze(bytes, pageIndex)
-  if (checked.runs.length !== runs.length)
-    fail('Die Ergebnisprüfung fand eine unerwartete Anzahl von Textstellen.')
-  for (let i = 0; i < runs.length; i++) {
-    const before = runs[i],
-      after = checked.runs[i]
-    if (
-      after.view.text !== (before === run ? replacement : before.view.text) ||
-      after.view.fontName !== before.view.fontName ||
-      Math.abs(after.view.x - before.view.x) > 1e-5 ||
-      Math.abs(after.view.baseline - before.view.baseline) > 1e-5 ||
-      Math.abs(after.advance - before.advance) > 1e-5
-    )
-      fail(
-        'Die Ergebnisprüfung fand eine unerwartete Text- oder Positionsänderung.',
-      )
-  }
+  verifyResult(
+    checked,
+    runs.map((r) => (r === run ? { ...expectedRun(r), text: replacement } : expectedRun(r))),
+    obstacles,
+  )
   return bytes
 }
 
 type Analysis = Awaited<ReturnType<typeof analyze>>
+interface ExpectedRun { text: string; fontName: string; fontRaw: string; fill: string; x: number; baseline: number; advance?: number; lead?: number }
+
+/** What a run untouched by an edit must still look like afterwards. */
+const expectedRun = (r: Analysis['runs'][number]): ExpectedRun => ({
+  text: r.view.text, fontName: r.view.fontName, fontRaw: r.fontRaw, fill: r.fill, x: r.view.x, baseline: r.view.baseline, advance: r.advance, lead: r.adjustments[0] ?? 0,
+})
+
+/** Every edit ends here: the written PDF is analyzed again and has to match, text by text. */
+function verifyResult(checked: Analysis, expected: readonly ExpectedRun[], obstacles: Analysis['obstacles']) {
+  if (checked.runs.length !== expected.length)
+    fail('Die Ergebnisprüfung fand eine unerwartete Anzahl von Textstellen.')
+  checked.runs.forEach((after, i) => {
+    const e = expected[i]
+    if (
+      after.view.text !== e.text ||
+      after.view.fontName !== e.fontName ||
+      after.fontRaw !== e.fontRaw ||
+      after.fill !== e.fill ||
+      Math.abs(after.view.x - e.x) > 1e-4 ||
+      Math.abs(after.view.baseline - e.baseline) > 1e-4 ||
+      (e.advance !== undefined && Math.abs(after.advance - e.advance) > 1e-5) ||
+      (e.lead !== undefined && Math.abs((after.adjustments[0] ?? 0) - e.lead) > 1e-5)
+    )
+      fail('Die Ergebnisprüfung fand eine unerwartete Text- oder Positionsänderung.')
+  })
+  // Images, graphics and annotations are untouched by construction; prove it.
+  if (
+    checked.obstacles.length !== obstacles.length ||
+    checked.obstacles.some((o, i) => (['left', 'right', 'bottom', 'top'] as const).some((k) => Math.abs(o[k] - obstacles[i][k]) > 1e-6))
+  )
+    fail('Die Ergebnisprüfung fand eine Veränderung an Bildern, Grafiken oder Anmerkungen.')
+}
 /** Replace changed content streams in place when unshared, copy-on-write otherwise. */
 function writeStreams(
   doc: PDFDocument,
@@ -1453,9 +1444,8 @@ function glyphBoxes(glyphs: readonly BlockGlyph[], lines: readonly PlacedLine[])
       if (hidden(glyphs, k, line.to)) continue
       const g = glyphs[k],
         x = line.positions[k - line.from]
-      const b = g.char.trim() ? (g.font.boxes?.get(g.code) ?? g.font.bbox) : undefined
-      const box = b
-        ? { left: x + (b[0] * g.size) / 1000, right: x + (b[2] * g.size) / 1000, bottom: line.baseline + (b[1] * g.size) / 1000, top: line.baseline + (b[3] * g.size) / 1000 }
+      const box = g.char.trim()
+        ? glyphBox(g, x, line.baseline)
         : { left: x, right: x + g.width, bottom: line.baseline - 0.25 * g.size, top: line.baseline + 0.5 * g.size }
       out.push({ orig: g.orig, x, baseline: line.baseline, box })
     }
@@ -1545,32 +1535,11 @@ export async function previewBlock(result: Analysis, block: SourceBlock, replace
   writeStreams(doc, page, refs, changes)
   const bytes = await doc.save({ updateFieldAppearances: false }),
     checked = await analyze(bytes, pageIndex)
-  const expected: { text: string; fontName: string; fontRaw: string; fill: string; x: number; baseline: number; advance?: number }[] = []
+  const expected: ExpectedRun[] = []
   runs.forEach((r, i) => {
     if (i === block.members[0]) expected.push(...emitted.expected)
-    else if (!members.has(i))
-      expected.push({ text: r.view.text, fontName: r.view.fontName, fontRaw: r.fontRaw, fill: r.fill, x: r.view.x, baseline: r.view.baseline, advance: r.advance })
+    else if (!members.has(i)) expected.push(expectedRun(r))
   })
-  if (checked.runs.length !== expected.length)
-    fail('Die Ergebnisprüfung fand eine unerwartete Anzahl von Textstellen.')
-  checked.runs.forEach((after, i) => {
-    const e = expected[i]
-    if (
-      after.view.text !== e.text ||
-      after.view.fontName !== e.fontName ||
-      after.fontRaw !== e.fontRaw ||
-      after.fill !== e.fill ||
-      Math.abs(after.view.x - e.x) > 1e-4 ||
-      Math.abs(after.view.baseline - e.baseline) > 1e-4 ||
-      (e.advance !== undefined && Math.abs(after.advance - e.advance) > 1e-5)
-    )
-      fail('Die Ergebnisprüfung fand eine unerwartete Text- oder Positionsänderung.')
-  })
-  // Images, graphics and annotations are untouched by construction; prove it.
-  if (
-    checked.obstacles.length !== obstacles.length ||
-    checked.obstacles.some((o, i) => (['left', 'right', 'bottom', 'top'] as const).some((k) => Math.abs(o[k] - obstacles[i][k]) > 1e-6))
-  )
-    fail('Die Ergebnisprüfung fand eine Veränderung an Bildern, Grafiken oder Anmerkungen.')
+  verifyResult(checked, expected, obstacles)
   return bytes
 }

@@ -1,11 +1,11 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import type { DocumentSession } from '../core/documentSession'
 import type { EditorStore } from '../core/editorStore'
-import { copyEditorState } from '../core/model'
+import { DraftSaver } from '../core/persistence/draftSaver'
 import {
+  draftSizeBytes,
   listDrafts,
   openDraftDb,
-  saveDraft,
   type DraftRecord,
   type DraftSummary,
 } from '../core/persistence/drafts'
@@ -21,39 +21,19 @@ function draftSummary(record: DraftRecord): DraftSummary {
     id: record.id,
     name: record.name,
     updatedAt: record.updatedAt,
-    sizeBytes: record.pdfBytes.byteLength + (record.pageSources ?? []).filter(source => record.pages?.some(page => page.sourceId === source.id)).reduce((size, source) => size + source.bytes.byteLength, 0),
+    sizeBytes: draftSizeBytes(record),
     overlayCount: record.overlays.length,
   }
 }
 
-/** Auto-save, manual save and the draft list. Owns the IndexedDB queue. */
+/** Auto-save, manual save and the draft list for the view. */
 export function useDraftPersistence(store: EditorStore, session: DocumentSession) {
   const [drafts, setDrafts] = useState<DraftSummary[]>([])
   const [draftsError, setDraftsError] = useState<string | null>(null)
   const [manualSave, setManualSave] = useState<ManualSave | null>(null)
   const manualSaveRequestRef = useRef<object | null>(null)
   const inputEpochRef = useRef(0)
-  // Lazily opened IndexedDB handle.
-  const dbRef = useRef<IDBDatabase | null>(null)
-  const saveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
-  const saveQueueRef = useRef<Promise<void>>(Promise.resolve())
-  const persistenceGenerationRef = useRef(0)
-
-  const ensureDraftDb = useCallback(async () => {
-    dbRef.current ??= await openDraftDb()
-    return dbRef.current
-  }, [])
-
-  // IndexedDB operations are serialized. That keeps delete-after-autosave and
-  // document switches deterministic even when a debounced save is in flight.
-  const queuePersistence = useCallback(<T,>(work: () => Promise<T>): Promise<T> => {
-    const queued = saveQueueRef.current.then(work)
-    saveQueueRef.current = queued.then(
-      () => undefined,
-      () => undefined,
-    )
-    return queued
-  }, [])
+  const [saver] = useState(() => new DraftSaver(openDraftDb, () => store.state, () => session.draft))
 
   const rememberDraft = useCallback((record: DraftRecord) => {
     const summary = draftSummary(record)
@@ -69,54 +49,41 @@ export function useDraftPersistence(store: EditorStore, session: DocumentSession
 
   /** Saves still waiting for the current draft will not happen anymore. */
   const pauseSaving = useCallback(() => {
-    persistenceGenerationRef.current += 1
-    if (saveTimerRef.current) {
-      clearTimeout(saveTimerRef.current)
-      saveTimerRef.current = null
-    }
+    saver.pause()
     setManualSave(null)
     manualSaveRequestRef.current = null
+  }, [saver])
+
+  const forgetDraft = useCallback((id: string) => {
+    setDrafts((current) => current.filter((item) => item.id !== id))
+    setDraftsError(null)
+  }, [])
+
+  /** Text typed but not yet in the store makes a saved state outdated. */
+  const noteInput = useCallback(() => {
+    inputEpochRef.current += 1
+    setManualSave(current => current?.status === 'saved' ? null : current)
   }, [])
 
   const persistActiveDraft = useCallback(async () => {
-    if (saveTimerRef.current) {
-      clearTimeout(saveTimerRef.current)
-      saveTimerRef.current = null
-    }
-    const draft = session.draft
-    if (!draft) return null
-    const generation = persistenceGenerationRef.current
-    // Copy now: the record must describe this save point even if the user keeps
-    // editing while the queued IndexedDB write is waiting.
-    const snapshot = copyEditorState(store.state)
-    const record = await queuePersistence(async () => {
-      if (generation !== persistenceGenerationRef.current) return null
-      const db = await ensureDraftDb()
-      return saveDraft(db, {
-        id: draft.id,
-        name: draft.name,
-        createdAt: draft.createdAt,
-        pdfBytes: draft.bytes,
-        ...snapshot,
-      })
-    })
+    const record = await saver.save()
     if (record) {
       rememberDraft(record)
       setDraftsError(null)
     }
     return record
-  }, [ensureDraftDb, queuePersistence, rememberDraft, session, store])
+  }, [rememberDraft, saver])
 
   const onManualSave = useCallback(async () => {
     const draft = session.draft
     if (!draft || (manualSave?.draftId === draft.id && manualSave.status === 'saving')) return
     const request = {}
     manualSaveRequestRef.current = request
-    const generation = persistenceGenerationRef.current
+    const generation = saver.generation
     const version = store.getVersion()
     const inputEpoch = inputEpochRef.current
     const stillCurrent = () => manualSaveRequestRef.current === request &&
-      session.draft?.id === draft.id && persistenceGenerationRef.current === generation
+      session.draft?.id === draft.id && saver.generation === generation
     setManualSave({ draftId: draft.id, version, status: 'saving' })
     try {
       // A normal button click blurs the active textarea first, committing its
@@ -130,17 +97,17 @@ export function useDraftPersistence(store: EditorStore, session: DocumentSession
       reportDraftProblem(problem, 'Der Entwurf konnte nicht gespeichert werden. Bitte erneut versuchen.')
       setManualSave({ draftId: draft.id, version, status: 'error' })
     }
-  }, [manualSave, persistActiveDraft, reportDraftProblem, session, store])
+  }, [manualSave, persistActiveDraft, reportDraftProblem, saver, session, store])
 
   const refreshDrafts = useCallback(async () => {
-    const list = await queuePersistence(async () => listDrafts(await ensureDraftDb()))
+    const list = await saver.queue(listDrafts)
     setDrafts(list)
     setDraftsError(null)
-  }, [ensureDraftDb, queuePersistence])
+  }, [saver])
 
   useEffect(() => {
     let cancelled = false
-    void queuePersistence(async () => listDrafts(await ensureDraftDb()))
+    void saver.queue(listDrafts)
       .then((list) => {
         if (!cancelled) setDrafts(list)
       })
@@ -150,7 +117,7 @@ export function useDraftPersistence(store: EditorStore, session: DocumentSession
     return () => {
       cancelled = true
     }
-  }, [ensureDraftDb, queuePersistence, reportDraftProblem])
+  }, [reportDraftProblem, saver])
 
   const onDraftsMenuOpen = useCallback(() => {
     void (async () => {
@@ -159,29 +126,23 @@ export function useDraftPersistence(store: EditorStore, session: DocumentSession
     })().catch((problem) => reportDraftProblem(problem, 'Die Entwurfsliste konnte nicht aktualisiert werden.'))
   }, [persistActiveDraft, refreshDrafts, reportDraftProblem])
 
-  // Auto-save: every store change (edits, moves, deletes) persists the draft
-  // to IndexedDB, debounced so gestures like dragging or typing coalesce.
+  // Auto-save: every store change (edits, moves, deletes) persists the draft.
   useEffect(() => {
     const unsubscribe = store.subscribe(() => {
       if (!session.draft) return
-      if (saveTimerRef.current) clearTimeout(saveTimerRef.current)
-      saveTimerRef.current = setTimeout(() => {
-        saveTimerRef.current = null
-        // Persistence must never break editing (e.g. private browsing).
-        void persistActiveDraft().catch((problem) =>
-          reportDraftProblem(problem, 'Der Entwurf konnte nicht gespeichert werden.'),
-        )
-      }, 500)
+      // Persistence must never break editing (e.g. private browsing).
+      saver.saveSoon(() => void persistActiveDraft().catch((problem) =>
+        reportDraftProblem(problem, 'Der Entwurf konnte nicht gespeichert werden.'),
+      ))
     })
     return () => {
       unsubscribe()
-      if (saveTimerRef.current) clearTimeout(saveTimerRef.current)
+      saver.stop()
     }
-  }, [persistActiveDraft, reportDraftProblem, session, store])
+  }, [persistActiveDraft, reportDraftProblem, saver, session, store])
 
   return {
-    drafts, setDrafts, draftsError, setDraftsError, manualSave, setManualSave, inputEpochRef,
-    pauseSaving, ensureDraftDb, queuePersistence, reportDraftProblem,
-    persistActiveDraft, onManualSave, onDraftsMenuOpen,
+    drafts, draftsError, manualSave, saver, forgetDraft, noteInput,
+    pauseSaving, reportDraftProblem, persistActiveDraft, onManualSave, onDraftsMenuOpen,
   }
 }

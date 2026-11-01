@@ -3,7 +3,7 @@ import { PDFDocument, PDFName, StandardFonts } from 'pdf-lib'
 import type { PDFFont } from 'pdf-lib'
 import { inspectPageSource, previewPageSource } from '../../src/core/sourceText/mixedPdf'
 import { previewPageSources } from '../../src/core/sourceText/mixedBatch'
-import type { SimpleSourceRun } from '../../src/core/sourceText/simplePdf'
+import type { SourceRun } from '../../src/core/sourceText/sourceTypes'
 
 const n = PDFName.of
 const SIZE = 12, LEADING = 14.4, LEFT = 72
@@ -57,15 +57,15 @@ const body: Para = {
   ],
 }
 const next: Para = { top: 690, lines: [word('Der folgende Absatz bleibt unverändert stehen. ')] }
-const groups = (runs: SimpleSourceRun[]) => {
-  const g = new Map<string, SimpleSourceRun[]>()
+const groups = (runs: SourceRun[]) => {
+  const g = new Map<string, SourceRun[]>()
   for (const r of runs) if (r.selection?.groupId) g.set(r.selection.groupId, [...(g.get(r.selection.groupId) ?? []), r])
   return [...g.values()]
 }
-const glyphs = (runs: SimpleSourceRun[]) => runs.flatMap((r) => [...r.text].map((char, i) => ({
+const glyphs = (runs: SourceRun[]) => runs.flatMap((r) => [...r.text].map((char, i) => ({
   char, x: r.x + r.selection!.characters[i].offset, end: r.x + r.selection!.characters[i].offset + r.selection!.characters[i].width, baseline: r.baseline,
 })))
-async function edit(bytes: Uint8Array, find: string, to: string, extra: { confirmReflow?: boolean; scope?: 'paragraph' | 'line' } = {}) {
+async function edit(bytes: Uint8Array, find: string, to: string, extra: { scope?: 'paragraph' | 'line' } = {}) {
   const a = await inspectPageSource(bytes, 0)
   const members = groups(a.runs).find((rs) => rs[0].paragraph!.text.includes(find))!
   const r = members[0]
@@ -79,9 +79,9 @@ test('Word fragments of one paragraph become one automatic block; every fragment
   const g = groups(a.runs)
   expect(g).toHaveLength(2)
   expect(g[0].length).toBeGreaterThan(10)
-  expect(g[0][0].paragraph).toMatchObject({ text: paragraphText, lineCount: 4, separator: '', automatic: true })
+  expect(g[0][0].paragraph).toMatchObject({ text: paragraphText, lineCount: 4 })
   expect(g[0].map((r) => r.text).join('')).toBe(paragraphText)
-  expect(g[1][0].paragraph).toMatchObject({ lineCount: 1, automatic: true })
+  expect(g[1][0].paragraph).toMatchObject({ lineCount: 1 })
 })
 
 test('shortening a fragment pulls the following period along instead of leaving a gap', async () => {
@@ -139,7 +139,7 @@ test('edited words keep the style of the text they replace (italic stays italic)
 test('untagged multi-line blocks reflow like tagged ones (the inline editor shows the result first)', async () => {
   const pdf = await wordPdf([body, next])
   const a = await inspectPageSource(pdf, 0)
-  expect(groups(a.runs)[0][0].paragraph).toMatchObject({ lineCount: 4, automatic: true })
+  expect(groups(a.runs)[0][0].paragraph).toMatchObject({ lineCount: 4 })
   const out = await edit(pdf, 'handelt.', 'hande.')
   expect(groups((await inspectPageSource(out, 0)).runs)[0][0].paragraph!.text).toContain('Hier hande.')
 })
@@ -154,7 +154,7 @@ test('a hard line break, painted content between fragments or mixed sizes split 
 test('several paragraphs are checked together in one candidate; each against the previous result', async () => {
   const bytes = await wordPdf([body, next], { tags: true })
   const a = await inspectPageSource(bytes, 0), g = groups(a.runs)
-  const sel = (rs: SimpleSourceRun[]) => ({ digest: a.digest, runId: rs[0].id, expectedText: rs[0].text, scope: 'paragraph' as const })
+  const sel = (rs: SourceRun[]) => ({ digest: a.digest, runId: rs[0].id, expectedText: rs[0].text, scope: 'paragraph' as const })
   const out = await previewPageSources(bytes, [
     { selection: sel(g[0]), replacement: paragraphText.replace('handelt.', 'hande.') },
     { selection: sel(g[1]), replacement: 'Der folgende Absatz bleibt stehen. ' },

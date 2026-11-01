@@ -15,6 +15,13 @@ export interface DraftHistory {
   /** Last recorded edit; consecutive typing in one word is one step. */
   group?: { id: string; kind: Kind; at: number }
 }
+/** Who takes an undo or redo: unchecked drafts first, the document only when
+ * stepping it could not throw away anything unchecked. */
+export function historyStep(draftCan: boolean, unchecked: boolean, documentCan: boolean): 'draft' | 'document' | null {
+  if (draftCan) return 'draft'
+  return documentCan && !unchecked ? 'document' : null
+}
+
 export const emptyHistory = (): DraftHistory => ({ past: [], future: [] })
 export const COALESCE_MS = 1000
 const HISTORY_LIMIT = 200

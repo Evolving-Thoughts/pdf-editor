@@ -10,6 +10,8 @@ import {
 import { isTextbox, type Overlay } from '../core/model'
 import { resolvedOverlayClips } from '../core/overlayClipping'
 import type { DocumentPage } from '../core/pages'
+import { TEXT_LINE_HEIGHT } from '../core/textLayout'
+import { FONT_CSS } from './fontStacks'
 
 // Browser font measurement follows the editor fonts. PDF substring advances
 // are font-measured estimates (PDF.js does not expose individual glyph advances).
@@ -23,7 +25,7 @@ function overlayGroups(
     const pageIndex = pages.findIndex((page) => page.id === box.pageId)
     const size = sizes[pageIndex]
     if (!size || !context) return []
-    context.font = `${box.italic ? 'italic' : 'normal'} ${box.bold ? 'bold' : 'normal'} ${box.fontSize}px ${box.font === 'times' ? 'Times New Roman' : box.font === 'courier' ? 'Courier New' : 'Arial'}`
+    context.font = `${box.italic ? 'italic' : 'normal'} ${box.bold ? 'bold' : 'normal'} ${box.fontSize}px ${FONT_CSS[box.font]}`
     const angle = ((box.rotation ?? 0) * Math.PI) / 180,
       cos = Math.cos(angle),
       sin = Math.sin(angle)
@@ -35,7 +37,7 @@ function overlayGroups(
       .split('\n')
       .map((text, line) => {
         const width = context.measureText(text).width,
-          top = line * box.fontSize * 1.2 - box.fontSize * 0.85,
+          top = line * box.fontSize * TEXT_LINE_HEIGHT - box.fontSize * 0.85,
           bottom = top + box.fontSize
         const advances =
           width > 0
@@ -141,17 +143,29 @@ export function SearchWindow({
           hits.length
         : 0,
     )
+  const activeHit = useRef<SearchHit | undefined>(undefined)
+  const jumpedTo = useRef<string | null>(null)
   useEffect(() => {
     onHits(hits, active)
-    if (hits[active]) onJump(hits[active])
-  }, [hits, active, onHits, onJump])
+  }, [hits, active, onHits])
+  // Edits elsewhere recompute the hits: the marks follow, the view only moves
+  // for a new query or another hit.
+  useEffect(() => {
+    activeHit.current = hits[active]
+    const target = hits[active] ? `${active}:${query}` : null
+    if (target !== null && target !== jumpedTo.current) onJump(hits[active])
+    jumpedTo.current = target
+  }, [hits, active, query, onJump])
+  // A new observer reports once, so another zoom also brings the hit back.
   useEffect(() => {
     const parent = windowRef.current?.parentElement
-    if (!parent || !hits[active]) return
-    const observer = new ResizeObserver(() => onJump(hits[active]))
+    if (!parent) return
+    const observer = new ResizeObserver(() => {
+      if (activeHit.current) onJump(activeHit.current)
+    })
     observer.observe(parent)
     return () => observer.disconnect()
-  }, [hits, active, onJump])
+  }, [onJump])
   useEffect(() => {
     input.current?.focus()
   }, [])

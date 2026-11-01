@@ -114,3 +114,16 @@ test('undoing a removal restores the original position in the overlay order', ()
   stack.undo()
   expect(state.overlays.map((o) => o.id)).toEqual(['a', 'b', 'c'])
 })
+
+test('every overlay command gives views a new list', () => {
+  const state: EditorState = { overlays: [] }
+  const stack = new CommandStack(state), box = makeBox('a', 'Hallo')
+  const changes = (run: () => void) => { const before = state.overlays; run(); return before !== state.overlays }
+  expect(changes(() => stack.execute(addOverlay(box)))).toBe(true)
+  const stored = state.overlays[0]
+  expect(changes(() => stack.execute(updateOverlay('a', { text: 'Hallo' }, { text: 'Neu' })))).toBe(true)
+  expect(state.overlays[0]).not.toBe(stored)
+  expect(changes(() => stack.undo())).toBe(true)
+  expect(changes(() => stack.execute(removeOverlay(state.overlays[0])))).toBe(true)
+  expect(changes(() => stack.undo())).toBe(true)
+})

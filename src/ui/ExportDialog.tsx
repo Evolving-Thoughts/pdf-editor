@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from 'react'
 import { COMPRESSION_PRESETS, type CompressionPreset } from '../core/pdf/compressPdf'
 import type { ExportProgress, ExportResult, ExportSize } from '../core/pdf/exportPipeline'
-import { rejection, type Assessment, type PreflightReport, type TextIssue } from '../core/pdf/preflight'
+import { CHECK_INCOMPLETE, rejection, type Assessment, type PreflightReport, type TextIssue } from '../core/pdf/preflight'
 export interface PreparedExport extends ExportResult {
   name: string
 }
@@ -56,7 +56,7 @@ export function ExportDialog({
   useEffect(() => {
     const controller = new AbortController()
     void onCheck(controller.signal).then(result => { if (!controller.signal.aborted) setReport(result) }).catch(() => {
-      if (!controller.signal.aborted) setReport({ rebuilt: true, textIssues: [], xmpDropped: false, assessments: [{ kind: 'signature', state: 'unknown', decision: 'confirm', message: 'Die Prüfung konnte nicht abgeschlossen werden. Bitte das Ergebnis selbst kontrollieren.' }] })
+      if (!controller.signal.aborted) setReport({ rebuilt: true, textIssues: [], xmpDropped: false, assessments: [{ kind: 'signature', state: 'unknown', decision: 'confirm', message: CHECK_INCOMPLETE }] })
     })
     return () => controller.abort()
   }, [onCheck])

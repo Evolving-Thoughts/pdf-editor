@@ -1,19 +1,18 @@
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react'
 import type { ReactNode } from 'react'
 import type { EditorStore } from '../core/editorStore'
-import { directSelection, selectedReplacement } from '../core/sourceText/directSelection'
+import { selectedReplacement } from '../core/sourceText/directSelection'
 import type { DirectSelection } from '../core/sourceText/directSelection'
 import { cachedInspection, prefetchInspection, previewSource, previewSources, warmSourceWorkers } from '../core/sourceText/client'
 import type { SourceAnalysis } from '../core/sourceText/client'
-import { draftSpace, liveBlock, liveFont, modelSpace } from '../core/sourceText/editModel'
-import type { EditModel, LiveFont } from '../core/sourceText/editModel'
-import { caretStops, hitOffset, inlineLayout, paintedGlyphs } from '../core/sourceText/inlineLayout'
+import { liveBlock, liveFont } from '../core/sourceText/editModel'
+import type { EditModel } from '../core/sourceText/editModel'
+import { caretStops, draftLayouts, hitOffset, inlineLayout, modelLimits } from '../core/sourceText/inlineLayout'
 import type { InlineView } from '../core/sourceText/inlineLayout'
-import type { Box } from '../core/sourceText/space'
-import { emptyHistory, recordEdit, recordStep, redoDraft, undoDraft, withDraft } from '../core/sourceText/draftHistory'
+import { historyStep, emptyHistory, recordEdit, recordStep, redoDraft, undoDraft, withDraft } from '../core/sourceText/draftHistory'
 import type { DraftHistory, DraftState } from '../core/sourceText/draftHistory'
 import { fitMessage } from './sourceFit'
-import { sourceRevisions } from '../core/sourceText/revision'
+import { sourceRevisions, sourceTextBlocker } from '../core/sourceText/revision'
 import type { SourcePageGeometry } from '../core/pdf/loadPdf'
 import type { SearchFragment } from '../core/search'
 import { SourceTextSelection } from './SourceTextSelection'
@@ -130,18 +129,6 @@ function Thumb({ docs, bytes, pageNumber, root }: { docs: PdfDocuments; bytes?: 
   return <span ref={ref} className="source-thumb" aria-hidden="true" />
 }
 
-const limitsOf = (m: EditModel, a: SourceAnalysis) => ({ room: m.room, pinned: m.pinned, slots: m.slots, space: modelSpace(m, a.rects) })
-/** Ink of a laid-out paragraph per line (glyph boxes, as the worker sees runs). */
-function lineBoxes(view: InlineView): Box[] {
-  const out = new Map<number, Box>()
-  for (const p of paintedGlyphs(view)) {
-    const g = p.glyph, f = g.font as LiveFont, b = f.boxes?.get(g.code) ?? f.bbox
-    const box = { left: p.x + (b[0] * g.size) / 1000, right: p.x + (b[2] * g.size) / 1000, bottom: p.baseline + (b[1] * g.size) / 1000, top: p.baseline + (b[3] * g.size) / 1000 }
-    const o = out.get(p.line)
-    out.set(p.line, o ? { left: Math.min(o.left, box.left), right: Math.max(o.right, box.right), bottom: Math.min(o.bottom, box.bottom), top: Math.max(o.top, box.top) } : box)
-  }
-  return [...out.values()]
-}
 const clock = () => Date.now()
 const NO_PAGES: NonNullable<EditorStore['state']['pages']> = []
 const NONE: DraftState = { drafts: {}, active: null }
@@ -174,7 +161,7 @@ export function SourceTextPanel({ store, original, onClose, onHistory, initialPa
   const [analysis, setAnalysis] = useState<(SourceAnalysis & { pageId: string }) | null>(null)
   // Fragment flow (text without a proved paragraph): side-panel textarea.
   const [selection, setSelection] = useState<DirectSelection | null>(null), [pending, setPending] = useState<DirectSelection | null>(null)
-  const [text, setText] = useState(''), [paragraph, setParagraph] = useState(false)
+  const [text, setText] = useState('')
   // Inline flow: proved paragraphs edited directly on the page, several at once, on several pages.
   const [draft, setDraft] = useState<DraftState>(NONE)
   const [metas, setMetas] = useState<Readonly<Record<string, DraftMeta>>>({})
@@ -209,21 +196,11 @@ export function SourceTextPanel({ store, original, onClose, onHistory, initialPa
   const textOf = useCallback((id: string) => draft.drafts[keyOf(pageId, id)] ?? models.get(id)?.text ?? '', [draft.drafts, models, pageId])
   const activeKey = draft.active ? splitKey(draft.active.id) : null
   const active = draft.active && activeKey!.pageId === pageId && models.has(activeKey!.blockId) ? { id: activeKey!.blockId, range: draft.active.range } : null
-  // Each changed paragraph against the page as it would be with the other drafts.
   const views = useMemo(() => {
-    const out = new Map<string, InlineView | null>()
-    if (!current) return out
+    if (!current) return new Map<string, InlineView | null>()
     const shown = new Set(draftIds)
     if (active) shown.add(active.id)
-    const base = new Map(draftIds.map(id => { const m = models.get(id)!; return [id, inlineLayout(live(m), textOf(id), limitsOf(m, current))] }))
-    for (const id of shown) {
-      const m = models.get(id)!, others = draftIds.filter(o => o !== id)
-      if (!others.length) { out.set(id, base.get(id) ?? inlineLayout(live(m), textOf(id), limitsOf(m, current))); continue }
-      const removed = new Set(others.flatMap(o => models.get(o)!.space.own))
-      const extra = others.flatMap(o => { const v = base.get(o); return v ? lineBoxes(v) : [] })
-      out.set(id, inlineLayout(live(m), textOf(id), { room: m.room, pinned: m.pinned, slots: m.slots, space: draftSpace(m, current.rects, removed, extra) }))
-    }
-    return out
+    return draftLayouts(shown, draftIds, id => { const model = models.get(id)!; return { model, block: live(model), text: textOf(id) } }, current.rects)
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [current, models, draftIds, active?.id, live, textOf])
   /** Keep the live fit of the shown page's drafts before leaving the page: the
@@ -244,8 +221,6 @@ export function SourceTextPanel({ store, original, onClose, onHistory, initialPa
   const okOf = (k: string) => { const { pageId: p, blockId } = splitKey(k); return p === pageId && models.has(blockId) ? fitOk(views.get(blockId)) : !!metas[k]?.ok }
   const checkable = allKeys.length > 0 && allKeys.every(k => !!metas[k] && okOf(k))
   const draftPages = useMemo(() => new Set(allKeys.map(k => splitKey(k).pageId)), [allKeys])
-  // Simple single-stream PDFs keep the confirmed reflow of the older adapter.
-  const automatic = !!run?.paragraph?.automatic, reflow = paragraph || automatic
   const fragmentDirty = !!selection && text !== selection.text
   const dirty = allKeys.length > 0 || fragmentDirty
   const invalid = () => { request.current?.abort(); epoch.current++; setCandidate(null); setShowOriginal(false); setReady(false); setBusy(false); setChecking(false) }
@@ -260,21 +235,20 @@ export function SourceTextPanel({ store, original, onClose, onHistory, initialPa
     queueMicrotask(() => {
       if (controller.signal.aborted) return
       if (changed) { setCandidate(null); setShowOriginal(false); setReady(false); setDraft(NONE); setMetas({}); history.current = emptyHistory(); bump() }
-      setAnalysis(null); setSelection(null); setPending(null); setText(''); setParagraph(false); setError(''); setBusy(true)
+      setAnalysis(null); setSelection(null); setPending(null); setText(''); setError(''); setBusy(true)
     })
-    const supported = (p: typeof page) =>
-      !!p && !p.cropped && p.rotation === 0 && p.unit === 1 && !p.redacted && !store.state.redactions?.length && !store.state.overlays.some(overlay => overlay.pageId === p.id)
-    if (!source || !supported(page)) {
-      queueMicrotask(() => { if (!controller.signal.aborted) { setAnalysis({ ...EMPTY_ANALYSIS, pageId }); setError('Diese Seite ist derzeit nicht unterstützt: Drehung, Zuschnitt, Schwärzungen oder Overlays verhindern eine sichere Originaltext-Korrektur.'); setBusy(false) } }); return () => controller.abort()
+    const blocker = sourceTextBlocker(store.state, pageId)
+    if (!source || blocker) {
+      queueMicrotask(() => { if (!controller.signal.aborted) { setAnalysis({ ...EMPTY_ANALYSIS, pageId }); setError(blocker ?? 'Diese Seite ist derzeit nicht unterstützt.'); setBusy(false) } }); return () => controller.abort()
     }
     void cachedInspection(source, page!.sourceIndex, controller.signal).then(result => {
       if (controller.signal.aborted || analysisEpoch.current !== currentEpoch) return
-      const runs = result.runs.filter(value => value.pageIndex === page!.sourceIndex)
-      setAnalysis({ ...result, runs, blocks: result.blocks ?? [], fonts: result.fonts ?? [], rects: result.rects ?? [], pageId })
+      const { runs } = result
+      setAnalysis({ ...result, pageId })
       if (!runs.some(value => value.selection)) setError('Keine sicher markierbaren Originaltextstellen nachgewiesen. Bei Scans ist zunächst OCR nötig; Text-PDFs können nicht unterstützte Schriften oder Strukturen enthalten.')
       // The neighbours are the likely next pages: analyze them in the background.
       const all = store.state.pages ?? [], at = all.findIndex(value => value.id === page!.id)
-      for (const next of [all[at + 1], all[at - 1]]) { const bytes = next && supported(next) ? sourceOf(next.id) : undefined; if (bytes) prefetchInspection(bytes, next.sourceIndex) }
+      for (const next of [all[at + 1], all[at - 1]]) { const bytes = next && !sourceTextBlocker(store.state, next.id) ? sourceOf(next.id) : undefined; if (bytes) prefetchInspection(bytes, next.sourceIndex) }
     }).catch(problem => { if (!controller.signal.aborted) { setAnalysis({ ...EMPTY_ANALYSIS, pageId }); setError(problem instanceof Error ? problem.message : 'Textanalyse fehlgeschlagen.') } }).finally(() => { if (!controller.signal.aborted && analysisEpoch.current === currentEpoch) setBusy(false) })
     return () => { controller.abort() }
   }, [version, pageId, page, source, store, sourceOf])
@@ -293,8 +267,13 @@ export function SourceTextPanel({ store, original, onClose, onHistory, initialPa
   const undo = useCallback(() => { const r = undoDraft(history.current, draftRef.current); if (!r) return; history.current = r.history; invalid(); restore(draftRef.current, r.state); setDraft(r.state); setError(''); bump() }, [restore])
   const redo = useCallback(() => { const r = redoDraft(history.current, draftRef.current); if (!r) return; history.current = r.history; invalid(); restore(draftRef.current, r.state); setDraft(r.state); setError(''); bump() }, [restore])
   const canUndo = counts.past > 0 && !checking, canRedo = counts.future > 0 && !checking
-  useEffect(() => { onHistory?.({ canUndo, canRedo, dirty: allKeys.length > 0, undo, redo }) }, [onHistory, canUndo, canRedo, allKeys.length, undo, redo])
+  useEffect(() => { onHistory?.({ canUndo, canRedo, dirty, undo, redo }) }, [onHistory, canUndo, canRedo, dirty, undo, redo])
   useEffect(() => () => onHistory?.(null), [onHistory])
+  const stepHistory = useCallback((redoing: boolean) => {
+    const step = redoing ? historyStep(canRedo, dirty, store.canRedo) : historyStep(canUndo, dirty, store.canUndo)
+    if (step === 'draft') { if (redoing) redo(); else undo() }
+    else if (step === 'document') { if (redoing) store.redo(); else store.undo() }
+  }, [undo, redo, canUndo, canRedo, dirty, store])
   useEffect(() => {
     const onKey = (event: KeyboardEvent) => {
       if (event.defaultPrevented || !(event.ctrlKey || event.metaKey) || event.altKey) return
@@ -303,17 +282,14 @@ export function SourceTextPanel({ store, original, onClose, onHistory, initialPa
       // The fragment textarea keeps the browser's own undo.
       if (event.target instanceof HTMLElement && event.target.closest('input, textarea, select, [contenteditable="true"]')) return
       event.preventDefault()
-      const redoing = key === 'y' || event.shiftKey
-      if (redoing) { if (history.current.future.length) redo(); else if (!Object.keys(draftRef.current.drafts).length && store.canRedo) store.redo() }
-      else if (history.current.past.length) undo()
-      else if (!Object.keys(draftRef.current.drafts).length && store.canUndo) store.undo()
+      stepHistory(key === 'y' || event.shiftKey)
     }
     window.addEventListener('keydown', onKey)
     return () => window.removeEventListener('keydown', onKey)
-  }, [undo, redo, store])
+  }, [stepHistory])
 
   const discard = () => !dirty || window.confirm(allKeys.length > 1 ? `${allKeys.length} ungeprüfte Absatzänderungen verwerfen?` : 'Ungesicherte Korrektur verwerfen?')
-  function accept(value: DirectSelection) { invalid(); setDraft(NONE); setMetas({}); history.current = emptyHistory(); bump(); setSelection(value); setText(value.text); setParagraph(false); setPending(null); setError('') }
+  function accept(value: DirectSelection) { invalid(); setDraft(NONE); setMetas({}); history.current = emptyHistory(); bump(); setSelection(value); setText(value.text); setPending(null); setError('') }
   function select(value: DirectSelection) {
     if (allKeys.length) { if (!window.confirm('Ungeprüfte Absatzänderungen verwerfen und dieses Textfragment bearbeiten?')) return; accept(value); return }
     if (selection && text !== selection.text) { setPending(value); return }
@@ -324,7 +300,7 @@ export function SourceTextPanel({ store, original, onClose, onHistory, initialPa
     if (!m || !current) return
     if (active?.id === id && !from) return
     if (fragmentDirty && !window.confirm('Ungesicherte Korrektur verwerfen?')) return
-    const value = textOf(id), v = views.get(id) ?? inlineLayout(live(m), value, limitsOf(m, current))
+    const value = textOf(id), v = views.get(id) ?? inlineLayout(live(m), value, modelLimits(m, current.rects))
     let range: TextRange = { start: value.length, end: value.length }
     if (v && from) {
       const stops = caretStops(v), a = hitOffset(v, stops, from.x, from.y, m.size), b = to ? hitOffset(v, stops, to.x, to.y, m.size) : a
@@ -387,8 +363,8 @@ export function SourceTextPanel({ store, original, onClose, onHistory, initialPa
         }
       } else {
         if (!source || !current || !page || !run || !selection || pending) return
-        const replacement = selectedReplacement(run, selection, text, reflow)
-        out.push({ pageId, pageNumber: page.sourceIndex + 1, bytes: await previewSource(source, { digest: current.digest, runId: run.id, expectedText: run.text, scope: reflow ? 'paragraph' : 'line', confirmReflow: paragraph }, replacement, controller.signal) })
+        const replacement = selectedReplacement(run, selection, text)
+        out.push({ pageId, pageNumber: page.sourceIndex + 1, bytes: await previewSource(source, { digest: current.digest, runId: run.id, expectedText: run.text }, replacement, controller.signal) })
       }
       // Every result page must render before it can be applied, not only the one on screen.
       for (const o of out) { if (controller.signal.aborted) return; const pdf = await docs.get(o.bytes); await pdf.renderPage(o.pageNumber, document.createElement('canvas'), .25) }
@@ -458,14 +434,12 @@ export function SourceTextPanel({ store, original, onClose, onHistory, initialPa
         </li> })}
       </ul></div>}
       {pending && <div className="source-pending" role="alert"><p>Die aktuelle Korrektur ist noch nicht übernommen. Verwerfen und die neue Auswahl bearbeiten?</p><button onClick={() => accept(pending)}>Auswahl wechseln</button><button onClick={() => { setPending(null); textarea.current?.focus() }}>Weiter bearbeiten</button></div>}
-      {!active && run && <p className="source-font">{run.fontName} · {run.fontSize} pt · {automatic ? (run.paragraph!.lineCount > 1 ? `Absatz mit ${run.paragraph!.lineCount} Zeilen – wird bei Bedarf automatisch neu umbrochen` : 'Zeile wird als Ganzes bearbeitet – Folgetext rückt nach') : run.paragraph ? 'Absatzumbruch nach Bestätigung möglich' : 'Nur dieses Textfragment – kein Absatzumbruch'}</p>}
-      {!active && run?.paragraph && current && <>{run.paragraph.lineCount > 1 && <button onClick={() => { const members = current.runs.filter(value => value.selection?.groupId === run.selection?.groupId); const value = directSelection(current.runs, members[0].id, 0, members.at(-1)!.id); if (value) select(value) }}>Ganzen Absatz auswählen</button>}{!automatic && <label className="source-check"><input type="checkbox" checked={paragraph} onChange={event => { invalid(); setParagraph(event.target.checked) }} />Diese {run.paragraph.lineCount} Zeilen sind ein Fließtextabsatz mit automatischen, nicht absichtlichen Umbrüchen. Absatz neu umbrechen.</label>}</>}
-      {!active && selection?.requiresReflow && !reflow && <p>Die Auswahl umfasst mehrere Zeilen. Zum Ändern zuerst den automatischen Absatzumbruch bestätigen.</p>}
+      {!active && run && <p className="source-font">{run.fontName} · {run.fontSize} pt · Nur dieses Textfragment – kein Absatzumbruch</p>}
       {!active && selection && <><label htmlFor="source-replacement">Ersatztext</label><textarea ref={textarea} id="source-replacement" maxLength={4096} value={text} disabled={!run || busy || !!pending || !!candidate} onChange={event => { invalid(); setText(event.target.value) }} /></>}
       {checking && <p role="status">{allKeys.length > 1 ? `${allKeys.length} Absätze${scope} werden isoliert in der PDF geprüft …` : 'Text wird isoliert in der PDF geprüft …'}</p>}{error && <p role="alert">{error}</p>}
       {candidate && <p role="status">{!result ? `Ergebnis${resultPages} bereit. Geprüfte Seiten sind in der Seitenliste markiert.` : ready ? (candidate.paragraphs > 1 ? `Ergebnis mit ${candidate.paragraphs} geänderten Absätzen${resultPages} in der echten PDF bereit. Absätze und Übergänge ansehen.` : 'Ergebnis in der echten PDF bereit. Absatz und Übergang zum Folgeinhalt ansehen.') : 'PDF-Ergebnis wird gerendert …'}</p>}
       <div className="source-actions">
-        {!candidate && (allKeys.length > 0 || selection) && <button className="export-button" disabled={busy || !!pending || (allKeys.length ? !checkable : !run || !text.trim() || text === selection?.text || (!!selection?.requiresReflow && !reflow))} onClick={() => void check()}>In PDF prüfen</button>}
+        {!candidate && (allKeys.length > 0 || selection) && <button className="export-button" disabled={busy || !!pending || (allKeys.length ? !checkable : !run || !text.trim() || text === selection?.text)} onClick={() => void check()}>In PDF prüfen</button>}
         {candidate && <><button onClick={keepEditing}>Weiter bearbeiten</button><button className="export-button" disabled={!canApply} onClick={apply}>Übernehmen</button></>}
         {allKeys.length > 1 && !candidate && <button onClick={discardAll} disabled={checking}>Alle Änderungen verwerfen</button>}
         <button onClick={() => { if (discard()) onClose() }}>Schließen</button>
@@ -486,7 +460,7 @@ export function SourceTextPanel({ store, original, onClose, onHistory, initialPa
           {active && model && <InlineSourceEditor key={model.id} model={model} view={view} text={textOf(model.id)} range={active.range} size={stage.size} canvas={stage.canvas} disabled={busy}
             onChange={(value, range) => edit(model.id, value, range)}
             onRange={range => setDraft({ ...draftRef.current, active: { id: keyOf(pageId, model.id), range } })}
-            onUndo={undo} onRedo={redo}
+            onUndo={() => stepHistory(false)} onRedo={() => stepHistory(true)}
             onSubmit={() => { if (checkable) void check() }} onCancel={leave} />}
         </>}
       </PdfPreview>}

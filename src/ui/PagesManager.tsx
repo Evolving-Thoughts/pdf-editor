@@ -15,8 +15,7 @@ import {
   pageSize,
   pagePreviewSize,
   rotatePages,
-  type CropMargins,
-} from '../core/pages'
+  type CropMargins, cropFits, dragCropCorner } from '../core/pages'
 import { importPageFile, preparePages, textPageBytes } from '../core/pdf/pageOperations'
 import { extractInWorker, preflightInWorker } from '../core/pdf/exportJob'
 import { selectDocument, type DocumentSnapshot } from '../core/pdf/documentOutput'
@@ -98,11 +97,7 @@ export function PagesManager({ nativeWidgets = [], pdf, store, original, snapsho
   // A common scale makes physical dimensions comparable between selections.
   const shownSize = a4Open ? a4Size(size) : size
   const scale = commonPreviewScale(pages.map(p => a4Open ? a4Size(pageSize(p)) : pagePreviewSize(p)), available)
-  const marginsFit = (m: CropMargins) =>
-    Object.values(m).every((v) => Number.isFinite(v) && v >= 0) &&
-    size.width - m.left - m.right >= 20 * MM - 1e-6 &&
-    size.height - m.top - m.bottom >= 20 * MM - 1e-6
-  const frameMargins = activeCrop && marginsFit(activeCrop.margins) ? activeCrop.margins : zero()
+  const frameMargins = activeCrop && cropFits(size, activeCrop.margins) ? activeCrop.margins : zero()
   const locked = busy || working || !!activeCrop || a4Open || !!deletePending || !!extractCheck
   useEffect(() => {
     onCropActive(!!activeCrop || a4Open || !!deletePending)
@@ -287,14 +282,8 @@ export function PagesManager({ nativeWidgets = [], pdf, store, original, snapsho
       initial = { ...frameMargins }
     el.setPointerCapture(event.pointerId)
     const move = (ev: PointerEvent) => {
-      const x = Math.max(0, Math.min(size.width, ((ev.clientX - rect.left) / rect.width) * size.width))
-      const y = Math.max(0, Math.min(size.height, ((ev.clientY - rect.top) / rect.height) * size.height))
-      const next = { ...initial }
-      if (corner.endsWith('l')) next.left = Math.max(0, Math.min(x, size.width - next.right - 20 * MM))
-      else next.right = Math.max(0, Math.min(size.width - x, size.width - next.left - 20 * MM))
-      if (corner.startsWith('t')) next.top = Math.max(0, Math.min(y, size.height - next.bottom - 20 * MM))
-      else next.bottom = Math.max(0, Math.min(size.height - y, size.height - next.top - 20 * MM))
-      setCrop({ id: page!.id, margins: next })
+      const point = { x: ((ev.clientX - rect.left) / rect.width) * size.width, y: ((ev.clientY - rect.top) / rect.height) * size.height }
+      setCrop({ id: page!.id, margins: dragCropCorner(initial, size, corner, point) })
     }
     const end = () => {
       el.removeEventListener('pointermove', move)
@@ -402,9 +391,7 @@ export function PagesManager({ nativeWidgets = [], pdf, store, original, snapsho
               <button
                 onClick={() =>
                   run(() => {
-                    const m = activeCrop.margins
-                    if (!marginsFit(m)) throw new Error('Mindestens 20 × 20 mm müssen sichtbar bleiben.')
-                    store.dispatch(cropPage(store.state, page!.id, m))
+                    store.dispatch(cropPage(store.state, page!.id, activeCrop.margins))
                     setCrop(null)
                   }, 'Zuschnitt angewendet. Rückgängig ist möglich.')
                 }

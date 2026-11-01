@@ -19,7 +19,7 @@ interface Props {
   onRange: (range: TextRange) => void
   onSubmit: () => void
   onCancel: () => void
-  /** Ctrl/Cmd+Z, Ctrl/Cmd+Shift+Z and Ctrl/Cmd+Y: the panel's draft history. */
+  /** Ctrl/Cmd+Z, Ctrl/Cmd+Shift+Z and Ctrl/Cmd+Y: the panel decides what they undo. */
   onUndo?: () => void
   onRedo?: () => void
   /** A changed paragraph that is not being edited: drawn, not focused. */

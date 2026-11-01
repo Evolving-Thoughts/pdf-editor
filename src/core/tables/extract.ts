@@ -1,7 +1,7 @@
 // Table structure from text positions (T26). The result is a proposal: positions
 // alone never prove which column a value belongs to, so a person reviews every table.
 import { fragmentRange, type SearchFragment } from '../search'
-import { classifyCell, type NumberLocale, type TableCell } from './values'
+import { asTextCell, classifyCell, type NumberLocale, type TableCell } from './values'
 
 export const COLUMN_CROSSING = 'Ein Wort liegt über einer Spaltengrenze.'
 
@@ -87,16 +87,22 @@ export function buildTable(words: TableWord[], columnLines: number[], locale: Nu
   return { rows }
 }
 
+/** A crossing word stays suspect until a person edits the cell itself. */
+export const keepCrossing = (from: TableCell, cell: TableCell): TableCell =>
+  from.note === COLUMN_CROSSING ? { ...cell, note: COLUMN_CROSSING } : cell
+
 /** Another number format changes how cells read, never what they say. */
 export const reclassifyRows = (rows: TableCell[][], locale: NumberLocale): TableCell[][] =>
-  rows.map(row => row.map(cell => {
-    const classified = classifyCell(cell.text, locale)
-    return cell.note === COLUMN_CROSSING ? { ...classified, note: COLUMN_CROSSING } : classified
-  }))
+  rows.map(row => row.map(cell => cell.chosenText ? cell : keepCrossing(cell, classifyCell(cell.text, locale))))
+
+function joinCells(first: TableCell, second: TableCell, locale: NumberLocale): TableCell {
+  const text = [first.text, second.text].filter(Boolean).join(' ')
+  return keepCrossing(first, keepCrossing(second, first.chosenText || second.chosenText ? asTextCell(text) : classifyCell(text, locale)))
+}
 
 export const mergeRows = (rows: TableCell[][], index: number, locale: NumberLocale): TableCell[][] =>
   rows.flatMap((row, position) => {
     if (position === index + 1) return []
     if (position !== index || !rows[index + 1]) return [row]
-    return [row.map((cell, column) => classifyCell([cell.text, rows[index + 1][column].text].filter(Boolean).join(' '), locale))]
+    return [row.map((cell, column) => joinCells(cell, rows[index + 1][column], locale))]
   })

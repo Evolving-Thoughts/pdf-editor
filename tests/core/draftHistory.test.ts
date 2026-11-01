@@ -1,5 +1,5 @@
 import { expect, test } from 'vitest'
-import { emptyHistory, recordEdit, recordStep, redoDraft, undoDraft, withDraft } from '../../src/core/sourceText/draftHistory'
+import { emptyHistory, historyStep, recordEdit, recordStep, redoDraft, undoDraft, withDraft } from '../../src/core/sourceText/draftHistory'
 import type { DraftHistory, DraftState } from '../../src/core/sourceText/draftHistory'
 
 const original = { a: 'Hallo Welt', b: 'Zweiter Absatz' }
@@ -37,4 +37,11 @@ test('restoring the original text removes the draft; discarding is an undoable s
   const r = undoDraft(h, s)!
   expect(r.state.drafts).toEqual({ b: 'Anders' })
   expect(r.state.active?.id).toBe('b')
+})
+
+test('drafts take a step first, and the document only when nothing unchecked is lost', () => {
+  expect(historyStep(true, true, true)).toBe('draft')
+  expect(historyStep(false, false, true)).toBe('document')
+  expect(historyStep(false, true, true)).toBeNull()
+  expect(historyStep(false, false, false)).toBeNull()
 })

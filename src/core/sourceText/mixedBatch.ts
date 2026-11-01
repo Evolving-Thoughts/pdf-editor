@@ -1,7 +1,7 @@
 // Several proved paragraphs of one page checked together in one candidate.
 import { analyze, fail, previewBlock, previewPageSource } from './mixedPdf'
 import type { SourceBlock } from './mixedBlocks'
-import type { SourceSelection } from './simplePdf'
+import type { SourceSelection } from './sourceTypes'
 
 /** Identity of a reconstructed block that survives edits of other blocks:
  * its text and the origin of its first line. */

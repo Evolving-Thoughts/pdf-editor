@@ -91,7 +91,7 @@ test('scaled page matrix with one Tj per character (HTML renderers) forms an edi
 })
 
 test('ActualText spaces (NBSP) survive an edit and the lexer reads <FEFF00A0>>> correctly', async () => {
-  const t = contentTokens('/Span <</ActualText <FEFF00A0>>> BDC', true)
+  const t = contentTokens('/Span <</ActualText <FEFF00A0>>> BDC')
   expect(t.map((x) => x.raw)).toEqual(['/Span', '<</ActualText <FEFF00A0>>>', 'BDC'])
   const bytes = await pdf(() => 'BT /F1 12 Tf 1 0 0 1 72 700 Tm (Seite) Tj /Span <</ActualText <FEFF00A0>>> BDC ( ) Tj EMC (12 von 20 Seiten) Tj ET')
   const { blocks: bs } = await blocks(bytes)

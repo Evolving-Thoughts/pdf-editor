@@ -7,9 +7,9 @@
 import { PDFArray, PDFDict, PDFName, PDFNumber, PDFRawStream, StandardFontEmbedder, StandardFonts } from 'pdf-lib'
 import type { PDFPage } from 'pdf-lib'
 import fontkit from '@pdf-lib/fontkit'
-import { sourceFontCodec, supportedSourceText } from './encoding'
-import type { SourceFontCodec, SourceGlyph } from './encoding'
-import type { SourceFont } from './sourceFonts'
+import { noCodec, sourceFontCodec, supportedSourceText } from './encoding'
+import type { SourceGlyph } from './encoding'
+import { baseFontName, type SourceFont } from './sourceTypes'
 import { streamBytes } from './streams'
 import { glyphNameUnicode, MAC_ROMAN_ENCODING, STANDARD_ENCODING, WIN_ANSI_ENCODING } from './fontTables'
 import { parseType1, type1Outline } from './type1'
@@ -18,18 +18,16 @@ const n = PDFName.of
 const MAX_FONT = 8 * 1024 * 1024
 export class UnmeasurableFont extends Error {}
 const unmeasurable = (reason: string): never => { throw new UnmeasurableFont(reason) }
-const noCodec: SourceFontCodec = { encode: () => ({ ok: false, error: 'missing-glyph' }) }
 const nameOf = (value: unknown) => (value instanceof PDFName ? value.decodeText() : undefined)
 const num = (value: unknown) => (value instanceof PDFNumber && Number.isFinite(value.asNumber()) ? value.asNumber() : undefined)
 const items = (value: PDFArray) => Array.from({ length: value.size() }, (_, i) => value.lookup(i))
 const numbers = (value: unknown) => (value instanceof PDFArray ? items(value).map(num) : undefined)
 const standardNames: string[] = Object.values(StandardFonts)
-const baseName = (name: string) => name.replace(/^[A-Z]{6}\+/, '')
 
 interface Program {
   unitsPerEm: number
   /** Glyph id for a character code, 0 when absent. */
-  gid(code: number, name?: string, unicode?: string): number
+  gid(code: number): number
   box(gid: number): number[] | undefined
   path(gid: number): string | undefined
   empty(gid: number): boolean
@@ -166,10 +164,10 @@ async function fontBytes(file: unknown) {
 }
 function finish(input: {
   name: string; codeBytes: 1 | 2; decode: Map<number, string>; widths: Map<number, number>; defaultWidth: number
-  bbox: number[]; program?: Program; gidOf?: (code: number) => number; embedded: boolean; locked?: string
-  scale?: number; availableWithoutProgram?: (code: number) => boolean; family?: string
+  bbox: number[]; program?: Program; gidOf?: (code: number) => number; locked?: string
+  availableWithoutProgram?: (code: number) => boolean; family?: string
 }): SourceFont {
-  const { program } = input, scale = input.scale ?? (program ? 1000 / program.unitsPerEm : 1)
+  const { program } = input, scale = program ? 1000 / program.unitsPerEm : 1
   const boxes = new Map<number, number[]>(), glyphs: SourceGlyph[] = [], advances = new Map(input.widths)
   const byChar = new Map<string, { code: number; width: number }[]>()
   let budget = 0
@@ -214,7 +212,6 @@ function finish(input: {
     boxes,
     defaultWidth: input.defaultWidth,
     locked: input.locked,
-    embedded: input.embedded,
     family: input.family,
     outline: program && input.gidOf ? (code: number) => {
       if (!outlines.has(code)) {
@@ -227,13 +224,13 @@ function finish(input: {
 }
 const scalePath = (path: string, scale: number) => scale === 1 ? path : path.replace(/-?\d*\.?\d+(?:e[-+]?\d+)?/gi, v => String(Math.round(Number(v) * scale * 100) / 100))
 const familyHint = (name: string) => {
-  const b = baseName(name).toLowerCase()
+  const b = baseFontName(name).toLowerCase()
   if (/courier|mono|code|consol/.test(b)) return 'monospace'
   if (/times|roman|serif|garamond|georgia|minion|cambria|book|palatino/.test(b) && !/sans/.test(b)) return 'serif'
   return 'sans-serif'
 }
 function locked(name: string, codeBytes: 1 | 2, widths: Map<number, number>, defaultWidth: number, bbox: number[], reason: string, decode = new Map<number, string>()): SourceFont {
-  return finish({ name, codeBytes, decode, widths, defaultWidth, bbox, embedded: false, locked: reason, family: familyHint(name) })
+  return finish({ name, codeBytes, decode, widths, defaultWidth, bbox, locked: reason, family: familyHint(name) })
 }
 const bboxOf = (dict: PDFDict | undefined) => {
   const b = numbers(dict?.lookup(n('FontBBox')))
@@ -296,7 +293,7 @@ async function readType0(font: PDFDict, name: string): Promise<SourceFont> {
       program = fontkitProgram(f, gidOf, matrix && matrix[0] ? 1 / matrix[0] : undefined)
     }
     if (!program) return locked(name, 2, widths, dw, bbox, 'Die Schrift ist nicht eingebettet oder ihr Format wird nicht unterstützt.', decode)
-    return finish({ name, codeBytes: 2, decode, widths, defaultWidth: dw, bbox, program, gidOf, embedded: true, family: familyHint(name) })
+    return finish({ name, codeBytes: 2, decode, widths, defaultWidth: dw, bbox, program, gidOf, family: familyHint(name) })
   } catch (error) {
     if (error instanceof UnmeasurableFont) throw error
     return locked(name, 2, widths, dw, bbox, 'Das eingebettete Schriftprogramm ist nicht lesbar.', decode)
@@ -307,7 +304,7 @@ async function readSimple(font: PDFDict, subtype: string, name: string): Promise
   const descriptor = font.lookup(n('FontDescriptor')), fd = descriptor instanceof PDFDict ? descriptor : undefined
   const first = num(font.lookup(n('FirstChar'))), widthList = numbers(font.lookup(n('Widths')))
   const missing = num(fd?.lookup(n('MissingWidth'))) ?? 0
-  const standard = !fd?.has(n('FontFile')) && !fd?.has(n('FontFile2')) && !fd?.has(n('FontFile3')) && standardNames.includes(baseName(name)) ? baseName(name) : undefined
+  const standard = !fd?.has(n('FontFile')) && !fd?.has(n('FontFile2')) && !fd?.has(n('FontFile3')) && standardNames.includes(baseFontName(name)) ? baseFontName(name) : undefined
   const embedder = standard ? StandardFontEmbedder.for(standard as Parameters<typeof StandardFontEmbedder.for>[0]) : undefined
   let matrixScale = 1, bbox = embedder ? [...embedder.font.FontBBox] : bboxOf(fd)
   if (subtype === 'Type3') {
@@ -339,7 +336,7 @@ async function readSimple(font: PDFDict, subtype: string, name: string): Promise
   const widths = new Map<number, number>()
   if (first !== undefined && widthList) widthList.forEach((w, i) => { if (w !== undefined && first + i >= 0 && first + i < 256) widths.set(first + i, w * matrixScale) })
   else if (embedder) for (let c = 0; c < 256; c++) { const g = names[c]; const w = g ? embedder.font.getWidthOfGlyph(g) : undefined; if (w !== undefined) widths.set(c, w) }
-  else if (subtype !== 'Type1' || !standard) unmeasurable('Die Zeichenbreiten der Schrift fehlen.')
+  else unmeasurable('Die Zeichenbreiten der Schrift fehlen.')
   const toUni = font.lookup(n('ToUnicode'))
   const fromCMap = toUni instanceof PDFRawStream ? lenientToUnicode(new TextDecoder('latin1').decode(await streamBytes(toUni, 1024 * 1024)), 1) : new Map<number, string>()
   const decode = new Map<number, string>()
@@ -373,7 +370,7 @@ async function readSimple(font: PDFDict, subtype: string, name: string): Promise
         empty: gid => !type1Outline(program, byId[gid - 1])?.path,
       }
       if (!(upm >= 16 && upm <= 16384)) unmeasurable('Ungültige Schriftmatrix.')
-      return finish({ name, codeBytes: 1, decode, widths, defaultWidth: missing, bbox, program: p, gidOf: c => p.gid(c), embedded: true, family })
+      return finish({ name, codeBytes: 1, decode, widths, defaultWidth: missing, bbox, program: p, gidOf: c => p.gid(c), family })
     }
     if (ff3 instanceof PDFRawStream || tt instanceof PDFRawStream) {
       const cff = ff3 instanceof PDFRawStream, kind = cff ? nameOf(ff3.dict.lookup(n('Subtype'))) : 'TrueType'
@@ -386,7 +383,7 @@ async function readSimple(font: PDFDict, subtype: string, name: string): Promise
         gidOf = c => (names[c] ? byName.get(names[c]!) ?? 0 : builtin ? own.codes.get(c) ?? 0 : 0)
         const matrix = f['CFF '].topDict.FontMatrix
         const program = fontkitProgram(f, gidOf, matrix && matrix[0] ? 1 / matrix[0] : undefined)
-        return finish({ name, codeBytes: 1, decode, widths, defaultWidth: missing, bbox, program, gidOf, embedded: true, family })
+        return finish({ name, codeBytes: 1, decode, widths, defaultWidth: missing, bbox, program, gidOf, family })
       }
       const lookup = trueTypeLookup(f)
       // Symbolic subsets address glyphs by code (3,0 / 1,0); others by Unicode.
@@ -404,15 +401,15 @@ async function readSimple(font: PDFDict, subtype: string, name: string): Promise
         for (let c = 0; c < 256; c++) { const v = reverse.get(lookup(0xf000 + c) || lookup(c)); if (v) decode.set(c, v) }
       }
       const program = fontkitProgram(f, gidOf)
-      return finish({ name, codeBytes: 1, decode, widths, defaultWidth: missing, bbox, program, gidOf, embedded: true, family })
+      return finish({ name, codeBytes: 1, decode, widths, defaultWidth: missing, bbox, program, gidOf, family })
     }
     if (embedder) {
       // Standard 14 font: viewer-provided, metrics from the AFM, names prove glyphs.
-      return finish({ name, codeBytes: 1, decode, widths, defaultWidth: missing, bbox, embedded: false, family: /Times/.test(standard!) ? 'serif' : /Courier/.test(standard!) ? 'monospace' : 'sans-serif', availableWithoutProgram: c => !!names[c] && embedder.font.getWidthOfGlyph(names[c]!) !== undefined && widths.has(c) })
+      return finish({ name, codeBytes: 1, decode, widths, defaultWidth: missing, bbox, family, availableWithoutProgram: c => !!names[c] && embedder.font.getWidthOfGlyph(names[c]!) !== undefined && widths.has(c) })
     }
     // Non-embedded, non-standard font: the viewer substitutes it; the PDF widths
     // still position every glyph, so declared widths are the proof.
-    return finish({ name, codeBytes: 1, decode, widths, defaultWidth: missing, bbox, embedded: false, family, availableWithoutProgram: c => widths.has(c) && !symbolic })
+    return finish({ name, codeBytes: 1, decode, widths, defaultWidth: missing, bbox, family, availableWithoutProgram: c => widths.has(c) && !symbolic })
   } catch (error) {
     if (error instanceof UnmeasurableFont) throw error
     return locked(name, 1, widths, missing, bbox, 'Das eingebettete Schriftprogramm ist nicht lesbar.', decode)

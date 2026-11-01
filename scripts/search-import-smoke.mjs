@@ -122,6 +122,32 @@ try {
   await query('<script>alert(1)</script>', 0)
   assert.equal(await btn('Nächster Treffer').isDisabled(), true)
   await query('Antrag', 2)
+  await btn('Rechteck').click()
+  const box = await p.locator('.page').first().boundingBox()
+  await p.mouse.move(box.x + 60, box.y + 200)
+  await p.mouse.down()
+  await p.mouse.move(box.x + 160, box.y + 280, { steps: 4 })
+  await p.mouse.up()
+  await p.locator('.shape-overlay').first().waitFor({ state: 'attached' })
+  await btn('⬚ Auswahl').click()
+  await p.setViewportSize({ width: 1280, height: 500 })
+  await btn('Nächster Treffer').click()
+  await p.waitForFunction(
+    () => document.querySelector('.pages').scrollTop > 100,
+  )
+  await p.locator('.pages').evaluate((el) => {
+    el.scrollTop = 0
+  })
+  await p.waitForTimeout(300)
+  await btn('Rückgängig').click()
+  await p.locator('.shape-overlay').waitFor({ state: 'detached' })
+  await p.waitForTimeout(300)
+  assert.equal(
+    await p.locator('.pages').evaluate((el) => el.scrollTop),
+    0,
+    'an edit elsewhere leaves the view where it is',
+  )
+  await p.setViewportSize({ width: 1280, height: 1100 })
   for (const width of [1280, 390]) {
     await p.setViewportSize({ width, height: 1100 })
     const controls = await p
@@ -197,6 +223,26 @@ try {
   await btn('Suchen').click()
   await query('OverlayUnique', 1)
   await query('Antrag', 4)
+  const hitCount = (count) =>
+    p.waitForFunction(
+      (count) =>
+        document
+          .querySelector('.search-controls [role=status]')
+          ?.textContent.endsWith(`/ ${count}`),
+      count,
+    )
+  await page.scrollIntoViewIfNeeded()
+  await btn('T Text').click()
+  const live = await page.boundingBox()
+  await p.mouse.click(live.x + 70, live.y + 230)
+  await p.locator('.textbox textarea:focus').waitFor()
+  await p.locator('.textbox textarea:focus').fill('Antrag live')
+  await input().click()
+  await hitCount(5)
+  while ((await p.locator('.textbox').count()) > 1) {
+    await btn('Rückgängig').click()
+  }
+  await hitCount(4)
   await btn('Suche schließen').click()
   await btn('Speichern').click()
   await p.waitForFunction(() =>

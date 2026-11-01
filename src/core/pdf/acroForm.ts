@@ -53,6 +53,8 @@ function point(page: DocumentPage, x: number, y: number) {
   switch (page.rotation) { case 90: return { x: y, y: w - x }; case 180: return { x: w - x, y: h - y }; case 270: return { x: h - y, y: x }; default: return { x, y } }
 }
 /** Missing metadata from older drafts is unknown, not proof that a source has no fields. */
+export const carriesXfa = (doc: PDFDocument) => !!doc.catalog.lookupMaybe(PDFName.of('AcroForm'), PDFDict)?.has(PDFName.of('XFA'))
+
 export const needsNativeFormInspection = (page: DocumentPage) => page.hasForms !== false || page.hasXfa === true
 /** Source keys never depend on document order or collision-renamed export field names. */
 export async function inspectNativeForms(original: Uint8Array, sources: PageSource[], pages: DocumentPage[]): Promise<{ widgets: NativeWidget[]; unsupported: string[] }> {
@@ -64,7 +66,7 @@ export async function inspectNativeForms(original: Uint8Array, sources: PageSour
     const bytes = sourceId === 'original' ? original : sources.find(s => s.id === sourceId)?.bytes
     if (!bytes) throw new Error('Formular-Quelldaten fehlen.')
     const doc = await PDFDocument.load(bytes)
-    if (doc.catalog.lookupMaybe(PDFName.of('AcroForm'), PDFDict)?.has(PDFName.of('XFA'))) { unsupported.push('XFA-Formular'); continue }
+    if (carriesXfa(doc)) { unsupported.push('XFA-Formular'); continue }
     for (const field of doc.getForm().getFields()) {
       let info: ReturnType<typeof fieldInfo>
       try { info = fieldInfo(field) } catch { info = null }

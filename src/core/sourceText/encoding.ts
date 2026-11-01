@@ -21,6 +21,9 @@ export function supportedSourceText(text: string): boolean {
   return text.length > 0 && text.length <= MAX_TEXT && SOURCE_ALPHABET.test(text)
 }
 
+/** For fonts that can write nothing. */
+export const noCodec: SourceFontCodec = { encode: () => ({ ok: false, error: 'missing-glyph' }) }
+
 export function sourceFontCodec(glyphs: readonly SourceGlyph[], codeBytes: 1 | 2): SourceTextResult<SourceFontCodec> {
   if ((codeBytes !== 1 && codeBytes !== 2) || !glyphs.length || glyphs.length > 65536) return { ok: false, error: 'invalid-font-map' }
   const byCharacter = new Map<string, SourceGlyph>()

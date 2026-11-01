@@ -3,6 +3,8 @@ import { assignEditorState, cloneOverlay, copyEditorState, isStroke, isTextbox, 
 import { assertPageBudget, assertSourceBudget } from './pdf/documentBudget'
 import { renumberLabels } from './labelNumbers'
 
+/** 20 mm: a crop must leave this much paper in both directions. */
+export const MIN_CROP_SIZE = 20 * 72 / 25.4
 export const XFA_UNSUPPORTED = 'XFA-Formulare werden bei Seitenoperationen noch nicht unterstützt.'
 
 export const A4_WIDTH = 210 * 72 / 25.4
@@ -186,16 +188,33 @@ export function sourcePoint(page: DocumentPage, x: number, y: number) {
   if (page.rotation === 270) return { x: b.x + y / u, y: b.y + b.height - x / u }
   return { x: b.x + x / u, y: b.y + y / u }
 }
+export const cropFits = (size: { width: number; height: number }, m: CropMargins) =>
+  Object.values(m).every((v) => Number.isFinite(v) && v >= 0) &&
+  size.width - m.left - m.right >= MIN_CROP_SIZE - 1e-6 &&
+  size.height - m.top - m.bottom >= MIN_CROP_SIZE - 1e-6
+
+/** Margins while one corner is dragged to a page point; the opposite corner stays. */
+export function dragCropCorner(
+  initial: CropMargins,
+  size: { width: number; height: number },
+  corner: string,
+  point: { x: number; y: number },
+): CropMargins {
+  const x = Math.max(0, Math.min(size.width, point.x)),
+    y = Math.max(0, Math.min(size.height, point.y)),
+    next = { ...initial }
+  if (corner.endsWith('l')) next.left = Math.max(0, Math.min(x, size.width - next.right - MIN_CROP_SIZE))
+  else next.right = Math.max(0, Math.min(size.width - x, size.width - next.left - MIN_CROP_SIZE))
+  if (corner.startsWith('t')) next.top = Math.max(0, Math.min(y, size.height - next.bottom - MIN_CROP_SIZE))
+  else next.bottom = Math.max(0, Math.min(size.height - y, size.height - next.top - MIN_CROP_SIZE))
+  return next
+}
 export function cropPage(state: EditorState, id: string, m: CropMargins): Command {
   const index = state.pages?.findIndex((p) => p.id === id) ?? -1
   if (index < 0) throw new Error('Seite nicht gefunden.')
   const page = state.pages![index],
     size = pageSize(page)
-  if (
-    Object.values(m).some((v) => !Number.isFinite(v) || v < 0) ||
-    size.width - m.left - m.right < (20 * 72) / 25.4 - 1e-6 ||
-    size.height - m.top - m.bottom < (20 * 72) / 25.4 - 1e-6
-  )
+  if (!cropFits(size, m))
     throw new Error('Der Zuschnitt muss mindestens 20 × 20 mm groß bleiben.')
   const a = sourcePoint(page, m.left, m.bottom),
     b = sourcePoint(page, size.width - m.right, size.height - m.top)
