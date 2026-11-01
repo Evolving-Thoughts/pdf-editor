@@ -5,16 +5,16 @@ let views: EditorViews
 beforeEach(() => { views = new EditorViews() })
 
 test.each([
-  ['page manager', (v: EditorViews, page: number) => v.togglePages(page), 'pages'],
-  ['text correction', (v: EditorViews, page: number) => v.toggleSourceText(page), 'sourceText'],
-  ['table', (v: EditorViews, page: number) => v.openTable(page), 'table'],
-] as const)('the %s opens at the visible page, and the document returns to the page last shown there', (_, open, main) => {
+  ['page manager', (v: EditorViews, page: number) => v.togglePages(page), (v: EditorViews) => v.togglePages(0), 'pages'],
+  ['text correction', (v: EditorViews, page: number) => v.toggleSourceText(page), (v: EditorViews) => v.toggleSourceText(0), 'sourceText'],
+  ['table', (v: EditorViews, page: number) => v.openTable(page), (v: EditorViews) => v.closeMain(), 'table'],
+] as const)('the %s opens at the visible page, and the document returns to the page last shown there', (_, open, close, main) => {
   open(views, 4)
   expect(views.main).toBe(main)
   expect(views.viewedPage).toBe(4)
   expect(views.returnPage).toBeNull()
   views.rememberPage(7)
-  open(views, 0)
+  close(views)
   expect(views.main).toBe('document')
   expect(views.returnPage).toBe(7)
 })

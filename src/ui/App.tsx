@@ -113,6 +113,7 @@ export default function App() {
     }
     return best
   }, [views])
+  const takeSnapshot = useCallback(() => session.snapshot(), [session])
   const onViewedPage = useCallback((index: number) => { views.rememberPage(index) }, [views])
 
   const { pdf, activeDraftId, loadingDraftId, busy, pagesStale: pageBusy, original: originalBytes } = session
@@ -230,25 +231,22 @@ export default function App() {
         return
       }
       const isActive = id === session.activeDraftId
-      // Pause auto-save while deleting; on failure it resumes and persists
-      // any edits made during the confirmation/DB round trip.
-      const pausedDraft = isActive ? session.suspend() : null
-      if (isActive) pauseSaving()
+      const remove = () => queuePersistence(async () => deleteDraft(await ensureDraftDb(), id))
       try {
-        await queuePersistence(async () => deleteDraft(await ensureDraftDb(), id))
+        if (isActive) {
+          await session.deleteDraft({
+            pauseSaving,
+            remove,
+            // Keeps edits made during the confirmation/DB round trip.
+            save: () => void persistActiveDraft().catch((saveProblem) =>
+              reportDraftProblem(saveProblem, 'Der Entwurf konnte nicht gespeichert werden.'),
+            ),
+          })
+          setSelectedId(null)
+        } else await remove()
         setDrafts((current) => current.filter((item) => item.id !== id))
         setDraftsError(null)
-        if (isActive) {
-          setSelectedId(null)
-          session.close()
-        }
       } catch (problem) {
-        if (pausedDraft) {
-          session.resume(pausedDraft)
-          void persistActiveDraft().catch((saveProblem) =>
-            reportDraftProblem(saveProblem, 'Der Entwurf konnte nicht gespeichert werden.'),
-          )
-        }
         reportDraftProblem(problem, 'Der Entwurf konnte nicht gelöscht werden.')
       }
     },
@@ -420,7 +418,7 @@ export default function App() {
     setTool('select')
     setSelectedId(issue.overlayId)
     requestAnimationFrame(() => workspaceRef.current?.querySelector(`.page[data-page-index="${issue.pageIndex}"]`)?.scrollIntoView({ block: 'center' }))
-  }, [])
+  }, [views])
   const onApplyRedactions = async () => {
     const draft=session.draft
     if(!draft||redactionBusy||pageBusy||!store.state.redactions?.length)return
@@ -704,7 +702,7 @@ export default function App() {
       {openingFile && <p role="status" className="hint">PDF wird geöffnet …</p>}
       <div className="workspace" ref={workspaceRef} inert={exportDialogOpen || busy}>
         {pdf && searchOpen && !pageManagerOpen && !pageBusy && <SearchWindow pdf={pdf} overlays={overlays} pages={documentPages ?? []} onClose={closeSearch} onHits={onSearchHits} onJump={onSearchJump}/>}
-        {pdf && pageManagerOpen && originalBytes && <PagesManager nativeWidgets={nativeWidgets} key={activeDraftId} pdf={pdf} store={store} original={originalBytes} busy={pageBusy} onCropActive={setCropActive} initialPage={views.viewedPage} onPage={onViewedPage} />}
+        {pdf && pageManagerOpen && originalBytes && <PagesManager nativeWidgets={nativeWidgets} key={activeDraftId} pdf={pdf} store={store} original={originalBytes} snapshot={takeSnapshot} busy={pageBusy} onCropActive={setCropActive} initialPage={views.viewedPage} onPage={onViewedPage} />}
         {pdf && sourceTextOpen && originalBytes && !pageBusy && <SourceTextPanel key={activeDraftId} store={store} original={originalBytes} initialPage={views.viewedPage} onPage={onViewedPage} onClose={() => views.closeMain()} onHistory={setSourceHistory} />}
         {pdf && tableOpen && documentPages && <TablePanel key={activeDraftId} pdf={pdf} pages={documentPages} fileName={pdf.fileName} initialPage={views.viewedPage} onClose={() => views.closeMain()} />}
         {!pageManagerOpen && !sourceTextOpen && !tableOpen && <>

@@ -4,7 +4,7 @@ import type { EditorStore } from './editorStore'
 import { createId, type EditorState } from './model'
 import type { DocumentPage } from './pages'
 import { assertFileBudget } from './pdf/documentBudget'
-import { previewDocument, snapshotDocument } from './pdf/documentOutput'
+import { previewDocument, snapshotDocument, type DocumentSnapshot } from './pdf/documentOutput'
 import type { PdfHandle } from './pdf/loadPdf'
 import { inspectPages } from './pdf/pageOperations'
 import { IncorrectPasswordError, PasswordRequiredError, preparePdf, unlockPdf } from './pdf/unlockPdf'
@@ -40,12 +40,19 @@ export interface FilePorts extends Replacing {
 }
 export interface DraftPorts extends Replacing { read(): Promise<DraftRecord | null> }
 
+export interface DeletePorts {
+  pauseSaving(): void
+  remove(): Promise<unknown>
+  /** Runs when the draft stays after all. */
+  save(): void
+}
+
 type LoadPdf = (name: string, bytes: Uint8Array) => Promise<PdfHandle>
 
 export class DocumentSession {
   pdf: PdfHandle | null = null
   draft: ActiveDraft | null = null
-  /** Stays while saving is suspended; only closing ends the document. */
+  /** Stays while the draft is being deleted; only closing ends the document. */
   activeDraftId: string | null = null
   original: ArrayBuffer | null = null
   private renderedPages: DocumentPage[] | undefined
@@ -196,6 +203,12 @@ export class DocumentSession {
     this.changed()
   }
 
+  /** The document as it is right now, for everything that leaves the editor. */
+  snapshot(): DocumentSnapshot {
+    if (!this.original) throw new Error('Es ist kein Dokument geöffnet.')
+    return snapshotDocument(new Uint8Array(this.original), this.store.state)
+  }
+
   /** Rebuilds the viewer after a page change. Returns how to abandon that rebuild. */
   refreshPages(onProblem: (problem: unknown) => void): () => void {
     const pages = this.store.state.pages, draft = this.draft
@@ -205,7 +218,7 @@ export class DocumentSession {
       return () => undefined
     }
     let cancelled = false
-    void previewDocument(snapshotDocument(new Uint8Array(draft.bytes), this.store.state)).then(bytes => this.load(draft.name, bytes)).then(next => {
+    void previewDocument(this.snapshot()).then(bytes => this.load(draft.name, bytes)).then(next => {
       if (cancelled || this.draft !== draft) {
         void next.destroy()
         return
@@ -223,16 +236,21 @@ export class DocumentSession {
     }
   }
 
-  /** Takes the draft away from saving while it is being deleted; the view stays. */
-  suspend(): ActiveDraft | null {
+  /** Saving is off while the open draft is deleted, and the view stays. If that fails,
+   * the same draft continues; otherwise the document closes. */
+  async deleteDraft(ports: DeletePorts) {
     const draft = this.draft
     this.epoch += 1
     this.draft = null
-    return draft
-  }
-
-  resume(draft: ActiveDraft) {
-    this.draft = draft
+    ports.pauseSaving()
+    try {
+      await ports.remove()
+    } catch (problem) {
+      this.draft = draft
+      ports.save()
+      throw problem
+    }
+    this.close()
   }
 
   close() {

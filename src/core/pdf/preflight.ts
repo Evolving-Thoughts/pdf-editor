@@ -225,3 +225,13 @@ export async function preflightExport({ original, state }: DocumentSnapshot): Pr
 
 export const needsConfirmation = (report: PreflightReport) => report.assessments.filter(item => item.decision === 'confirm')
 export const rejection = (report: PreflightReport) => report.assessments.find(item => item.decision === 'reject')
+
+/** What extracting pages takes: a refusal, or what the user must confirm first. Null means the check failed. */
+export function reviewExtraction(report: PreflightReport | null): { rejected?: string; confirm: string[] } {
+  if (!report) return { confirm: ['Die Prüfung konnte nicht abgeschlossen werden. Bitte das Ergebnis selbst kontrollieren.'] }
+  const rejected = rejection(report)
+  if (rejected) return { rejected: rejected.message, confirm: [] }
+  const confirm = needsConfirmation(report).map(item => item.message)
+  if (report.textIssues.length) confirm.push('Nicht darstellbare Zeichen werden durch „?“ ersetzt.')
+  return { confirm }
+}

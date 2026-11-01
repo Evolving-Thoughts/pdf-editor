@@ -36,16 +36,16 @@ export class EditorViews {
     this.main = main
   }
 
-  private toggle(main: MainView, visiblePage: number) {
-    this.go(this.main === main ? 'document' : main, visiblePage)
+  private show(main: MainView, visiblePage: number) {
+    this.go(main, visiblePage)
     this.dialog = null
     this.searchOpen = false
     this.changed()
   }
 
-  togglePages(visiblePage: number) { this.toggle('pages', visiblePage) }
-  toggleSourceText(visiblePage: number) { this.toggle('sourceText', visiblePage) }
-  openTable(visiblePage: number) { this.toggle(this.main === 'table' ? 'document' : 'table', visiblePage) }
+  togglePages(visiblePage: number) { this.show(this.main === 'pages' ? 'document' : 'pages', visiblePage) }
+  toggleSourceText(visiblePage: number) { this.show(this.main === 'sourceText' ? 'document' : 'sourceText', visiblePage) }
+  openTable(visiblePage: number) { this.show('table', visiblePage) }
 
   /** The table or text correction asks to be closed. */
   closeMain() {
