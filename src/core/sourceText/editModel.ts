@@ -2,7 +2,7 @@
  * proved block (glyphs, metrics, outlines); the UI rebuilds light fonts and
  * runs the same layout code (`layoutEdit`) for a live preview. Only the
  * worker's preview of the real PDF authorizes a change. */
-import { sourceFontCodec } from './encoding'
+import { noCodec, sourceFontCodec } from './encoding'
 import type { BlockRect, SourceBlock } from './mixedBlocks'
 import type { SourceFont } from './sourceTypes'
 import type { BlockSpace, Box } from './space'
@@ -16,7 +16,6 @@ export interface EditFont {
   codeBytes: 1 | 2
   bbox: number[]
   family?: string
-  embedded: boolean
   defaultWidth?: number
   advances: [number, number][]
   boxes: [number, number[]][]
@@ -35,7 +34,6 @@ export interface EditModel {
   runId: string
   expectedText: string
   text: string
-  tagged: boolean
   justified: boolean
   right: number
   leading: number
@@ -76,7 +74,7 @@ export function editModels(items: { block: SourceBlock; runId: string; expectedT
       id = fonts.length
       ids.set(font, id)
       fonts.push({
-        name: font.name, codeBytes: font.codeBytes, bbox: font.bbox, family: font.family, embedded: font.embedded !== false,
+        name: font.name, codeBytes: font.codeBytes, bbox: font.bbox, family: font.family,
         defaultWidth: font.defaultWidth, advances: [], boxes: [], insertable: font.insertable ?? [], outlines: [],
       })
     }
@@ -84,7 +82,7 @@ export function editModels(items: { block: SourceBlock; runId: string; expectedT
   }
   const used = new Map<number, Set<number>>()
   const blocks: EditModel[] = items.map(({ block, runId, expectedText, room, limit, slots, pinned, space }) => ({
-    id: block.id, runId, expectedText, text: block.text, tagged: block.tagged, justified: block.justified,
+    id: block.id, runId, expectedText, text: block.text, justified: block.justified,
     right: block.right, leading: block.leading, size: block.size, room, limit, slots, pinned, space,
     lines: block.lines.map(l => ({ from: l.from, to: l.to, left: l.left, baseline: l.baseline })),
     glyphs: block.glyphs.map(g => {
@@ -108,14 +106,13 @@ export function editModels(items: { block: SourceBlock; runId: string; expectedT
   return { blocks, fonts }
 }
 
-const noCodec: SourceFont['codec'] = { encode: () => ({ ok: false, error: 'missing-glyph' }) }
 export interface LiveFont extends SourceFont { paths: Map<number, string> }
 export function liveFont(f: EditFont): LiveFont {
   const codec = f.insertable.length
     ? sourceFontCodec(f.insertable.map(([character, code, advance]) => ({ character, code: code.toString(16).padStart(f.codeBytes * 2, '0'), advance })), f.codeBytes)
     : undefined
   return {
-    name: f.name, codeBytes: f.codeBytes, bbox: f.bbox, family: f.family, embedded: f.embedded, defaultWidth: f.defaultWidth,
+    name: f.name, codeBytes: f.codeBytes, bbox: f.bbox, family: f.family, defaultWidth: f.defaultWidth,
     codec: codec?.ok ? codec.value : noCodec,
     decode: new Map(f.insertable.map(([c, code]) => [code, c])),
     advances: new Map(f.advances), boxes: new Map(f.boxes), paths: new Map(f.outlines),
@@ -123,7 +120,7 @@ export function liveFont(f: EditFont): LiveFont {
 }
 export function liveBlock(model: EditModel, fonts: readonly LiveFont[]): SourceBlock {
   return {
-    id: model.id, members: [], right: model.right, leading: model.leading, text: model.text, tagged: model.tagged, size: model.size, justified: model.justified,
+    id: model.id, members: [], right: model.right, leading: model.leading, text: model.text, size: model.size, justified: model.justified,
     lines: model.lines.map(l => ({ ...l, runs: [] })),
     glyphs: model.glyphs.map(g => ({
       char: g.c, code: g.code, font: fonts[g.f], fontRaw: g.fr, fill: g.fill, tf: g.tf, tc: g.tc, tw: g.tw, scale: g.s, size: g.size,

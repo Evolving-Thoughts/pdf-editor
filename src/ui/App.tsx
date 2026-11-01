@@ -7,6 +7,8 @@ import { ToolbarTools } from './ToolbarTools'
 import { inspectStructures, type TextIssue } from '../core/pdf/preflight'
 import { setMetadataCommand } from '../core/pdf/metadata'
 import { IncorrectPasswordError } from '../core/pdf/unlockPdf'
+import { DocumentProblem } from '../core/pdf/documentBudget'
+import { historyStep } from '../core/sourceText/draftHistory'
 import { PasswordDialog, type PasswordRequest } from './PasswordDialog'
 import { SearchWindow } from './SearchWindow'
 import type { SearchHit } from '../core/search'
@@ -100,6 +102,8 @@ export default function App() {
   // React re-renders on store notifications.
   const [store] = useState(() => new EditorStore())
   useSyncExternalStore(store.subscribe, store.getVersion)
+  const undoStep = historyStep(!!sourceHistory?.canUndo, !!sourceHistory?.dirty, store.canUndo)
+  const redoStep = historyStep(!!sourceHistory?.canRedo, !!sourceHistory?.dirty, store.canRedo)
   const [session] = useState(() => new DocumentSession(store, loadPdf))
   useSyncExternalStore(session.subscribe, session.getVersion)
   const scrollerBox = useCallback(() => workspaceRef.current?.querySelector<HTMLElement>('.pages') ?? null, [])
@@ -191,7 +195,7 @@ export default function App() {
         setError(
           problem instanceof IncorrectPasswordError
             ? problem.message
-            : `„${file.name}“ konnte nicht geöffnet werden. ${problem instanceof Error && /entschlüsselt|Möglich sind/.test(problem.message) ? problem.message : 'Datei beschädigt, kein gültiges PDF oder bisheriger Entwurf nicht speicherbar. Der bisherige Stand bleibt geöffnet.'}`,
+            : `„${file.name}“ konnte nicht geöffnet werden. ${problem instanceof DocumentProblem ? problem.message : 'Datei beschädigt, kein gültiges PDF oder bisheriger Entwurf nicht speicherbar. Der bisherige Stand bleibt geöffnet.'}`,
         )
       }
     },
@@ -573,8 +577,8 @@ export default function App() {
                 <button
                   type="button"
                   aria-label="Rückgängig"
-                  disabled={!(sourceHistory?.canUndo || (store.canUndo && !sourceHistory?.dirty)) || pageBusy || cropActive}
-                  onClick={() => { if (sourceHistory?.canUndo) sourceHistory.undo(); else if (!sourceHistory?.dirty) store.undo() }}
+                  disabled={!undoStep || pageBusy || cropActive}
+                  onClick={() => { if (undoStep === 'draft') sourceHistory?.undo(); else if (undoStep === 'document') store.undo() }}
                   title="Rückgängig (Strg+Z)"
                 >
                   <svg
@@ -593,8 +597,8 @@ export default function App() {
                 <button
                   type="button"
                   aria-label="Wiederholen"
-                  disabled={!(sourceHistory?.canRedo || (store.canRedo && !sourceHistory?.dirty)) || pageBusy || cropActive}
-                  onClick={() => { if (sourceHistory?.canRedo) sourceHistory.redo(); else if (!sourceHistory?.dirty) store.redo() }}
+                  disabled={!redoStep || pageBusy || cropActive}
+                  onClick={() => { if (redoStep === 'draft') sourceHistory?.redo(); else if (redoStep === 'document') store.redo() }}
                   title="Wiederholen (Strg+Y)"
                 >
                   <svg

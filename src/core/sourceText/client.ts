@@ -36,12 +36,12 @@ export function sourceTextRequest<T>(request: Request, signal: AbortSignal, crea
     try { const bytes = request.bytes.slice(0); worker.postMessage({ ...request, bytes }, [bytes]) } catch (error) { finish(error instanceof Error ? error : new Error('Textanalyse konnte nicht gestartet werden.')) }
   })
 }
-type Inspection = { digest: string; runs: SourceRun[]; blocks?: EditModel[]; fonts?: EditFont[]; rects?: Box[] }
+type Inspection = { digest: string; runs: SourceRun[]; blocks: EditModel[]; fonts: EditFont[]; rects: Box[] }
 export const inspectSource = (bytes: ArrayBuffer, signal: AbortSignal, pageIndex?: number) => sourceTextRequest<Inspection>({ action: 'inspect', bytes, pageIndex }, signal)
 export const previewSource = (bytes: ArrayBuffer, selection: SourceSelection, replacement: string, signal: AbortSignal) => sourceTextRequest<ArrayBuffer>({ action: 'preview', bytes, selection, replacement }, signal)
 /** Several proved paragraphs of one page, checked together in one candidate. */
 export const previewSources = (bytes: ArrayBuffer, edits: SourceEdit[], signal: AbortSignal) =>
-  edits.length === 1 ? previewSource(bytes, edits[0].selection, edits[0].replacement, signal) : sourceTextRequest<ArrayBuffer>({ action: 'preview', bytes, edits }, signal)
+  sourceTextRequest<ArrayBuffer>({ action: 'preview', bytes, edits }, signal)
 
 /** Analyses per source buffer and page. A source buffer is immutable (a page
  * revision creates a new buffer), so a cached analysis stays valid; only

@@ -1,5 +1,8 @@
 import type { SourceFontCodec } from './encoding'
 
+/** A subset prefix like ABCDEF+ says nothing about the font itself. */
+export const baseFontName = (name: string) => name.replace(/^[A-Z]{6}\+/, '')
+
 export interface SourceRun {
   id: string
   pageIndex: number
@@ -20,8 +23,6 @@ export interface SourceFont {
   defaultWidth?: number
   /** Measurement-only font: text stays a protected obstacle, never editable. */
   locked?: string
-  /** False when the viewer supplies the glyph program (standard/unembedded fonts). */
-  embedded?: boolean
   /** CSS generic family hint for the inline editor when no outline exists. */
   family?: string
   /** SVG outline (1000 units per em, y up) of a code for the inline editor. */

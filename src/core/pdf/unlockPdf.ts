@@ -1,3 +1,4 @@
+import { DocumentProblem } from './documentBudget'
 import { PDFDocument } from 'pdf-lib'
 
 export class PasswordRequiredError extends Error {
@@ -53,7 +54,7 @@ export async function unlockPdf(
       /password incorrect|needs password/i.test(error.message)
     )
       throw new IncorrectPasswordError()
-    throw new Error(
+    throw new DocumentProblem(
       'Dieses PDF konnte nicht entschlüsselt werden. Die Datei ist beschädigt oder verwendet ein nicht unterstütztes Schutzverfahren.',
       { cause: error },
     )

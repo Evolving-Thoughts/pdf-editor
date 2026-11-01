@@ -26,6 +26,7 @@ import {
   codeAdvance,
   emitBlock,
   hidden,
+  glyphBox,
   inkBox,
   layoutEdit,
   pdfNumber,
@@ -995,7 +996,6 @@ export async function analyze(input: Uint8Array, pageIndex: number) {
     const scale = run.scale ?? 1
     return {
       index,
-      text: run.view.text,
       codes: run.codes,
       chars: run.actual !== undefined ? [run.actual] : run.codes.map((c) => run.font.decode.get(c) ?? '\ufffd'),
       actual: run.actual !== undefined,
@@ -1286,17 +1286,7 @@ export async function previewPageSource(
         )
       continue
     }
-    const gapX = Math.max(
-        other.left - run.bounds.right,
-        run.bounds.left - other.right,
-        0,
-      ),
-      gapY = Math.max(
-        other.bottom - run.bounds.top,
-        run.bounds.bottom - other.top,
-        0,
-      )
-    const gap = Math.min(3, Math.max(gapX, gapY))
+    const gap = Math.min(3, separation(run.bounds, other))
     if (overlap(bounds, other, Math.max(0, gap - 0.001)))
       fail(
         'Die Korrektur würde den geschützten Abstand zu benachbartem Text, Bild, Link oder einer Grafik unterschreiten.',
@@ -1454,9 +1444,8 @@ function glyphBoxes(glyphs: readonly BlockGlyph[], lines: readonly PlacedLine[])
       if (hidden(glyphs, k, line.to)) continue
       const g = glyphs[k],
         x = line.positions[k - line.from]
-      const b = g.char.trim() ? (g.font.boxes?.get(g.code) ?? g.font.bbox) : undefined
-      const box = b
-        ? { left: x + (b[0] * g.size) / 1000, right: x + (b[2] * g.size) / 1000, bottom: line.baseline + (b[1] * g.size) / 1000, top: line.baseline + (b[3] * g.size) / 1000 }
+      const box = g.char.trim()
+        ? glyphBox(g, x, line.baseline)
         : { left: x, right: x + g.width, bottom: line.baseline - 0.25 * g.size, top: line.baseline + 0.5 * g.size }
       out.push({ orig: g.orig, x, baseline: line.baseline, box })
     }
