@@ -161,7 +161,7 @@ test('oversized output is refused', () => {
   expect(() => buildXlsx(wide, 'de')).toThrow(/zu groß/)
 })
 
-test('a new number format reads the cells again and keeps what a person corrected', () => {
+test('a new number format reads the cells again and keeps a crossing word', () => {
   const rows: TableCell[][] = [[
     plain('Toner schwarz'),
     number('1.234,50'),

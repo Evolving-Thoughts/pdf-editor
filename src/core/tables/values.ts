@@ -6,6 +6,8 @@ export interface TableCell {
   type: 'text' | 'number'
   /** Why a person should look at this cell. */
   note?: string
+  /** A person chose text: another number format leaves the cell alone. */
+  chosenText?: boolean
 }
 
 const AMBIGUOUS = 'Unklar: Dezimaltrennzeichen oder Tausenderpunkt?'
@@ -47,5 +49,7 @@ export function classifyCell(text: string, locale: NumberLocale): TableCell {
 
 /** A person's explicit choice: accepted only when the value really is a number. */
 export function asNumberCell(cell: TableCell, locale: NumberLocale): TableCell {
-  return parseNumber(cell.text, locale) === null ? { ...cell, type: 'text', note: WRONG_FORMAT } : { text: cell.text, type: 'number' }
+  return parseNumber(cell.text, locale) === null ? { text: cell.text, type: 'text', note: WRONG_FORMAT } : { text: cell.text, type: 'number' }
 }
+
+export const asTextCell = (text: string): TableCell => ({ text, type: 'text', chosenText: true })

@@ -1,5 +1,6 @@
 import { expect, test } from 'vitest'
 import type { TableWord } from '../../src/core/tables/extract'
+import { COLUMN_CROSSING } from '../../src/core/tables/extract'
 import { changeLines, changeLocale, changePage, chooseRegion, deleteRow, editCell, mergeWithNext, restoreCorrections, setColumnType, startReview, wordsLoaded } from '../../src/core/tables/tableReview'
 
 const word = (text: string, left: number, top: number): TableWord => ({ text, left, right: left + text.length * 6, top, bottom: top + 10 })
@@ -52,6 +53,36 @@ test('corrections survive a page change and bring their page back', () => {
 test('restored numbers come back with the number format they were read in', () => {
   const moved = changeLocale(changePage(editCell(table(), 0, 0, 'Posten'), 1), 'en')
   expect(restoreCorrections(moved).locale).toBe('de')
+})
+
+test('a column chosen as text stays text in another number format', () => {
+  const ids = chooseRegion(startReview(0), [word('Nr', 20, 20), word('12345', 200, 20)], region)
+  const cell = (state: typeof ids) => state.rows[0][1]
+  expect(cell(ids).type).toBe('number')
+  expect(cell(changeLocale(setColumnType(ids, 1, 'text'), 'en')).type).toBe('text')
+  expect(cell(changeLocale(setColumnType(setColumnType(ids, 1, 'text'), 1, 'number'), 'en')).type).toBe('number')
+})
+
+test('merged rows keep a text choice and a crossing word', () => {
+  const state = { ...startReview(0), rows: [
+    [{ text: '12', type: 'number' as const }, { text: 'a', type: 'text' as const, note: COLUMN_CROSSING }],
+    [{ text: '', type: 'text' as const }, { text: 'b', type: 'text' as const }],
+  ] }
+  expect(mergeWithNext(state, 0).rows[0][1]).toEqual({ text: 'a b', type: 'text', note: COLUMN_CROSSING })
+  const chosen = mergeWithNext(setColumnType(state, 0, 'text'), 0)
+  expect(chosen.rows[0][0].type).toBe('text')
+  expect(changeLocale(chosen, 'en').rows[0][0].type).toBe('text')
+})
+
+test('choosing a column type does not clear a crossing word', () => {
+  const state = { ...startReview(0), rows: [[{ text: 'a b', type: 'text' as const, note: COLUMN_CROSSING }]] }
+  expect(setColumnType(state, 0, 'text').rows[0][0].note).toBe(COLUMN_CROSSING)
+})
+
+test('a region drawn after a failed read keeps the failure visible', () => {
+  const failed = { ...startReview(0), problem: 'Lesefehler' }
+  expect(chooseRegion(failed, null, region).problem).toBe('Lesefehler')
+  expect(chooseRegion(failed, words, region).problem).toBe('')
 })
 
 test('an unedited table has nothing to restore', () => {

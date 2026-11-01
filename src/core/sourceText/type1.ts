@@ -134,7 +134,6 @@ export function type1Outline(program: Type1Program, name: string, depth = 0): { 
               const p = flex; flex = null
               if (p.length >= 7) {
                 const [, a, b, c, d, e, g] = p
-                const sx = p[0][0], sy = p[0][1]; void sx; void sy
                 out.push(`C${f(a[0])} ${f(a[1])} ${f(b[0])} ${f(b[1])} ${f(c[0])} ${f(c[1])}`, `C${f(d[0])} ${f(d[1])} ${f(e[0])} ${f(e[1])} ${f(g[0])} ${f(g[1])}`)
                 for (const q of [a, b, c, d, e, g]) touch(q[0], q[1])
                 x = g[0]; y = g[1]

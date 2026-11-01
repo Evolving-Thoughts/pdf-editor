@@ -36,8 +36,7 @@ export function sourceTextRequest<T>(request: Request, signal: AbortSignal, crea
     try { const bytes = request.bytes.slice(0); worker.postMessage({ ...request, bytes }, [bytes]) } catch (error) { finish(error instanceof Error ? error : new Error('Textanalyse konnte nicht gestartet werden.')) }
   })
 }
-type Inspection = { digest: string; runs: SourceRun[]; blocks: EditModel[]; fonts: EditFont[]; rects: Box[] }
-export const inspectSource = (bytes: ArrayBuffer, signal: AbortSignal, pageIndex?: number) => sourceTextRequest<Inspection>({ action: 'inspect', bytes, pageIndex }, signal)
+export const inspectSource = (bytes: ArrayBuffer, signal: AbortSignal, pageIndex?: number) => sourceTextRequest<SourceAnalysis>({ action: 'inspect', bytes, pageIndex }, signal)
 export const previewSource = (bytes: ArrayBuffer, selection: SourceSelection, replacement: string, signal: AbortSignal) => sourceTextRequest<ArrayBuffer>({ action: 'preview', bytes, selection, replacement }, signal)
 /** Several proved paragraphs of one page, checked together in one candidate. */
 export const previewSources = (bytes: ArrayBuffer, edits: SourceEdit[], signal: AbortSignal) =>
@@ -46,8 +45,8 @@ export const previewSources = (bytes: ArrayBuffer, edits: SourceEdit[], signal: 
 /** Analyses per source buffer and page. A source buffer is immutable (a page
  * revision creates a new buffer), so a cached analysis stays valid; only
  * successful analyses are kept. */
-const analyses = new WeakMap<ArrayBuffer, Map<number, Promise<Inspection>>>()
-export function cachedInspection(bytes: ArrayBuffer, pageIndex: number, signal: AbortSignal): Promise<Inspection> {
+const analyses = new WeakMap<ArrayBuffer, Map<number, Promise<SourceAnalysis>>>()
+export function cachedInspection(bytes: ArrayBuffer, pageIndex: number, signal: AbortSignal): Promise<SourceAnalysis> {
   let pages = analyses.get(bytes)
   if (!pages) analyses.set(bytes, (pages = new Map()))
   const hit = pages.get(pageIndex)

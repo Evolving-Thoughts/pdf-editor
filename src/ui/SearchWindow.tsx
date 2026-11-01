@@ -143,17 +143,29 @@ export function SearchWindow({
           hits.length
         : 0,
     )
+  const activeHit = useRef<SearchHit | undefined>(undefined)
+  const jumpedTo = useRef<string | null>(null)
   useEffect(() => {
     onHits(hits, active)
-    if (hits[active]) onJump(hits[active])
-  }, [hits, active, onHits, onJump])
+  }, [hits, active, onHits])
+  // Edits elsewhere recompute the hits: the marks follow, the view only moves
+  // for a new query or another hit.
+  useEffect(() => {
+    activeHit.current = hits[active]
+    const target = hits[active] ? `${active}:${query}` : null
+    if (target !== null && target !== jumpedTo.current) onJump(hits[active])
+    jumpedTo.current = target
+  }, [hits, active, query, onJump])
+  // A new observer reports once, so another zoom also brings the hit back.
   useEffect(() => {
     const parent = windowRef.current?.parentElement
-    if (!parent || !hits[active]) return
-    const observer = new ResizeObserver(() => onJump(hits[active]))
+    if (!parent) return
+    const observer = new ResizeObserver(() => {
+      if (activeHit.current) onJump(activeHit.current)
+    })
     observer.observe(parent)
     return () => observer.disconnect()
-  }, [hits, active, onJump])
+  }, [onJump])
   useEffect(() => {
     input.current?.focus()
   }, [])

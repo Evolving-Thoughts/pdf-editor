@@ -148,7 +148,7 @@ test('lexer rejects malformed strings/composites and honors escapes and odd hex 
   expect(contentTokens('(a\\\\b\\(c\\)\\101)')[0].bytes).toEqual(Uint8Array.from([97, 92, 98, 40, 99, 41, 65]))
   expect(contentTokens('<4 1 F>')[0].bytes).toEqual(Uint8Array.from([65, 240]))
   expect(contentTokens('% BT <41> Tj\n /F#31 12 Tf').map(token => token.raw)).toEqual(['/F#31', '12', 'Tf'])
-  for (const text of ['(unterminated', '<GG>', '<41', '[<41>] TJ', '<< /A 1 >>', '('.repeat(34)]) expect(() => contentTokens(text)).toThrow()
+  for (const text of ['(unterminated', '<GG>', '<41', '[<41> TJ', '<< /A 1', ')', '('.repeat(34)]) expect(() => contentTokens(text)).toThrow()
 })
 
 test('bounded streaming inflate rejects highly compressed oversized content', async () => {

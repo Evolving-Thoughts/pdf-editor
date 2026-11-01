@@ -421,7 +421,7 @@ export async function analyze(input: Uint8Array, pageIndex: number) {
     total += text.length
     if (total > 2 * 1024 * 1024)
       fail('Die entpackten Seiteninhalte überschreiten 2 MiB.')
-    for (const token of contentTokens(text, true)) {
+    for (const token of contentTokens(text)) {
       if (token.kind !== 'operator') {
         if (ops.length >= 32) fail('Ein PDF-Operator hat zu viele Argumente.')
         ops.push(token)

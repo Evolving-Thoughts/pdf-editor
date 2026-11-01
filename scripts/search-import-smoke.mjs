@@ -122,6 +122,32 @@ try {
   await query('<script>alert(1)</script>', 0)
   assert.equal(await btn('Nächster Treffer').isDisabled(), true)
   await query('Antrag', 2)
+  await p.setViewportSize({ width: 1280, height: 500 })
+  await btn('Nächster Treffer').click()
+  await p.waitForFunction(
+    () => document.querySelector('.pages').scrollTop > 100,
+  )
+  await p.locator('.pages').evaluate((el) => {
+    el.scrollTop = 0
+  })
+  await p.waitForTimeout(300)
+  await btn('Rechteck').click()
+  const box = await p.locator('.page').first().boundingBox()
+  await p.mouse.move(box.x + 60, box.y + 200)
+  await p.mouse.down()
+  await p.mouse.move(box.x + 160, box.y + 280, { steps: 4 })
+  await p.mouse.up()
+  await p.locator('.shape-overlay').first().waitFor({ state: 'attached' })
+  await btn('⬚ Auswahl').click()
+  await btn('Rückgängig').click()
+  await p.locator('.shape-overlay').waitFor({ state: 'detached' })
+  await p.waitForTimeout(300)
+  assert.equal(
+    await p.locator('.pages').evaluate((el) => el.scrollTop),
+    0,
+    'an edit elsewhere leaves the view where it is',
+  )
+  await p.setViewportSize({ width: 1280, height: 1100 })
   for (const width of [1280, 390]) {
     await p.setViewportSize({ width, height: 1100 })
     const controls = await p

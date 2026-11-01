@@ -1,7 +1,7 @@
 // Reviewing an extracted table (framework-free, ADR-004). Every change to region, columns or
 // cells passes through here, so each one withdraws the confirmation and keeps corrections reachable.
-import { buildTable, detectColumns, mergeRows, reclassifyRows, wordsInRegion, type TableRegion, type TableWord } from './extract'
-import { asNumberCell, classifyCell, type NumberLocale, type TableCell } from './values'
+import { buildTable, detectColumns, keepCrossing, mergeRows, reclassifyRows, wordsInRegion, type TableRegion, type TableWord } from './extract'
+import { asNumberCell, asTextCell, classifyCell, type NumberLocale, type TableCell } from './values'
 
 interface TableSnapshot { pageIndex: number; region: TableRegion | null; lines: number[]; rows: TableCell[][]; locale: NumberLocale }
 
@@ -25,7 +25,8 @@ const corrections = (state: TableReview): TableSnapshot | null => {
 }
 
 function rebuilt(state: TableReview, words: Words, region: TableRegion | null, lines: number[]): TableReview {
-  const next = { ...state, region, lines, rows: [], problem: '', reviewed: false, edited: false }
+  // Without words there is nothing to rebuild, so a failed read stays on screen.
+  const next = { ...state, region, lines, rows: [], problem: words ? '' : state.problem, reviewed: false, edited: false }
   if (!region || !words) return next
   try { return { ...next, rows: buildTable(wordsInRegion(words, region), lines, state.locale).rows } }
   catch (error) { return { ...next, problem: error instanceof Error ? error.message : 'Die Tabelle konnte nicht erzeugt werden.' } }
@@ -58,7 +59,7 @@ export const editCell = (state: TableReview, rowIndex: number, columnIndex: numb
 export const setColumnType = (state: TableReview, columnIndex: number, type: 'number' | 'text'): TableReview =>
   corrected(state, state.rows.map(row => row.map((cell, c) => {
     if (c !== columnIndex || !cell.text) return cell
-    return type === 'number' ? asNumberCell(cell, state.locale) : { text: cell.text, type: 'text' }
+    return keepCrossing(cell, type === 'number' ? asNumberCell(cell, state.locale) : asTextCell(cell.text))
   })))
 
 export const deleteRow = (state: TableReview, rowIndex: number): TableReview =>

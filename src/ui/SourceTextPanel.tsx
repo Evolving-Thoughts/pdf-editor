@@ -269,6 +269,11 @@ export function SourceTextPanel({ store, original, onClose, onHistory, initialPa
   const canUndo = counts.past > 0 && !checking, canRedo = counts.future > 0 && !checking
   useEffect(() => { onHistory?.({ canUndo, canRedo, dirty, undo, redo }) }, [onHistory, canUndo, canRedo, dirty, undo, redo])
   useEffect(() => () => onHistory?.(null), [onHistory])
+  const stepHistory = useCallback((redoing: boolean) => {
+    const step = redoing ? historyStep(canRedo, dirty, store.canRedo) : historyStep(canUndo, dirty, store.canUndo)
+    if (step === 'draft') { if (redoing) redo(); else undo() }
+    else if (step === 'document') { if (redoing) store.redo(); else store.undo() }
+  }, [undo, redo, canUndo, canRedo, dirty, store])
   useEffect(() => {
     const onKey = (event: KeyboardEvent) => {
       if (event.defaultPrevented || !(event.ctrlKey || event.metaKey) || event.altKey) return
@@ -277,14 +282,11 @@ export function SourceTextPanel({ store, original, onClose, onHistory, initialPa
       // The fragment textarea keeps the browser's own undo.
       if (event.target instanceof HTMLElement && event.target.closest('input, textarea, select, [contenteditable="true"]')) return
       event.preventDefault()
-      const redoing = key === 'y' || event.shiftKey
-      const step = redoing ? historyStep(canRedo, dirty, store.canRedo) : historyStep(canUndo, dirty, store.canUndo)
-      if (step === 'draft') { if (redoing) redo(); else undo() }
-      else if (step === 'document') { if (redoing) store.redo(); else store.undo() }
+      stepHistory(key === 'y' || event.shiftKey)
     }
     window.addEventListener('keydown', onKey)
     return () => window.removeEventListener('keydown', onKey)
-  }, [undo, redo, canUndo, canRedo, dirty, store])
+  }, [stepHistory])
 
   const discard = () => !dirty || window.confirm(allKeys.length > 1 ? `${allKeys.length} ungeprüfte Absatzänderungen verwerfen?` : 'Ungesicherte Korrektur verwerfen?')
   function accept(value: DirectSelection) { invalid(); setDraft(NONE); setMetas({}); history.current = emptyHistory(); bump(); setSelection(value); setText(value.text); setPending(null); setError('') }
@@ -458,7 +460,7 @@ export function SourceTextPanel({ store, original, onClose, onHistory, initialPa
           {active && model && <InlineSourceEditor key={model.id} model={model} view={view} text={textOf(model.id)} range={active.range} size={stage.size} canvas={stage.canvas} disabled={busy}
             onChange={(value, range) => edit(model.id, value, range)}
             onRange={range => setDraft({ ...draftRef.current, active: { id: keyOf(pageId, model.id), range } })}
-            onUndo={undo} onRedo={redo}
+            onUndo={() => stepHistory(false)} onRedo={() => stepHistory(true)}
             onSubmit={() => { if (checkable) void check() }} onCancel={leave} />}
         </>}
       </PdfPreview>}

@@ -32,6 +32,11 @@ const DB_VERSION = 4
 
 type StoredImage = Omit<ImageOverlay, 'dataUrl'> & { imageAssetKey: string[] }
 type StoredOverlay = Exclude<Overlay, ImageOverlay> | StoredImage
+const usedSources = ({ pageSources, pages }: Pick<DraftRecord, 'pageSources' | 'pages'>) =>
+  (pageSources ?? []).filter(source => pages?.some(page => page.sourceId === source.id))
+export const draftSizeBytes = (record: DraftRecord) =>
+  record.pdfBytes.byteLength + usedSources(record).reduce((size, source) => size + source.bytes.byteLength, 0)
+
 type StoredDraft = Omit<DraftRecord, 'pdfBytes' | 'overlays' | 'pageSources'> & { sizeBytes: number; overlays: StoredOverlay[]; pageSourceIds?: string[] }
 interface ImageAsset { key: string[]; draftId: string; dataUrl: string }
 const isStoredImage = (overlay: StoredOverlay): overlay is StoredImage => 'imageAssetKey' in overlay
@@ -95,10 +100,10 @@ export async function saveDraft(db: IDBDatabase, draft: Omit<DraftRecord, 'updat
     if (!referencedIds.has(key[1])) assets.delete(cursor.primaryKey)
     cursor.continue()
   }
-  const activeSources=(pageSources??[]).filter(source=>metadata.pages?.some(p=>p.sourceId===source.id))
+  const activeSources=usedSources({ pageSources, pages: metadata.pages })
   const stored: StoredDraft = { ...metadata, overlays: storedOverlays,
     pageSourceIds: activeSources.map(s=>s.id),
-    sizeBytes: pdfBytes.byteLength + activeSources.reduce((total,s)=>total+s.bytes.byteLength,0) }
+    sizeBytes: draftSizeBytes(record) }
   transaction.objectStore(STORE).put(stored)
   const bytesStore = transaction.objectStore(BYTES_STORE)
   const existingBytesKey = bytesStore.getKey(record.id)

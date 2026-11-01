@@ -1,11 +1,11 @@
-/** Strict content lexer for the initial simple-text adapter, not a general PDF parser. */
+/** Content stream lexer for text analysis, not a general PDF parser. Fails closed on what it cannot read. */
 export interface ContentToken { kind: 'number' | 'name' | 'string' | 'operator' | 'array' | 'dict'; raw: string; start: number; end: number; bytes?: Uint8Array; items?: ContentToken[] }
 const whitespace = new Set(['\0', '\t', '\n', '\f', '\r', ' '])
 const white = (c: string) => whitespace.has(c)
 const delimiter = (c: string) => white(c) || '()<>[]{}/%'.includes(c)
 const bad = (): never => { throw new Error('Nicht unterstützte oder beschädigte PDF-Textstruktur.') }
 
-export function contentTokens(content: string, composite = false, level = 0): ContentToken[] {
+export function contentTokens(content: string, level = 0): ContentToken[] {
   if (level > 16 || content.length > 512 * 1024) bad()
   const tokens: ContentToken[] = []
   let i = 0
@@ -16,7 +16,7 @@ export function contentTokens(content: string, composite = false, level = 0): Co
     const start = i
     const first = content[i++]
     let kind: ContentToken['kind'], bytes: Uint8Array | undefined
-    if (composite && (first === '[' || (first === '<' && content[i] === '<'))) {
+    if (first === '[' || (first === '<' && content[i] === '<')) {
       const dict = first === '<', endMark = dict ? '>>' : ']'
       if (dict) i++
       const bodyStart = i
@@ -32,7 +32,7 @@ export function contentTokens(content: string, composite = false, level = 0): Co
         cursor++
       }
       if (nesting) bad()
-      const items = contentTokens(content.slice(bodyStart, cursor), true, level + 1)
+      const items = contentTokens(content.slice(bodyStart, cursor), level + 1)
       const shift = (values: ContentToken[]) => { for (const value of values) { value.start += bodyStart; value.end += bodyStart; if (value.items) shift(value.items) } }; shift(items)
       i = cursor + endMark.length; tokens.push({ kind: dict ? 'dict' : 'array', raw: content.slice(start,i), start, end:i, items }); continue
     }
@@ -74,7 +74,7 @@ export function contentTokens(content: string, composite = false, level = 0): Co
         while (i < content.length && !delimiter(content[i])) i++
         if (i === start + 1) bad()
       } else {
-        if (delimiter(first)) bad() // TJ arrays, dictionaries, inline images etc fail closed.
+        if (delimiter(first)) bad() // A stray closing delimiter fails closed.
         while (i < content.length && !delimiter(content[i])) i++
         kind = /^[+-]?(?:\d+\.?\d*|\.\d+)$/.test(content.slice(start, i)) ? 'number' : 'operator'
         if (kind === 'operator' && content.slice(start, i) === 'BI') {

@@ -236,12 +236,11 @@ test('stale selections, paragraph requests on fragmented source and missing glyp
 })
 test('bounded composite lexer respects literal strings and absolute offsets', () => {
   const s = '[ (a]b) -20 <0041> ] TJ /Span << /MCID 0 /Lang (de) >> BDC'
-  const t = contentTokens(s, true)
+  const t = contentTokens(s)
   expect(t[0].kind).toBe('array')
   expect(t[0].items!.map((x) => x.raw)).toEqual(['(a]b)', '-20', '<0041>'])
   for (const x of t[0].items!) expect(s.slice(x.start, x.end)).toBe(x.raw)
-  expect(() => contentTokens('['.repeat(20) + ']'.repeat(20), true)).toThrow()
-  expect(() => contentTokens('[1 2]')).toThrow() // strict legacy mode remains strict
+  expect(() => contentTokens('['.repeat(20) + ']'.repeat(20))).toThrow()
 })
 test('original ligature glyphs stay byte-identical and are never silently split into missing letters', async () => {
   const d = await PDFDocument.create()

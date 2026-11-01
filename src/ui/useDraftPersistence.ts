@@ -3,6 +3,7 @@ import type { DocumentSession } from '../core/documentSession'
 import type { EditorStore } from '../core/editorStore'
 import { DraftSaver } from '../core/persistence/draftSaver'
 import {
+  draftSizeBytes,
   listDrafts,
   openDraftDb,
   type DraftRecord,
@@ -20,7 +21,7 @@ function draftSummary(record: DraftRecord): DraftSummary {
     id: record.id,
     name: record.name,
     updatedAt: record.updatedAt,
-    sizeBytes: record.pdfBytes.byteLength + (record.pageSources ?? []).filter(source => record.pages?.some(page => page.sourceId === source.id)).reduce((size, source) => size + source.bytes.byteLength, 0),
+    sizeBytes: draftSizeBytes(record),
     overlayCount: record.overlays.length,
   }
 }

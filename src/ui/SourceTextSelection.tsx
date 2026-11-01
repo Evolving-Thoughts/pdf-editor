@@ -13,12 +13,12 @@ interface Props {
   onSelect: (value: DirectSelection) => void
   onReject: (text: string) => void
   /** Blocks with an inline editor model; a click opens it at that point. */
-  blocks?: ReadonlySet<string>
+  blocks: ReadonlySet<string>
   /** Block currently edited inline (drawn by the editor instead). */
   editing?: string
   /** Blocks with an unchecked draft (drawn by a passive editor instead). */
-  drafted?: ReadonlySet<string>
-  onBlock?: (id: string, from?: { x: number; y: number }, to?: { x: number; y: number }) => void
+  drafted: ReadonlySet<string>
+  onBlock: (id: string, from?: { x: number; y: number }, to?: { x: number; y: number }) => void
 }
 
 export function SourceTextSelection({ runs, size, fragments, selection, onSelect, onReject, blocks, editing, drafted, onBlock }: Props) {
@@ -60,10 +60,10 @@ export function SourceTextSelection({ runs, size, fragments, selection, onSelect
     const r = layer.current!.getBoundingClientRect()
     return { x: ((event.clientX - r.left) / r.width) * size.width - transform[4], y: transform[5] - ((event.clientY - r.top) / r.height) * size.height }
   }
-  const inline = (run: SourceRun) => { const id = run.selection?.groupId; return id && blocks?.has(id) && onBlock ? id : undefined }
+  const inline = (run: SourceRun) => { const id = run.selection?.groupId; return id && blocks.has(id) ? id : undefined }
   function choose(run: SourceRun, at?: { x: number; y: number }) {
     const id = inline(run)
-    if (id) { onBlock!(id, at); return }
+    if (id) { onBlock(id, at); return }
     const value = directSelection(selectable.find(value => value.id === run.id))
     if (value) onSelect(value)
   }
@@ -78,7 +78,7 @@ export function SourceTextSelection({ runs, size, fragments, selection, onSelect
     const id = startRun && inline(startRun)
     if (id && endRun && inline(endRun) === id) {
       native.removeAllRanges()
-      onBlock!(id, downAt.current, lastUp.current)
+      onBlock(id, downAt.current, lastUp.current)
       return
     }
     if (!start || !end) {
@@ -112,7 +112,7 @@ export function SourceTextSelection({ runs, size, fragments, selection, onSelect
     {order.map(first => {
       const id = first.run.selection?.groupId
       if (!id) return hit(first, true)
-      if (id === editing || drafted?.has(id)) return null
+      if (id === editing || drafted.has(id)) return null
       const members = groups.get(id)!
       const x = Math.min(...members.map(b => b.x)), y = Math.min(...members.map(b => b.y))
       const width = Math.max(...members.map(b => b.x + b.width)) - x, height = Math.max(...members.map(b => b.y + b.height)) - y
@@ -126,7 +126,7 @@ export function SourceTextSelection({ runs, size, fragments, selection, onSelect
     const run = b.run, active = selection?.runId === run.id
     const grouped = !!run.selection?.groupId
     const label = grouped ? `${run.paragraph!.lineCount > 1 ? 'Absatz' : 'Zeile'} auswählen: ${run.paragraph!.text.slice(0, 120)}` : `Textstelle auswählen: ${run.text}`
-    const title = grouped ? 'Zusammenhängender Absatz · klicken wählt den ganzen Block, Markieren wählt einen Teil' : 'Nur dieses Textfragment unterstützt · markieren oder mit Enter auswählen'
+    const title = grouped ? 'Zusammenhängender Absatz · klicken öffnet ihn zum Bearbeiten' : 'Nur dieses Textfragment unterstützt · markieren oder mit Enter auswählen'
     const focusable = !grouped || primary
     return <div key={run.id} className={`source-run-hit ${grouped ? 'source-member' : ''} ${grouped ? 'source-paragraph' : 'source-fragment'} ${!grouped && active ? 'source-picked' : ''}`} data-source-id={run.id} role={focusable ? 'button' : undefined} aria-hidden={focusable ? undefined : true} tabIndex={focusable ? 0 : -1} aria-label={focusable ? label : undefined} title={title} style={{ left: percent(b.x), top: percent(b.y, 'y'), width: percent(b.width), height: percent(b.height, 'y') }} onKeyDown={event => {
       if (event.key === 'Enter' || event.key === ' ') { event.preventDefault(); choose(run) }
