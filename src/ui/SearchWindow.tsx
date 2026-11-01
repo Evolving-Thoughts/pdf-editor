@@ -10,6 +10,8 @@ import {
 import { isTextbox, type Overlay } from '../core/model'
 import { resolvedOverlayClips } from '../core/overlayClipping'
 import type { DocumentPage } from '../core/pages'
+import { TEXT_LINE_HEIGHT } from '../core/textLayout'
+import { FONT_CSS } from './fontStacks'
 
 // Browser font measurement follows the editor fonts. PDF substring advances
 // are font-measured estimates (PDF.js does not expose individual glyph advances).
@@ -23,7 +25,7 @@ function overlayGroups(
     const pageIndex = pages.findIndex((page) => page.id === box.pageId)
     const size = sizes[pageIndex]
     if (!size || !context) return []
-    context.font = `${box.italic ? 'italic' : 'normal'} ${box.bold ? 'bold' : 'normal'} ${box.fontSize}px ${box.font === 'times' ? 'Times New Roman' : box.font === 'courier' ? 'Courier New' : 'Arial'}`
+    context.font = `${box.italic ? 'italic' : 'normal'} ${box.bold ? 'bold' : 'normal'} ${box.fontSize}px ${FONT_CSS[box.font]}`
     const angle = ((box.rotation ?? 0) * Math.PI) / 180,
       cos = Math.cos(angle),
       sin = Math.sin(angle)
@@ -35,7 +37,7 @@ function overlayGroups(
       .split('\n')
       .map((text, line) => {
         const width = context.measureText(text).width,
-          top = line * box.fontSize * 1.2 - box.fontSize * 0.85,
+          top = line * box.fontSize * TEXT_LINE_HEIGHT - box.fontSize * 0.85,
           bottom = top + box.fontSize
         const advances =
           width > 0
