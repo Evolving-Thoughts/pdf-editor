@@ -7,6 +7,18 @@ const SAVE_DELAY_MS = 500
 
 interface OpenDraft { id: string; name: string; createdAt: number; bytes: ArrayBuffer }
 
+/** The user chose to keep the document that could not be saved. */
+export class UnsavedDraftError extends Error {}
+
+/** Leaving a document saves it first. If that fails, only the user can decide to lose the changes. */
+export async function saveBeforeLeaving(save: () => Promise<unknown>, discard: (problem: unknown) => boolean) {
+  try {
+    await save()
+  } catch (problem) {
+    if (!discard(problem)) throw new UnsavedDraftError()
+  }
+}
+
 export class DraftSaver {
   private db: IDBDatabase | null = null
   private tail: Promise<unknown> = Promise.resolve()

@@ -1,7 +1,7 @@
 import 'fake-indexeddb/auto'
 import { afterEach, beforeEach, expect, test, vi } from 'vitest'
 import type { EditorState } from '../../../src/core/model'
-import { DraftSaver } from '../../../src/core/persistence/draftSaver'
+import { DraftSaver, saveBeforeLeaving, UnsavedDraftError } from '../../../src/core/persistence/draftSaver'
 import { deleteDraft, listDrafts, loadDraft, openDraftDb } from '../../../src/core/persistence/drafts'
 
 let state: EditorState, draft: { id: string; name: string; createdAt: number; bytes: ArrayBuffer } | null, saver: DraftSaver, db: IDBDatabase | undefined
@@ -76,4 +76,18 @@ test('rapid changes end up as one save, and a pause or stop cancels it', () => {
   saver.stop()
   vi.advanceTimersByTime(1000)
   expect(save).toHaveBeenCalledOnce()
+})
+
+test('leaving saves first and asks nothing when that works', async () => {
+  const discard = vi.fn(() => false)
+  await saveBeforeLeaving(async () => undefined, discard)
+  expect(discard).not.toHaveBeenCalled()
+})
+
+test('a failed save keeps the document unless the user discards it', async () => {
+  const failing = async () => { throw new Error('voll') }
+  await expect(saveBeforeLeaving(failing, () => false)).rejects.toBeInstanceOf(UnsavedDraftError)
+  const discard = vi.fn(() => true)
+  await expect(saveBeforeLeaving(failing, discard)).resolves.toBeUndefined()
+  expect(discard).toHaveBeenCalledWith(expect.objectContaining({ message: 'voll' }))
 })

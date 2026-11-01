@@ -38,6 +38,7 @@ import { DrawingToolbar } from './DrawingToolbar'
 import { PageView } from './PageView'
 import { VirtualPage } from './VirtualPage'
 import { EditorViews } from '../core/editorViews'
+import { saveBeforeLeaving, UnsavedDraftError } from '../core/persistence/draftSaver'
 import { largestVisiblePage, polygonCenter, scrollToPoint, visibleCenter } from '../core/pageViewport'
 import { arrowStep, nudgeCommand } from '../core/overlayGesture'
 import { PagesManager } from './PagesManager'
@@ -47,9 +48,6 @@ import { renderStampImage } from './stampImage'
 import { stampOverlay } from '../core/stamps'
 import type { Tool } from './tools'
 import './app.css'
-
-/** The current draft could not be saved: it stays open, and that has been reported. */
-class UnsavedDraftError extends Error {}
 
 export default function App() {
   const [views] = useState(() => new EditorViews())
@@ -170,12 +168,17 @@ export default function App() {
     setPasswordRequest({ fileName, error: problem, resolve: finish })
   }), [])
 
+  const saveCurrentDraft = useCallback(() => saveBeforeLeaving(persistActiveDraft, (problem) => {
+    reportDraftProblem(problem, 'Der bisherige Entwurf konnte nicht gespeichert werden.')
+    return window.confirm('Der bisherige Entwurf konnte nicht gespeichert werden, zum Beispiel weil der Speicher voll ist. Ungespeicherte Änderungen verwerfen und trotzdem öffnen?')
+  }), [persistActiveDraft, reportDraftProblem])
+
   const onOpenFile = useCallback(
     async (file: File) => {
       passwordPending.current?.(null)
       setError(null)
       try {
-        if (!await session.openFile(file, { save: persistActiveDraft, beforeReplace: pauseSaving, askPassword })) return
+        if (!await session.openFile(file, { save: saveCurrentDraft, beforeReplace: pauseSaving, askPassword })) return
         resetView()
         void persistActiveDraft().catch((problem) =>
           reportDraftProblem(
@@ -184,6 +187,7 @@ export default function App() {
           ),
         )
       } catch (problem) {
+        if (problem instanceof UnsavedDraftError) return
         setError(
           problem instanceof IncorrectPasswordError
             ? problem.message
@@ -191,7 +195,7 @@ export default function App() {
         )
       }
     },
-    [askPassword, pauseSaving, persistActiveDraft, reportDraftProblem, resetView, session],
+    [askPassword, pauseSaving, persistActiveDraft, reportDraftProblem, resetView, saveCurrentDraft, session],
   )
 
   const onOpenDraft = useCallback(
@@ -200,10 +204,7 @@ export default function App() {
       setError(null)
       try {
         const outcome = await session.openDraft(id, {
-          save: () => persistActiveDraft().catch((problem) => {
-            reportDraftProblem(problem, 'Der bisherige Entwurf konnte nicht gespeichert werden. Er bleibt geöffnet.')
-            throw new UnsavedDraftError()
-          }),
+          save: saveCurrentDraft,
           read: () => saver.queue(db => loadDraft(db, id)),
           beforeReplace: pauseSaving,
         })
@@ -216,7 +217,7 @@ export default function App() {
         if (!(problem instanceof UnsavedDraftError)) setError('Der Entwurf konnte nicht geöffnet werden.')
       }
     },
-    [forgetDraft, pauseSaving, persistActiveDraft, reportDraftProblem, resetView, saver, session],
+    [forgetDraft, pauseSaving, resetView, saveCurrentDraft, saver, session],
   )
 
   const onDeleteDraft = useCallback(
