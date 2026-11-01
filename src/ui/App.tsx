@@ -37,6 +37,7 @@ import { TablePanel } from './TablePanel'
 import { DrawingToolbar } from './DrawingToolbar'
 import { PageView } from './PageView'
 import { VirtualPage } from './VirtualPage'
+import { EditorViews } from '../core/editorViews'
 import { arrowStep, nudgeCommand } from '../core/overlayGesture'
 import { PagesManager } from './PagesManager'
 import { pageSize, type DocumentPage } from '../core/pages'
@@ -47,13 +48,14 @@ import type { Tool } from './tools'
 import './app.css'
 
 export default function App() {
-  const [sourceTextOpen, setSourceTextOpen] = useState(false)
+  const [views] = useState(() => new EditorViews())
+  useSyncExternalStore(views.subscribe, views.getVersion)
+  const { dialog: documentDialog, searchOpen } = views
+  const pageManagerOpen = views.main === 'pages', sourceTextOpen = views.main === 'sourceText', tableOpen = views.main === 'table'
   // Unchecked inline drafts of the correction panel come before document history.
   const [sourceHistory, setSourceHistory] = useState<SourceHistory | null>(null)
   const [exportDialogOpen, setExportDialogOpen] = useState(false)
   const [signedDocument, setSignedDocument] = useState<ArrayBuffer | null>(null)
-  const [documentDialog, setDocumentDialog] = useState<'info' | 'labels' | 'ocr' | 'table' | null>(null)
-  const [searchOpen, setSearchOpen] = useState(false)
   const [searchResult, setSearchResult] = useState<{
     hits: SearchHit[]
     active: number
@@ -69,14 +71,13 @@ export default function App() {
     [],
   )
   const closeSearch = useCallback(() => {
-    setSearchOpen(false)
+    views.closeSearch()
     requestAnimationFrame(() => searchButtonRef.current?.focus())
-  }, [])
+  }, [views])
 
   const [redactionFill,setRedactionFill]=useState<Redaction['fill']>('black')
   const [highlightFields, setHighlightFields] = useState(true)
   const [formInfo, setFormInfo] = useState<{ pages: DocumentPage[]; widgets: NativeWidget[]; unsupported: string[] } | null>(null)
-  const [pageManagerOpen, setPageManagerOpen] = useState(false)
   const [cropActive, setCropActive] = useState(false)
   const [zoom, setZoom] = useState(1)
   const [tool, setTool] = useState<Tool>('select')
@@ -100,20 +101,19 @@ export default function App() {
   useSyncExternalStore(store.subscribe, store.getVersion)
   const [session] = useState(() => new DocumentSession(store, loadPdf))
   useSyncExternalStore(session.subscribe, session.getVersion)
-  const returnPageRef = useRef<number | null>(null)
   const visiblePageIndex = useCallback(() => {
     const scroller = workspaceRef.current?.querySelector<HTMLElement>('.pages')
-    if (!scroller) return session.viewedPage
+    if (!scroller) return views.viewedPage
     const view = scroller.getBoundingClientRect()
-    let best = session.viewedPage, area = 0
+    let best = views.viewedPage, area = 0
     for (const page of scroller.querySelectorAll<HTMLElement>('.page[data-page-index]')) {
       const rect = page.getBoundingClientRect()
       const visible = Math.max(0, Math.min(rect.bottom, view.bottom) - Math.max(rect.top, view.top)) * Math.max(0, Math.min(rect.right, view.right) - Math.max(rect.left, view.left))
       if (visible > area) { area = visible; best = Number(page.dataset.pageIndex) }
     }
     return best
-  }, [session])
-  const onViewedPage = useCallback((index: number) => { session.rememberPage(index) }, [session])
+  }, [views])
+  const onViewedPage = useCallback((index: number) => { views.rememberPage(index) }, [views])
 
   const { pdf, activeDraftId, loadingDraftId, busy, pagesStale: pageBusy, original: originalBytes } = session
   const redactionBusy = session.running('redacting'), openingFile = session.running('opening')
@@ -144,7 +144,6 @@ export default function App() {
     })
     return () => { cancelled = true }
   }, [originalBytes])
-  const tableOpen = documentDialog === 'table'
   const { checkExport, prepareExport, downloadExport } = useExportFlow(store, session, pageBusy)
   useEffect(() => session.refreshPages(problem => {
     setError(problem instanceof Error ? problem.message : 'Die Seiten konnten nicht aktualisiert werden.')
@@ -158,15 +157,12 @@ export default function App() {
   },[pdf,shapePage])
 
   const resetView = useCallback(() => {
-    setSourceTextOpen(false)
-    setSearchOpen(false)
+    views.reset()
     setSelectedId(null)
     setTool('select')
     setRedactionFill('black')
-    setPageManagerOpen(false)
     setCropActive(false)
-    setDocumentDialog(null)
-  }, [])
+  }, [views])
 
   const askPassword = useCallback((fileName: string, problem: string | null) => new Promise<string | null>((resolve) => {
     const finish = (value: string | null) => {
@@ -309,7 +305,7 @@ export default function App() {
       if (target.closest('dialog')) return
       if (sourceTextOpen || busy || pageBusy || (pageManagerOpen && cropActive)) return
       if (pdf && (event.ctrlKey || event.metaKey) && event.key.toLowerCase()==='f') {
-        event.preventDefault();setPageManagerOpen(false);setSelectedId(null);setSearchOpen(true);return
+        event.preventDefault();views.openSearch(visiblePageIndex());setSelectedId(null);return
       }
       if (target.closest('textarea, input, select, [contenteditable]')) return
       if (event.key === 'Escape') {
@@ -354,7 +350,7 @@ export default function App() {
     }
     window.addEventListener('keydown', onKeyDown)
     return () => window.removeEventListener('keydown', onKeyDown)
-  }, [sourceTextOpen, store, selectedId, pageBusy, pageManagerOpen, cropActive, busy, pdf])
+  }, [sourceTextOpen, store, selectedId, pageBusy, pageManagerOpen, cropActive, busy, pdf, views, visiblePageIndex])
 
   const placeStamp = useCallback((pageId: string, point: { x: number; y: number }, page: { width: number; height: number }) => {
     if (!stamp) return
@@ -400,7 +396,7 @@ export default function App() {
   )
 
   useEffect(() => {
-    const index = returnPageRef.current
+    const index = views.returnPage
     if (index === null || pageManagerOpen || sourceTextOpen || tableOpen || pageBusy || !pdf) return
     let frame = 0, tries = 0
     // Page boxes get their size once the page geometry is known: retry briefly.
@@ -409,19 +405,18 @@ export default function App() {
       const page = scroller?.querySelector<HTMLElement>(`.page[data-page-index="${index}"]`)
       if (scroller && page && page.offsetHeight > 0) {
         scroller.scrollTop += page.getBoundingClientRect().top - scroller.getBoundingClientRect().top - 12
-        returnPageRef.current = null
+        views.returned()
         if (tries++ < 3) frame = requestAnimationFrame(scroll)
         else return
       } else if (tries++ < 30) frame = requestAnimationFrame(scroll)
     }
     frame = requestAnimationFrame(scroll)
     return () => cancelAnimationFrame(frame)
-  }, [pageManagerOpen, sourceTextOpen, tableOpen, pageBusy, pdf])
+  }, [pageManagerOpen, sourceTextOpen, tableOpen, pageBusy, pdf, views])
 
   const jumpToIssue = useCallback((issue: TextIssue) => {
     setExportDialogOpen(false)
-    setPageManagerOpen(false)
-    setSourceTextOpen(false)
+    views.showDocument()
     setTool('select')
     setSelectedId(issue.overlayId)
     requestAnimationFrame(() => workspaceRef.current?.querySelector(`.page[data-page-index="${issue.pageIndex}"]`)?.scrollIntoView({ block: 'center' }))
@@ -544,10 +539,10 @@ export default function App() {
                 {!pageManagerOpen && <DocumentMenu
                   disabled={pageBusy || cropActive || redactions.length > 0}
                   items={[
-                    { label: 'Dokumentinfo …', onSelect: () => setDocumentDialog('info') },
-                    { label: 'Seitenzahlen, Kopf- und Fußzeile …', onSelect: () => { setSourceTextOpen(false); setDocumentDialog('labels') } },
-                    { label: 'Text erkennen (OCR) …', onSelect: () => { if (!sourceTextOpen) session.rememberPage(visiblePageIndex()); setSourceTextOpen(false); setDocumentDialog('ocr') } },
-                    { label: 'Tabelle exportieren …', onSelect: () => { if (!sourceTextOpen) session.rememberPage(visiblePageIndex()); setSourceTextOpen(false); setSearchOpen(false); setSelectedId(null); setTool('select'); setDocumentDialog('table') } },
+                    { label: 'Dokumentinfo …', onSelect: () => views.openDialog('info', visiblePageIndex()) },
+                    { label: 'Seitenzahlen, Kopf- und Fußzeile …', onSelect: () => views.openDialog('labels', visiblePageIndex()) },
+                    { label: 'Text erkennen (OCR) …', onSelect: () => views.openDialog('ocr', visiblePageIndex()) },
+                    { label: 'Tabelle exportieren …', onSelect: () => { views.openTable(visiblePageIndex()); setSelectedId(null); setTool('select') } },
                   ]}
                 />}
               </>
@@ -567,14 +562,9 @@ export default function App() {
                   aria-pressed={pageManagerOpen}
                   disabled={pageBusy || redactions.length > 0}
                   onClick={() => {
-                    if (!pageManagerOpen && !sourceTextOpen && !tableOpen) session.rememberPage(visiblePageIndex())
-                    if (pageManagerOpen) returnPageRef.current = session.viewedPage
-                    setDocumentDialog(null)
-                    setSourceTextOpen(false)
-                    setSearchOpen(false)
+                    views.togglePages(visiblePageIndex())
                     setSelectedId(null)
                     setCropActive(false)
-                    setPageManagerOpen((open) => !open)
                   }}
                 >
                   {pageManagerOpen
@@ -587,11 +577,8 @@ export default function App() {
                   disabled={pageBusy || cropActive}
                   aria-pressed={searchOpen}
                   onClick={() => {
-                    setDocumentDialog(null)
-                    setSourceTextOpen(false)
-                    setPageManagerOpen(false)
+                    views.toggleSearch(visiblePageIndex())
                     setSelectedId(null)
-                    setSearchOpen((open) => !open)
                   }}
                   title="Im Dokument suchen (Strg/⌘+F)"
                 >
@@ -617,7 +604,7 @@ export default function App() {
                   </div>
                 )}
               </div>
-              {!pageManagerOpen && <button aria-label={sourceTextOpen ? undefined : 'Originaltext korrigieren'} title={sourceTextOpen ? 'Textkorrektur schließen und zur normalen Ansicht zurückkehren' : 'Originaltext in derselben Schrift korrigieren'} disabled={pageBusy || cropActive || !!redactions.length} aria-pressed={sourceTextOpen} onClick={() => { if (sourceTextOpen) returnPageRef.current = session.viewedPage; else if (!tableOpen) session.rememberPage(visiblePageIndex()); setDocumentDialog(null); setPageManagerOpen(false); setSearchOpen(false); setSelectedId(null); setTool('select'); setSourceTextOpen(value => !value) }}>{sourceTextOpen ? 'Zur Dokumentbearbeitung' : 'Textkorrektur'}</button>}
+              {!pageManagerOpen && <button aria-label={sourceTextOpen ? undefined : 'Originaltext korrigieren'} title={sourceTextOpen ? 'Textkorrektur schließen und zur normalen Ansicht zurückkehren' : 'Originaltext in derselben Schrift korrigieren'} disabled={pageBusy || cropActive || !!redactions.length} aria-pressed={sourceTextOpen} onClick={() => { views.toggleSourceText(visiblePageIndex()); setSelectedId(null); setTool('select') }}>{sourceTextOpen ? 'Zur Dokumentbearbeitung' : 'Textkorrektur'}</button>}
               <div
                 className="toolbar-history"
                 role="group"
@@ -717,9 +704,9 @@ export default function App() {
       {openingFile && <p role="status" className="hint">PDF wird geöffnet …</p>}
       <div className="workspace" ref={workspaceRef} inert={exportDialogOpen || busy}>
         {pdf && searchOpen && !pageManagerOpen && !pageBusy && <SearchWindow pdf={pdf} overlays={overlays} pages={documentPages ?? []} onClose={closeSearch} onHits={onSearchHits} onJump={onSearchJump}/>}
-        {pdf && pageManagerOpen && originalBytes && <PagesManager nativeWidgets={nativeWidgets} key={activeDraftId} pdf={pdf} store={store} original={originalBytes} busy={pageBusy} onCropActive={setCropActive} initialPage={session.viewedPage} onPage={onViewedPage} />}
-        {pdf && sourceTextOpen && originalBytes && !pageBusy && <SourceTextPanel key={activeDraftId} store={store} original={originalBytes} initialPage={session.viewedPage} onPage={onViewedPage} onClose={() => { returnPageRef.current = session.viewedPage; setSourceTextOpen(false) }} onHistory={setSourceHistory} />}
-        {pdf && tableOpen && documentPages && <TablePanel key={activeDraftId} pdf={pdf} pages={documentPages} fileName={pdf.fileName} initialPage={session.viewedPage} onClose={() => { returnPageRef.current = session.viewedPage; setDocumentDialog(null) }} />}
+        {pdf && pageManagerOpen && originalBytes && <PagesManager nativeWidgets={nativeWidgets} key={activeDraftId} pdf={pdf} store={store} original={originalBytes} busy={pageBusy} onCropActive={setCropActive} initialPage={views.viewedPage} onPage={onViewedPage} />}
+        {pdf && sourceTextOpen && originalBytes && !pageBusy && <SourceTextPanel key={activeDraftId} store={store} original={originalBytes} initialPage={views.viewedPage} onPage={onViewedPage} onClose={() => views.closeMain()} onHistory={setSourceHistory} />}
+        {pdf && tableOpen && documentPages && <TablePanel key={activeDraftId} pdf={pdf} pages={documentPages} fileName={pdf.fileName} initialPage={views.viewedPage} onClose={() => views.closeMain()} />}
         {!pageManagerOpen && !sourceTextOpen && !tableOpen && <>
         {pageBusy && <p role="status" className="hint">Seitenansicht wird aktualisiert …</p>}
         {pdf && !pageBusy && (
@@ -771,9 +758,9 @@ export default function App() {
         </>}
       </div>
       {exportDialogOpen && <ExportDialog onCancel={()=>setExportDialogOpen(false)} onCheck={checkExport} onJump={jumpToIssue} onPrepare={prepareExport} onDownload={downloadExport}/> }
-      {documentDialog === 'info' && originalBytes && <DocumentInfoDialog original={originalBytes} edit={store.state.metadata} onApply={edit => store.dispatch(setMetadataCommand(store.state.metadata, edit))} onClose={() => setDocumentDialog(null)} />}
-      {documentDialog === 'labels' && pdf && <PageLabelsDialog pdf={pdf} store={store} onClose={() => setDocumentDialog(null)} />}
-      {documentDialog === 'ocr' && pdf && <OcrDialog pdf={pdf} store={store} initialPage={session.viewedPage} onClose={() => setDocumentDialog(null)} />}
+      {documentDialog === 'info' && originalBytes && <DocumentInfoDialog original={originalBytes} edit={store.state.metadata} onApply={edit => store.dispatch(setMetadataCommand(store.state.metadata, edit))} onClose={() => views.closeDialog()} />}
+      {documentDialog === 'labels' && pdf && <PageLabelsDialog pdf={pdf} store={store} onClose={() => views.closeDialog()} />}
+      {documentDialog === 'ocr' && pdf && <OcrDialog pdf={pdf} store={store} initialPage={views.viewedPage} onClose={() => views.closeDialog()} />}
       {passwordRequest && <PasswordDialog key={passwordEpoch} request={passwordRequest}/>}
       {pdf && !pageManagerOpen && !sourceTextOpen && !tableOpen && !pageBusy && (
         <footer

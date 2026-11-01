@@ -48,9 +48,6 @@ export class DocumentSession {
   /** Stays while saving is suspended; only closing ends the document. */
   activeDraftId: string | null = null
   original: ArrayBuffer | null = null
-  /** Page shown before switching to the page manager or the text correction: both
-   * views open there, and the normal view returns to it. Never a reason to re-render. */
-  viewedPage = 0
   private renderedPages: DocumentPage[] | undefined
   private activities = new Map<Activity, { draftId?: string }>()
   private epoch = 0
@@ -76,10 +73,6 @@ export class DocumentSession {
   private changed() {
     this.version += 1
     this.listeners.forEach(listener => listener())
-  }
-
-  rememberPage(index: number) {
-    this.viewedPage = index
   }
 
   get busy(): boolean { return this.activities.size > 0 }
