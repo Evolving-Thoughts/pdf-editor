@@ -223,6 +223,26 @@ try {
   await btn('Suchen').click()
   await query('OverlayUnique', 1)
   await query('Antrag', 4)
+  const hitCount = (count) =>
+    p.waitForFunction(
+      (count) =>
+        document
+          .querySelector('.search-controls [role=status]')
+          ?.textContent.endsWith(`/ ${count}`),
+      count,
+    )
+  await page.scrollIntoViewIfNeeded()
+  await btn('T Text').click()
+  const live = await page.boundingBox()
+  await p.mouse.click(live.x + 70, live.y + 230)
+  await p.locator('.textbox textarea:focus').waitFor()
+  await p.locator('.textbox textarea:focus').fill('Antrag live')
+  await input().click()
+  await hitCount(5)
+  while ((await p.locator('.textbox').count()) > 1) {
+    await btn('Rückgängig').click()
+  }
+  await hitCount(4)
   await btn('Suche schließen').click()
   await btn('Speichern').click()
   await p.waitForFunction(() =>

@@ -1,6 +1,7 @@
 // Command stack for unlimited undo/redo (ADR-002).
 // Every state change goes through a reversible Command; no direct mutations
 // from the UI. A running gesture is only a preview in its view.
+// Commands replace the overlay list and changed overlays: views compare by reference.
 import type { EditorState, ImageOverlay, Overlay, Textbox } from './model'
 import type { ShapeChanges } from './shapes'
 import { cloneOverlay, isMarker, isStroke } from './model'
@@ -65,7 +66,7 @@ export function addOverlay(overlay: Overlay): Command {
   return {
     label: 'Add overlay',
     apply: (s) => {
-      s.overlays.push(cloneOverlay(snapshot))
+      s.overlays = [...s.overlays, cloneOverlay(snapshot)]
     },
     revert: (s) => {
       s.overlays = s.overlays.filter((o) => o.id !== snapshot.id)
@@ -109,8 +110,8 @@ export function removeOverlay(overlay: Overlay): Command {
     },
     revert: (s) => {
       const restored = cloneOverlay(snapshot)
-      if (index >= 0 && index <= s.overlays.length) s.overlays.splice(index, 0, restored)
-      else s.overlays.push(restored)
+      const at = index >= 0 && index <= s.overlays.length ? index : s.overlays.length
+      s.overlays = [...s.overlays.slice(0, at), restored, ...s.overlays.slice(at)]
     },
   }
 }
@@ -122,8 +123,7 @@ type OverlayChanges = Partial<Textbox> | ImageChanges | ShapeChanges
 export function updateOverlay(id: string, before: OverlayChanges, after: OverlayChanges): Command {
   const from = { ...before }, to = { ...after }
   const patch = (state: EditorState, changes: OverlayChanges) => {
-    const overlay = state.overlays.find((o) => o.id === id)
-    if (overlay) Object.assign(overlay, changes)
+    state.overlays = state.overlays.map((o) => (o.id === id ? ({ ...o, ...changes } as Overlay) : o))
   }
   return { label: 'Edit overlay', apply: (s) => patch(s, to), revert: (s) => patch(s, from) }
 }
