@@ -231,9 +231,20 @@ try {
           ?.textContent.endsWith(`/ ${count}`),
       count,
     )
-  await page.scrollIntoViewIfNeeded()
+  // The jump to a hit swaps pages for placeholders, so settle before measuring.
+  await p
+    .locator('.pages .page-slot')
+    .nth(2)
+    .evaluate((el) => el.scrollIntoView({ block: 'center' }))
+  await p.waitForFunction(
+    () =>
+      document.querySelector('.pages .page[data-page-index="2"] canvas')?.width >
+      0,
+  )
   await btn('T Text').click()
-  const live = await page.boundingBox()
+  const live = await p
+    .locator('.pages .page[data-page-index="2"]')
+    .boundingBox()
   await p.mouse.click(live.x + 70, live.y + 230)
   await p.locator('.textbox textarea:focus').waitFor()
   await p.locator('.textbox textarea:focus').fill('Antrag live')
