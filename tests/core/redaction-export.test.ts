@@ -69,7 +69,7 @@ test('extracting only an unaffected page from a redacted document also removes u
  const {PDFName}=await import('pdf-lib'),{exportPageDocument}=await import('../../src/core/pdf/pageOperations'),doc=await PDFDocument.create();doc.addPage([400,600]);const b=doc.addPage([400,600]);b.drawText('PUBLIC')
  b.node.Resources()!.set(PDFName.of('XObject'),doc.context.obj({Unused:doc.context.register(doc.context.flateStream('SECRET-SUBSET',{Type:'XObject',Subtype:'Form',BBox:[0,0,20,20]}))}))
  const original=await doc.save(),pages=await inspectPages(original,'fixture'),result=await writeRasterSource([{page:pages[0],png}])
- const output=await PDFDocument.load(await exportPageDocument(original,[result.source],[result.replacements[0],pages[1]],[],pages[1].id))
+ const output=await PDFDocument.load(await exportPageDocument(original,[result.source],[result.replacements[0],pages[1]],[],{pageId:pages[1].id}))
  expect(output.getPageCount()).toBe(1);expect(decodedStreams(output)).not.toContain('SECRET-SUBSET')
 })
 
@@ -78,7 +78,7 @@ test('sticky secure mode remains effective when the last rasterized page was rem
  a.node.Resources()!.set(PDFName.of('XObject'),doc.context.obj({Unused:doc.context.register(doc.context.flateStream('SECRET-AFTER-DELETE',{Type:'XObject',Subtype:'Form',BBox:[0,0,20,20]}))}))
  const original=await doc.save(),pages=await inspectPages(original,'fixture')
  // This looks like an unchanged original page tree; secure mode must still bypass the fast path.
- const output=await PDFDocument.load(await composePages(original,[],pages,{},true))
+ const output=await PDFDocument.load(await composePages(original,[],pages,{secure:true}))
  expect(decodedStreams(output)).not.toContain('SECRET-AFTER-DELETE')
 })
 

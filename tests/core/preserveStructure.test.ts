@@ -129,12 +129,12 @@ test('appended documents bring their outline along, behind the first', async () 
 
 test('a page extracted on its own keeps only its own entry', async () => {
   const { bytes, pages } = await fixture()
-  expect((await outline(await exportPageDocument(bytes, [], pages, [], [pages[2].id]))).map(item => item.title)).toEqual(['Kapitel 3'])
+  expect((await outline(await exportPageDocument(bytes, [], pages, [], { pageId: [pages[2].id] }))).map(item => item.title)).toEqual(['Kapitel 3'])
 })
 
 test('a redacted export carries no outline and no tags', async () => {
   const { bytes, pages } = await fixture()
-  const output = await composePages(bytes, [], [pages[1], pages[0], pages[2]], {}, true)
+  const output = await composePages(bytes, [], [pages[1], pages[0], pages[2]], { secure: true })
   expect(await outline(output)).toEqual([])
   expect(await tagged(output)).toBe('none')
   expect(text(output)).not.toContain('Kapitel')

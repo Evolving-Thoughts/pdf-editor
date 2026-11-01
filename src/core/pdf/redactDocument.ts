@@ -10,7 +10,7 @@ export async function prepareRedaction(original: Uint8Array, state: EditorState)
   const overlays = state.overlays.map(cloneOverlay), sources = [...(state.pageSources ?? [])], values = state.formValues ? structuredClone(state.formValues) : undefined
   validateRedactions(marks, pages)
   // Rasterize exactly what is visible, including native values and prior overlays. They must not survive as recoverable objects on these pages.
-  const bytes = await exportPageDocument(original, sources, pages, overlays, undefined, values, isSecure(state))
+  const bytes = await exportPageDocument(original, sources, pages, overlays, { formValues: values, secure: isSecure(state) })
   const pdf = await loadPdf('Schwärzung', bytes), rows: RasterPage[] = [], newText: Textbox[] = []
   try {
     for (const [index, page] of pages.entries()) {
@@ -22,7 +22,7 @@ export async function prepareRedaction(original: Uint8Array, state: EditorState)
     const result = await writeRasterSource(rows)
     const replacements = new Map(result.replacements.map(page => [page.id, page]))
     // Validate the complete secure export before publishing any live change.
-    await composePages(original, [...sources, result.source], pages.map(page => replacements.get(page.id) ?? page), values, true)
+    await composePages(original, [...sources, result.source], pages.map(page => replacements.get(page.id) ?? page), { formValues: values, secure: true })
     return { ...result, newText }
   } finally { await pdf.destroy() }
 }

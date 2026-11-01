@@ -3,6 +3,8 @@ import { assignEditorState, cloneOverlay, copyEditorState, isStroke, isTextbox, 
 import { assertPageBudget, assertSourceBudget } from './pdf/documentBudget'
 import { renumberLabels } from './labelNumbers'
 
+export const XFA_UNSUPPORTED = 'XFA-Formulare werden bei Seitenoperationen noch nicht unterstützt.'
+
 export const A4_WIDTH = 210 * 72 / 25.4
 export const A4_HEIGHT = 297 * 72 / 25.4
 
@@ -61,7 +63,7 @@ function pageCommand(
 ): Command {
   if(state.redactions?.length)throw new Error('Vorgemerkte Schwärzungen zuerst anwenden oder verwerfen.')
   if (state.pages?.some(p => p.hasXfa))
-    throw new Error('XFA-Formulare werden bei Seitenoperationen noch nicht unterstützt.')
+    throw new Error(XFA_UNSUPPORTED)
   const before = withPages(state),
     after = withPages(state)
   mutate(after)
@@ -118,7 +120,7 @@ export function insertPages(
     new Set(pages.map((p) => p.id)).size !== pages.length
   )
     throw new Error('Doppelte Seitenkennung.')
-  if (pages.some(p => p.hasXfa)) throw new Error('XFA-Formulare werden bei Seitenoperationen noch nicht unterstützt.')
+  if (pages.some(p => p.hasXfa)) throw new Error(XFA_UNSUPPORTED)
   assertPageBudget((state.pages?.length ?? 0) + pages.length)
   if (!state.pageSources?.some(existing => existing.id === source.id))
     assertSourceBudget((state.pageSources ?? []).reduce((total, existing) => total + existing.bytes.byteLength, originalBytes), source.bytes.byteLength)

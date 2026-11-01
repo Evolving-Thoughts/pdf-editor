@@ -20,4 +20,4 @@ export const selectDocument = ({ original, state }: DocumentSnapshot, ids: reado
 
 /** The pages as the viewer shows them. Form values and overlays stay editable on top. */
 export const previewDocument = ({ original, state }: DocumentSnapshot) =>
-  composePages(original, state.pageSources ?? [], state.pages ?? [], undefined, isSecure(state))
+  composePages(original, state.pageSources ?? [], state.pages ?? [], { secure: isSecure(state) })

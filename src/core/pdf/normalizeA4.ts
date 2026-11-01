@@ -1,21 +1,21 @@
 import { PDFArray, PDFDict, PDFDocument, PDFName, PDFNumber, PDFString, PDFHexString,
   clip, concatTransformationMatrix, endPath, popGraphicsState, pushGraphicsState, rectangle,
 } from 'pdf-lib'
-import { a4Size, pageSize } from '../pages'
+import { a4Size, pageSize, XFA_UNSUPPORTED } from '../pages'
 import { cloneOverlay, isShape, isStroke, isTextbox } from '../model'
 import { capturePageClip } from '../overlayClipping'
 import { clipAnnotation } from './clipAnnotation'
-import { composePages, preparePages } from './pageOperations'
+import { carriesXfa, composePages, preparePages } from './pageOperations'
 import { isSecure, type DocumentSnapshot } from './documentOutput'
 
 /** Normalize a derived source, never the user's original bytes or live state. */
 export async function normalizeA4({ original, state }: DocumentSnapshot) {
   const pages = state.pages ?? [], overlays = state.overlays
-  if (pages.some(page => page.hasXfa)) throw new Error('XFA-Formulare werden bei Seitenoperationen noch nicht unterstützt.')
-  const bytes = await composePages(original, state.pageSources ?? [], pages, state.formValues, isSecure(state))
+  if (pages.some(page => page.hasXfa)) throw new Error(XFA_UNSUPPORTED)
+  const bytes = await composePages(original, state.pageSources ?? [], pages, { formValues: state.formValues, secure: isSecure(state) })
   const doc = await PDFDocument.load(bytes)
-  if (doc.catalog.lookupMaybe(PDFName.of('AcroForm'), PDFDict)?.has(PDFName.of('XFA')))
-    throw new Error('XFA-Formulare werden bei Seitenoperationen noch nicht unterstützt.')
+  if (carriesXfa(doc))
+    throw new Error(XFA_UNSUPPORTED)
   const factors = new Map<PDFDict, number>()
   const mapped = overlays.map(cloneOverlay)
   for (let index = 0; index < pages.length; index++) {
