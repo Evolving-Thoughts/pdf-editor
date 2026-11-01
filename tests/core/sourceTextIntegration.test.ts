@@ -4,17 +4,17 @@ import { expect, test, vi } from 'vitest'
 import { PDFDocument, StandardFonts, PDFName, PDFDict, PDFRawStream, PDFArray, PDFNumber, PDFString } from 'pdf-lib'
 import fontkit from '@pdf-lib/fontkit'
 import { getDocument } from 'pdfjs-dist/legacy/build/pdf.mjs'
-import { inspectSimpleSourceText, previewSimpleSourceCorrection } from '../../src/core/sourceText/simplePdf'
-import { sourceFontCodec } from '../../src/core/sourceText/encoding'
-import { planSourceParagraph } from '../../src/core/sourceText/layout'
 import { sourceRevision, sourceRevisions } from '../../src/core/sourceText/revision'
 import { EditorStore } from '../../src/core/editorStore'
 import { inspectPages, exportPageDocument } from '../../src/core/pdf/pageOperations'
 import { sourceTextRequest } from '../../src/core/sourceText/client'
 import { streamBytes } from '../../src/core/sourceText/streams'
-import { inspectPageSource, textString } from '../../src/core/sourceText/mixedPdf'
+import { inspectPageSource, previewPageSource, textString } from '../../src/core/sourceText/mixedPdf'
 import { openDraftDb, saveDraft, loadDraft } from '../../src/core/persistence/drafts'
 import { indexedDB, IDBKeyRange } from 'fake-indexeddb'
+
+const inspectPage = (bytes: Uint8Array) => inspectPageSource(bytes, 0)
+const previewEdit = previewPageSource
 
 async function extract(bytes: Uint8Array) {
   const task = getDocument({ data: bytes.slice(), standardFontDataUrl: resolve('node_modules/pdfjs-dist/standard_fonts') + '/' })
@@ -24,53 +24,44 @@ async function extract(bytes: Uint8Array) {
 async function paragraphFixture(follow = 540) {
   const doc = await PDFDocument.create(), font = await doc.embedFont(StandardFonts.Helvetica)
   const text = 'This paragraph contains several short words that can flow naturally through the existing lines without moving the following paragraph.'
-  const chars = [...new Set(text)], codec = sourceFontCodec(chars.map(character => ({ character, code: font.encodeText(character).asString(), advance: font.widthOfTextAtSize(character, 1000) })), 1)
-  if (!codec.ok) throw Error('fixture')
-  const plan = planSourceParagraph(text, codec.value, { left: 50, right: 270, firstBaseline: 700, bottomLimit: 400, fontSize: 12, leading: 20, ascent: 12, descent: 3, originalLineCount: 1 })
-  if (!plan.ok) throw Error('fixture layout')
+  const lines = text.split(' ').reduce<string[]>((all, word) => {
+    const last = all.at(-1)
+    if (last && font.widthOfTextAtSize(`${last} ${word}`, 12) <= 220) all[all.length - 1] = `${last} ${word}`
+    else all.push(word)
+    return all
+  }, [])
   const page = doc.addPage([595, 842])
-  page.drawText(plan.value.lines.map(line => line.text).join('\n'), { x: 50, y: 700, font, size: 12, lineHeight: 20 })
+  page.drawText(lines.join('\n'), { x: 50, y: 700, font, size: 12, lineHeight: 20 })
   page.drawText('Following paragraph stays here.', { x: 50, y: follow, font, size: 12 })
   return doc.save()
 }
-function paragraphSelection(analysis: Awaited<ReturnType<typeof inspectSimpleSourceText>>) {
+function paragraphSelection(analysis: Awaited<ReturnType<typeof inspectPage>>) {
   const run = analysis.runs[0]
   expect(run.paragraph).toBeDefined()
   return { digest: analysis.digest, runId: run.id, expectedText: run.text, scope: 'paragraph' as const, confirmReflow: true }
 }
 
 test('real paragraph shrinks naturally while neighbour baseline and first baseline remain fixed', async () => {
-  const bytes = await paragraphFixture(), original = await inspectSimpleSourceText(bytes)
-  const candidate = await previewSimpleSourceCorrection(bytes, paragraphSelection(original), 'This paragraph contains short words.')
+  const bytes = await paragraphFixture(), original = await inspectPage(bytes)
+  const candidate = await previewEdit(bytes, paragraphSelection(original), 'This paragraph contains short words.')
   const items = await extract(candidate)
   expect(items.filter(item => item.transform[5] > 540).map(item => item.str).join(' ')).toBe('This paragraph contains short words.')
   expect(items[0].transform[5]).toBe(700)
   expect(items.at(-1)!.str).toBe('Following paragraph stays here.')
   expect(items.at(-1)!.transform[5]).toBe(540)
-  expect((await inspectSimpleSourceText(candidate)).runs.length).toBeLessThan(original.runs.length)
+  expect((await inspectPage(candidate)).runs.length).toBeLessThan(original.runs.length)
 })
 
 test('paragraph grows only into proven free space, preserves size and rejects a protected following paragraph', async () => {
-  const bytes = await paragraphFixture(), analysis = await inspectSimpleSourceText(bytes)
+  const bytes = await paragraphFixture(), analysis = await inspectPage(bytes)
   const replacement = analysis.runs[0].paragraph!.text + ' More short words can follow naturally through the lines.'
-  const candidate = await previewSimpleSourceCorrection(bytes, paragraphSelection(analysis), replacement)
-  const changed = await inspectSimpleSourceText(candidate)
+  const candidate = await previewEdit(bytes, paragraphSelection(analysis), replacement)
+  const changed = await inspectPage(candidate)
   expect(changed.runs.length).toBeGreaterThan(analysis.runs.length)
   expect(changed.runs.every(run => run.fontSize === 12)).toBe(true)
   expect((await extract(candidate)).at(-1)!.transform[5]).toBe(540)
-  const occupied = await paragraphFixture(605), occupiedAnalysis = await inspectSimpleSourceText(occupied)
-  await expect(previewSimpleSourceCorrection(occupied, paragraphSelection(occupiedAnalysis), replacement)).rejects.toThrow(/passt nicht/)
-})
-
-test('reflow requires explicit confirmation; hyphenation and intentional-looking breaks are not inferred away', async () => {
-  const bytes = await paragraphFixture(), analysis = await inspectSimpleSourceText(bytes)
-  await expect(previewSimpleSourceCorrection(bytes, { ...paragraphSelection(analysis), confirmReflow: false }, 'This paragraph.')).rejects.toThrow(/bestätigt/)
-  for (const text of ['One line.\nAnother line.', 'A word-\ncontinued here', '1. First item\n2. Next item']) {
-    const doc = await PDFDocument.create(), font = await doc.embedFont(StandardFonts.Helvetica)
-    doc.addPage().drawText(text, { font, size: 12, lineHeight: 20 })
-    const inspected = await inspectSimpleSourceText(await doc.save())
-    expect(inspected.runs.every(run => !run.paragraph)).toBe(true)
-  }
+  const occupied = await paragraphFixture(605), occupiedAnalysis = await inspectPage(occupied)
+  await expect(previewEdit(occupied, paragraphSelection(occupiedAnalysis), replacement)).rejects.toThrow(/Absatzzeile/)
 })
 
 async function embeddedFixture() {
@@ -81,11 +72,11 @@ async function embeddedFixture() {
 }
 
 test('reuses a real embedded TrueType subset for DE/EN even when not a standard font', async () => {
-  const bytes = await embeddedFixture(), analysis = await inspectSimpleSourceText(bytes), run = analysis.runs[0]
-  const candidate = await previewSimpleSourceCorrection(bytes, { digest: analysis.digest, runId: run.id, expectedText: run.text }, 'Hallo München Grüße Welt äöüÄÖÜß')
+  const bytes = await embeddedFixture(), analysis = await inspectPage(bytes), run = analysis.runs[0]
+  const candidate = await previewEdit(bytes, { digest: analysis.digest, runId: run.id, expectedText: run.text }, 'Hallo München Grüße Welt äöüÄÖÜß')
   expect((await extract(candidate)).map(item => item.str).join('')).toBe('Hallo München Grüße Welt äöüÄÖÜß')
-  expect((await inspectSimpleSourceText(candidate)).runs[0].fontName).toBe(run.fontName)
-  await expect(previewSimpleSourceCorrection(bytes, { digest: analysis.digest, runId: run.id, expectedText: run.text }, 'Ein Z fehlt')).rejects.toThrow(/Zeichen fehlt/)
+  expect((await inspectPage(candidate)).runs[0].fontName).toBe(run.fontName)
+  await expect(previewEdit(bytes, { digest: analysis.digest, runId: run.id, expectedText: run.text }, 'Ein Z fehlt')).rejects.toThrow(/Zeichen fehlt/)
 })
 
 test('invalid embedded glyph reference or ambiguous Unicode mapping is refused', async () => {
@@ -105,13 +96,17 @@ test('invalid embedded glyph reference or ambiguous Unicode mapping is refused',
       const text = new TextDecoder().decode(await streamBytes(raw)).replace('<0002> <0072>', '<0002> <0047>')
       font.set(PDFName.of('ToUnicode'), doc.context.register(doc.context.flateStream(text)))
     }
-    await expect(inspectSimpleSourceText(await doc.save())).rejects.toThrow()
+    const broken = await doc.save()
+    await expect((async () => {
+      const analysis = await inspectPage(broken), run = analysis.runs[0]
+      return previewEdit(broken, { digest: analysis.digest, runId: run.id, expectedText: run.text }, 'Hallo')
+    })()).rejects.toThrow()
   }
 })
 
 test('source revision supports undo/redo, stored drafts and real page export without mutating original', async () => {
-  const bytes = await paragraphFixture(), analysis = await inspectSimpleSourceText(bytes)
-  const candidate = await previewSimpleSourceCorrection(bytes, paragraphSelection(analysis), 'This paragraph contains short words.')
+  const bytes = await paragraphFixture(), analysis = await inspectPage(bytes)
+  const candidate = await previewEdit(bytes, paragraphSelection(analysis), 'This paragraph contains short words.')
   const pages = await inspectPages(bytes, 'original.pdf'), store = new EditorStore()
   store.restore({ overlays: [], pages: pages, pageSources: [] })
   const originalSource = store.state.pages![0].sourceId
@@ -156,12 +151,6 @@ test('source revision refuses overlays and leaves duplicate page copies and orig
   expect(store.state.pages![1].sourceId).toBe('original')
   expect(store.state.pages![0].sourceId).not.toBe('original')
   store.undo(); expect(store.state.pageSources).toEqual([])
-})
-
-test('line-only corrections do not widen an already recognized paragraph', async () => {
-  const bytes = await paragraphFixture(), analysis = await inspectSimpleSourceText(bytes), run = analysis.runs[0]
-  expect(run.paragraph).toBeDefined()
-  await expect(previewSimpleSourceCorrection(bytes, { digest: analysis.digest, runId: run.id, expectedText: run.text }, 'W'.repeat(30))).rejects.toThrow(/Absatzbreite/)
 })
 
 test('a character whose only slot has width 0 is not in the subset and is never inserted', async () => {

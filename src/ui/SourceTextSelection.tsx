@@ -1,12 +1,12 @@
 import { useId, useRef } from 'react'
-import type { SimpleSourceRun } from '../core/sourceText/simplePdf'
+import type { SourceRun } from '../core/sourceText/sourceTypes'
 import type { SourcePageGeometry } from '../core/pdf/loadPdf'
 import type { SearchFragment } from '../core/search'
 import { directSelection } from '../core/sourceText/directSelection'
 import type { DirectSelection } from '../core/sourceText/directSelection'
 
 interface Props {
-  runs: SimpleSourceRun[]
+  runs: SourceRun[]
   size: SourcePageGeometry
   fragments: SearchFragment[]
   selection: DirectSelection | null
@@ -26,12 +26,12 @@ export function SourceTextSelection({ runs, size, fragments, selection, onSelect
   const mask = useId().replace(/:/g, ''), dragged = useRef(false), layer = useRef<HTMLDivElement>(null), downAt = useRef<{ x: number; y: number } | undefined>(undefined)
   const transform = size.sourceTransform
   const horizontal = Math.abs(transform[0] - 1) < 1e-8 && Math.abs(transform[1]) < 1e-8 && Math.abs(transform[2]) < 1e-8 && Math.abs(transform[3] + 1) < 1e-8
-  const position = (run: SimpleSourceRun) => ({ x: run.x + transform[4], y: -run.baseline + transform[5] })
+  const position = (run: SourceRun) => ({ x: run.x + transform[4], y: -run.baseline + transform[5] })
   const percent = (x: number, axis = 'x') => `${x / (axis === 'x' ? size.width : size.height) * 100}%`
   // Bound DOM work separately from the worker's PDF limits. Unshown runs do not
   // become editable through extraction or through a cross-line native selection.
   let budget = 40000
-  const withinBudget: SimpleSourceRun[] = []
+  const withinBudget: SourceRun[] = []
   for (const run of runs) {
     if (!horizontal || !run.selection || run.text.length > budget) continue
     budget -= run.text.length
@@ -68,8 +68,8 @@ export function SourceTextSelection({ runs, size, fragments, selection, onSelect
     const r = layer.current!.getBoundingClientRect()
     return { x: ((event.clientX - r.left) / r.width) * size.width - transform[4], y: transform[5] - ((event.clientY - r.top) / r.height) * size.height }
   }
-  const inline = (run: SimpleSourceRun) => { const id = run.selection?.groupId; return id && run.paragraph?.automatic && blocks?.has(id) && onBlock ? id : undefined }
-  function choose(run: SimpleSourceRun, at?: { x: number; y: number }) {
+  const inline = (run: SourceRun) => { const id = run.selection?.groupId; return id && run.paragraph?.automatic && blocks?.has(id) && onBlock ? id : undefined }
+  function choose(run: SourceRun, at?: { x: number; y: number }) {
     const id = inline(run)
     if (id) { onBlock!(id, at); return }
     const members = run.paragraph?.automatic && run.selection?.groupId ? groups.get(run.selection.groupId) ?? [] : []

@@ -16,7 +16,6 @@ import {
   previewPageSource,
 } from '../../src/core/sourceText/mixedPdf'
 import { contentTokens } from '../../src/core/sourceText/contentTokens'
-import { unicodeMap } from '../../src/core/sourceText/sourceFonts'
 const n = PDFName.of
 async function fixture(
   options: {
@@ -86,9 +85,6 @@ async function extract(bytes: Uint8Array, page = 1) {
   } finally {
     await task.destroy()
   }
-}
-function cmap(body: string) {
-  return `/CIDInit /ProcSet findresource begin 26 dict begin begincmap /CIDSystemInfo << /Registry (Adobe) /Ordering (UCS) /Supplement 0 >> def /CMapName /Adobe-Identity-UCS def /CMapType 2 def 1 begincodespacerange <0000> <FFFF> endcodespacerange ${body} endcmap CMapName currentdict /CMap defineresource pop end end`
 }
 test('page-scoped analysis does not reject a supported page for unrelated operators on another page', async () => {
   const b = await fixture({ otherBad: true }),
@@ -247,22 +243,6 @@ test('bounded composite lexer respects literal strings and absolute offsets', ()
   expect(() => contentTokens('['.repeat(20) + ']'.repeat(20), true)).toThrow()
   expect(() => contentTokens('[1 2]')).toThrow() // strict legacy mode remains strict
 })
-test('bounded bfrange supports sequential and array ranges and leaves ligatures non-encodable', () => {
-  const m = unicodeMap(
-    cmap(
-      '1 beginbfchar <0001> <00660069> endbfchar 1 beginbfrange <0002> <0003> <0041> endbfrange 1 beginbfrange <0004> <0005> [<00E4> <00DF>] endbfrange',
-    ),
-    true,
-  )
-  expect([...m.values()]).toEqual(['fi', 'A', 'B', 'ä', 'ß'])
-  expect(() =>
-    unicodeMap(cmap('1 beginbfrange <0002> <0003> <FFFF> endbfrange'), true),
-  ).toThrow()
-  expect(() =>
-    unicodeMap(cmap('1 beginbfrange <0002> <0003> [<0041>] endbfrange'), true),
-  ).toThrow()
-})
-
 test('original ligature glyphs stay byte-identical and are never silently split into missing letters', async () => {
   const d = await PDFDocument.create()
   d.registerFontkit(fontkit)

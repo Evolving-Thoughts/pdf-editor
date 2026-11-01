@@ -1,7 +1,7 @@
-import type { SimpleSourceRun, SourceSelection } from './simplePdf'
+import type { SourceRun, SourceSelection } from './sourceTypes'
 import type { EditFont, EditModel } from './editModel'
 import type { Box } from './space'
-export interface SourceAnalysis { digest: string; runs: SimpleSourceRun[]; blocks: EditModel[]; fonts: EditFont[]; rects: Box[] }
+export interface SourceAnalysis { digest: string; runs: SourceRun[]; blocks: EditModel[]; fonts: EditFont[]; rects: Box[] }
 export interface SourceEdit { selection: SourceSelection; replacement: string }
 interface Request { action: 'inspect' | 'preview'; bytes: ArrayBuffer; selection?: SourceSelection; replacement?: string; edits?: SourceEdit[]; pageIndex?: number }
 const spawn = () => new Worker(new URL('./sourceText.worker.ts', import.meta.url), { type: 'module' })
@@ -36,7 +36,7 @@ export function sourceTextRequest<T>(request: Request, signal: AbortSignal, crea
     try { const bytes = request.bytes.slice(0); worker.postMessage({ ...request, bytes }, [bytes]) } catch (error) { finish(error instanceof Error ? error : new Error('Textanalyse konnte nicht gestartet werden.')) }
   })
 }
-type Inspection = { digest: string; runs: SimpleSourceRun[]; blocks?: EditModel[]; fonts?: EditFont[]; rects?: Box[] }
+type Inspection = { digest: string; runs: SourceRun[]; blocks?: EditModel[]; fonts?: EditFont[]; rects?: Box[] }
 export const inspectSource = (bytes: ArrayBuffer, signal: AbortSignal, pageIndex?: number) => sourceTextRequest<Inspection>({ action: 'inspect', bytes, pageIndex }, signal)
 export const previewSource = (bytes: ArrayBuffer, selection: SourceSelection, replacement: string, signal: AbortSignal) => sourceTextRequest<ArrayBuffer>({ action: 'preview', bytes, selection, replacement }, signal)
 /** Several proved paragraphs of one page, checked together in one candidate. */

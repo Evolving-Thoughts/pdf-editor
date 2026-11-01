@@ -15,13 +15,9 @@ import {
 import { contentTokens } from './contentTokens'
 import type { ContentToken } from './contentTokens'
 import { readPageFont, UnmeasurableFont } from './fontReader'
-import type { SourceFont } from './sourceFonts'
+import type { SourceFont } from './sourceTypes'
 import { streamText } from './streams'
-import {
-  inspectSimpleSourceText,
-  previewSimpleSourceCorrection,
-} from './simplePdf'
-import type { SimpleSourceRun, SourceSelection } from './simplePdf'
+import type { SourceRun, SourceSelection } from './sourceTypes'
 import { supportedSourceText } from './encoding'
 import { blockedBy, contains, overlap, separation, slotBox, union } from './space'
 import type { BlockSpace, Box } from './space'
@@ -74,7 +70,7 @@ interface State {
   gs: string
 }
 interface Run {
-  view: SimpleSourceRun
+  view: SourceRun
   bounds: Rect
   clip?: Rect
   font: SourceFont
@@ -673,7 +669,7 @@ export async function analyze(input: Uint8Array, pageIndex: number) {
             (lockAllTagged && structural?.tagged
               ? 'Der Strukturbaum ist zu groß für eine sichere Prüfung von Ersatztexten.'
               : undefined)
-          const view: SimpleSourceRun = {
+          const view: SourceRun = {
             id: `mixed:${pageIndex}:${runs.length}`,
             pageIndex,
             text: measured.text,
@@ -1076,20 +1072,7 @@ function editable(run: Run) {
   )
 }
 export async function inspectPageSource(bytes: Uint8Array, pageIndex: number) {
-  let result: Analysis
-  try {
-    result = await analyze(bytes, pageIndex)
-  } catch (error) {
-    // The older single-stream adapter still covers its own verified subset.
-    try {
-      const simple = await inspectSimpleSourceText(bytes)
-      const runs = simple.runs.filter((r) => r.pageIndex === pageIndex)
-      if (runs.length) return { ...simple, runs, blocks: [], fonts: [] }
-    } catch {
-      /* report the page-scoped reason below */
-    }
-    throw error
-  }
+  const result: Analysis = await analyze(bytes, pageIndex)
   const geometry = (r: Run) => {
     const scale = r.scale ?? 1,
       chars = runChars(r)
@@ -1132,7 +1115,7 @@ export async function inspectPageSource(bytes: Uint8Array, pageIndex: number) {
   for (const block of offered) for (const i of block.members) member.set(i, block)
   // One shared object per block: structured clone sends shared objects once,
   // not once per member run (HTML renderers emit one run per character).
-  const paragraphs = new Map<SourceBlock, NonNullable<SimpleSourceRun['paragraph']>>()
+  const paragraphs = new Map<SourceBlock, NonNullable<SourceRun['paragraph']>>()
   const paragraphOf = (block: SourceBlock) => {
     let p = paragraphs.get(block)
     if (!p)
@@ -1146,7 +1129,7 @@ export async function inspectPageSource(bytes: Uint8Array, pageIndex: number) {
       }))
     return p
   }
-  const runs: SimpleSourceRun[] = []
+  const runs: SourceRun[] = []
   result.runs.forEach((r, i) => {
     const block = member.get(i)
     if (!block && !editable(r)) return
@@ -1221,8 +1204,7 @@ export async function previewPageSource(
   replacement: string,
 ) {
   selection = { ...selection }
-  if (!selection.runId.startsWith('mixed:'))
-    return previewSimpleSourceCorrection(input, selection, replacement)
+  if (!selection.runId.startsWith('mixed:')) throw new Error('Ungültige Textauswahl.')
   const pageIndex = Number(selection.runId.split(':')[1]),
     result = await analyze(input, pageIndex),
     { doc, page, runs, obstacles, revision, refs } = result

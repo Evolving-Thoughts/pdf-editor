@@ -1,7 +1,7 @@
 import { expect, test } from 'vitest'
 import { directSelection, selectedReplacement } from '../../src/core/sourceText/directSelection'
-import type { SimpleSourceRun } from '../../src/core/sourceText/simplePdf'
-const make=(id:string,text:string,groupId?:string):SimpleSourceRun=>({id,text,pageIndex:0,fontName:'Helvetica',fontSize:12,x:50,baseline:700,width:100,selection:{characters:[...text].map((_,i)=>({offset:i*6,width:6})),groupId}})
+import type { SourceRun } from '../../src/core/sourceText/sourceTypes'
+const make=(id:string,text:string,groupId?:string):SourceRun=>({id,text,pageIndex:0,fontName:'Helvetica',fontSize:12,x:50,baseline:700,width:100,selection:{characters:[...text].map((_,i)=>({offset:i*6,width:6})),groupId}})
 const a=make('a','Grüße Welt','g'),b=make('b','Hallo Ende.','g'),c=make('c','Next paragraph')
 a.paragraph=b.paragraph={text:a.text+' '+b.text,lineCount:2,leading:20,width:100}
 const runs=[a,b,c]

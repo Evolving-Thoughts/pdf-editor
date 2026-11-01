@@ -4,7 +4,7 @@
  * worker's preview of the real PDF authorizes a change. */
 import { sourceFontCodec } from './encoding'
 import type { BlockRect, SourceBlock } from './mixedBlocks'
-import type { SourceFont } from './sourceFonts'
+import type { SourceFont } from './sourceTypes'
 import type { BlockSpace, Box } from './space'
 
 /** Per-block inputs of the shared free-space rules; `own` lists the page

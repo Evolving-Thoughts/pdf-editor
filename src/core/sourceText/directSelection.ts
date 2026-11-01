@@ -1,4 +1,4 @@
-import type { SimpleSourceRun } from './simplePdf'
+import type { SourceRun } from './sourceTypes'
 
 export interface DirectSelection {
   runId: string
@@ -14,7 +14,7 @@ export interface DirectSelection {
  * Offsets are UTF-16 indices; the supported DE/EN source alphabet is BMP-only.
  */
 export function directSelection(
-  runs: readonly SimpleSourceRun[], firstId: string, from: number,
+  runs: readonly SourceRun[], firstId: string, from: number,
   lastId = firstId, to?: number,
 ): DirectSelection | null {
   const a = runs.findIndex(run => run.id === firstId), b = runs.findIndex(run => run.id === lastId)
@@ -43,7 +43,7 @@ export function directSelection(
 }
 
 /** Rebuild the proved source unit, changing only the selected substring. */
-export function selectedReplacement(run: SimpleSourceRun, selection: DirectSelection, draft: string, reflow: boolean) {
+export function selectedReplacement(run: SourceRun, selection: DirectSelection, draft: string, reflow: boolean) {
   if (run.id !== selection.runId || (!reflow && selection.requiresReflow)) throw new Error('Diese Auswahl benötigt einen bestätigten, unterstützten Absatzumbruch.')
   if (reflow) {
     if (!run.paragraph || selection.paragraphFrom === undefined || selection.paragraphTo === undefined) throw new Error('Die Auswahl ist keinem sicher unterstützten Absatz zugeordnet.')

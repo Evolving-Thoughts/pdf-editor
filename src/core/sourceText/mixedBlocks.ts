@@ -10,7 +10,7 @@
  * and when re-wrapping the original text reproduces every original line break
  * exactly. Line breaks without a space glyph get an inferred word space; a
  * line-end hyphen between lowercase letters is treated as a hyphenation point. */
-import type { SourceFont } from './sourceFonts'
+import type { SourceFont } from './sourceTypes'
 
 export interface BlockRect { left: number; right: number; bottom: number; top: number }
 export interface BlockInput {
