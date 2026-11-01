@@ -1,7 +1,7 @@
 import { sanitizeRedactedSource } from './redactionSafety'
 import type { FormValues } from '../forms'
-import { applyFormValues, updateFormAppearances } from './acroForm'
-import { PDFDict, PDFDocument, PDFName, PDFNumber, PDFObjectCopier, PDFPage, PDFPageLeaf, PDFRef, StandardFonts, degrees } from 'pdf-lib'
+import { applyFormValues, carriesXfa, updateFormAppearances } from './acroForm'
+import { PDFDocument, PDFName, PDFNumber, PDFObjectCopier, PDFPage, PDFPageLeaf, PDFRef, StandardFonts, degrees } from 'pdf-lib'
 import { copyOutlines, copyTags, keepsTagOrder, pageOrigin } from './preserveStructure'
 import { cloneOverlay, createId, type Overlay } from '../model'
 import { exportPdf } from './exportPdf'
@@ -11,8 +11,6 @@ import { initialImageGeometry } from '../images/geometry'
 import { retainPageWidgets, namespaceFormResources, mergeAcroForm } from './preserveForms'
 import { assertFileBudget, assertPageBudget } from './documentBudget'
 import { writeOcrLayers } from '../ocr/ocrLayer'
-
-export const carriesXfa = (doc: PDFDocument) => !!doc.catalog.lookupMaybe(PDFName.of('AcroForm'), PDFDict)?.has(PDFName.of('XFA'))
 
 export async function inspectPages(
   bytes: Uint8Array,
@@ -103,7 +101,7 @@ async function composeBase(
   if (keptTree ?? await keepsPageTree(original, pages, secure)) {
     if (!Object.keys(formValues).length) return original.slice()
     const doc = await PDFDocument.load(original, { updateMetadata: false })
-    if (carriesXfa(doc)) throw new Error('XFA-Formulare werden noch nicht unterstützt.')
+    if (carriesXfa(doc)) throw new Error(XFA_UNSUPPORTED)
     if (applyFormValues(doc, 'original', formValues)) { await updateFormAppearances(doc); return doc.save({ updateFieldAppearances: false }) }
     return original.slice()
   }
@@ -118,7 +116,7 @@ async function composeBase(
       if (!bytes) throw new Error('Quelldaten einer Seite fehlen.')
       const doc = await PDFDocument.load(bytes)
       if (carriesXfa(doc))
-        throw new Error('XFA-Formulare werden bei Seitenoperationen noch nicht unterstützt. Die Originaldatei bleibt unverändert.')
+        throw new Error(`${XFA_UNSUPPORTED} Die Originaldatei bleibt unverändert.`)
       if (applyFormValues(doc, page.sourceId, formValues)) await updateFormAppearances(doc)
       const indices = new Set(pages.filter(p => p.sourceId === page.sourceId).map(p => p.sourceIndex))
       retainPageWidgets(doc, indices)

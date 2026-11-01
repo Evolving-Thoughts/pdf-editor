@@ -27,8 +27,6 @@ export interface PdfHandle {
   readonly pageCount: number
   /** Renders a page (1-based) into the canvas. Per canvas in order; all canvases share a parallelism limit. */
   renderPage(pageNumber: number, canvas: HTMLCanvasElement, zoom: number, signal?: AbortSignal): Promise<void>
-  /** Measurable render load, used by large-document checks. */
-  renderStats(): { active: number; queued: number; peak: number }
   /** Page size in PDF points (1-based page number), cached after first call. */
   getPageSize(pageNumber: number): Promise<PageSize>
   /** Opt-in source mapping; keep the existing size-only contract unchanged. */
@@ -87,7 +85,6 @@ export async function loadPdf(fileName: string, bytes: Uint8Array): Promise<PdfH
       return run
     },
 
-    renderStats: () => queue.stats(),
 
     renderForOcr: pageNumber => queue.run(async () => {
       const page = await pdfDocument.getPage(pageNumber)

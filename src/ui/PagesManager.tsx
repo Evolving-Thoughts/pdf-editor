@@ -15,8 +15,7 @@ import {
   pageSize,
   pagePreviewSize,
   rotatePages,
-  type CropMargins,
-} from '../core/pages'
+  type CropMargins, MIN_CROP_SIZE } from '../core/pages'
 import { importPageFile, preparePages, textPageBytes } from '../core/pdf/pageOperations'
 import { extractInWorker, preflightInWorker } from '../core/pdf/exportJob'
 import { selectDocument, type DocumentSnapshot } from '../core/pdf/documentOutput'
@@ -100,8 +99,8 @@ export function PagesManager({ nativeWidgets = [], pdf, store, original, snapsho
   const scale = commonPreviewScale(pages.map(p => a4Open ? a4Size(pageSize(p)) : pagePreviewSize(p)), available)
   const marginsFit = (m: CropMargins) =>
     Object.values(m).every((v) => Number.isFinite(v) && v >= 0) &&
-    size.width - m.left - m.right >= 20 * MM - 1e-6 &&
-    size.height - m.top - m.bottom >= 20 * MM - 1e-6
+    size.width - m.left - m.right >= MIN_CROP_SIZE - 1e-6 &&
+    size.height - m.top - m.bottom >= MIN_CROP_SIZE - 1e-6
   const frameMargins = activeCrop && marginsFit(activeCrop.margins) ? activeCrop.margins : zero()
   const locked = busy || working || !!activeCrop || a4Open || !!deletePending || !!extractCheck
   useEffect(() => {
@@ -290,10 +289,10 @@ export function PagesManager({ nativeWidgets = [], pdf, store, original, snapsho
       const x = Math.max(0, Math.min(size.width, ((ev.clientX - rect.left) / rect.width) * size.width))
       const y = Math.max(0, Math.min(size.height, ((ev.clientY - rect.top) / rect.height) * size.height))
       const next = { ...initial }
-      if (corner.endsWith('l')) next.left = Math.max(0, Math.min(x, size.width - next.right - 20 * MM))
-      else next.right = Math.max(0, Math.min(size.width - x, size.width - next.left - 20 * MM))
-      if (corner.startsWith('t')) next.top = Math.max(0, Math.min(y, size.height - next.bottom - 20 * MM))
-      else next.bottom = Math.max(0, Math.min(size.height - y, size.height - next.top - 20 * MM))
+      if (corner.endsWith('l')) next.left = Math.max(0, Math.min(x, size.width - next.right - MIN_CROP_SIZE))
+      else next.right = Math.max(0, Math.min(size.width - x, size.width - next.left - MIN_CROP_SIZE))
+      if (corner.startsWith('t')) next.top = Math.max(0, Math.min(y, size.height - next.bottom - MIN_CROP_SIZE))
+      else next.bottom = Math.max(0, Math.min(size.height - y, size.height - next.top - MIN_CROP_SIZE))
       setCrop({ id: page!.id, margins: next })
     }
     const end = () => {
