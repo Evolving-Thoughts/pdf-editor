@@ -3,7 +3,10 @@ import { fontSupportsItalic } from '../core/fonts'
 import { useCallback, useEffect, useLayoutEffect, useRef, useState, type Dispatch, type SetStateAction } from 'react'
 import { updateOverlay, removeOverlay } from '../core/commands'
 import type { EditorStore } from '../core/editorStore'
-import { isTextbox, patchOverlay, type OverlayFont, type Textbox } from '../core/model'
+import type { Bounds } from '../core/images/geometry'
+import type { OverlayFont, Textbox } from '../core/model'
+import { moveTextbox, type GestureStep } from '../core/overlayGesture'
+import { useOverlayGesture } from './useOverlayGesture'
 import { TEXT_LINE_HEIGHT as LINE_HEIGHT } from '../core/textLayout'
 import type { Tool } from './tools'
 
@@ -164,14 +167,16 @@ function FontSizePicker({ value, onCommit }: FontSizePickerProps) {
 interface TextboxViewProps {
   box: Textbox
   zoom: number
-  pageHeightPts: number
+  pageSize: Bounds
   selected: boolean
   tool: Tool
   store: EditorStore
   onSelect: Dispatch<SetStateAction<string | null>>
 }
 
-export function TextboxView({ box, zoom, pageHeightPts, selected, tool, store, onSelect }: TextboxViewProps) {
+interface Point { x: number; y: number }
+
+export function TextboxView({ box, zoom, pageSize, selected, tool, store, onSelect }: TextboxViewProps) {
   const [draft, setDraft] = useState(box.text)
   const [focused, setFocused] = useState(false)
   const beforeEdit = useRef(box.text)
@@ -179,7 +184,12 @@ export function TextboxView({ box, zoom, pageHeightPts, selected, tool, store, o
   const baselineLineRef = useRef<HTMLSpanElement>(null)
   const baselineMarkerRef = useRef<HTMLSpanElement>(null)
   const anchorRef = useRef<HTMLDivElement>(null)
-  const dragFrom = useRef<{ pointerX: number; pointerY: number; x: number; y: number } | null>(null)
+  const drag = useOverlayGesture(
+    () => ({ zoom, version: store.getVersion(), tool, active: true }),
+    ({ data, dx, dy }: GestureStep<Point>) => moveTextbox(data, dx, dy, pageSize),
+    (next) => { if (next.x !== box.x || next.y !== box.y) store.dispatch(updateOverlay(box.id, { x: box.x, y: box.y }, next)) },
+  )
+  const position = drag.shown ?? box
 
   const displayText = focused ? draft : box.text
   const isSymbol = box.font === 'zapfdingbats'
@@ -229,12 +239,12 @@ export function TextboxView({ box, zoom, pageHeightPts, selected, tool, store, o
     const insetX = parseFloat(chrome.paddingLeft) + parseFloat(chrome.borderLeftWidth)
     const insetY = parseFloat(chrome.paddingTop) + parseFloat(chrome.borderTopWidth)
     if (anchorRef.current) {
-      anchorRef.current.style.left = `${box.x * zoom - insetX}px`
-      anchorRef.current.style.top = `${(pageHeightPts - box.y) * zoom - baseline - insetY}px`
+      anchorRef.current.style.left = `${position.x * zoom - insetX}px`
+      anchorRef.current.style.top = `${(pageSize.height - position.y) * zoom - baseline - insetY}px`
       anchorRef.current.style.transformOrigin = `${insetX}px ${baseline + insetY}px`
       anchorRef.current.style.transform = `rotate(${box.rotation ?? 0}deg)`
     }
-  }, [fontRevision, displayText, box.font, box.bold, box.italic, box.fontSize, box.x, box.y, box.rotation, pageHeightPts, zoom])
+  }, [fontRevision, displayText, box.font, box.bold, box.italic, box.fontSize, position.x, position.y, box.rotation, pageSize.height, zoom])
 
   // Focus the textarea when a new (still empty) box gets selected.
   useEffect(() => {
@@ -266,32 +276,11 @@ export function TextboxView({ box, zoom, pageHeightPts, selected, tool, store, o
   // Selection tool: a surface over the text makes the whole frame draggable;
   // double-click enters text editing. Text tool: the textarea is directly editable.
   const onSurfacePointerDown = (event: React.PointerEvent<HTMLDivElement>) => {
-    event.stopPropagation()
-    event.preventDefault()
-    onSelect(box.id)
-    event.currentTarget.setPointerCapture(event.pointerId)
-    dragFrom.current = { pointerX: event.clientX, pointerY: event.clientY, x: box.x, y: box.y }
+    if (drag.begin(event, { x: box.x, y: box.y })) onSelect(box.id)
   }
 
-  const onSurfacePointerMove = (event: React.PointerEvent<HTMLDivElement>) => {
-    const drag = dragFrom.current
-    if (!drag) return
-    const dx = (event.clientX - drag.pointerX) / zoom
-    const dy = (event.clientY - drag.pointerY) / zoom
-    store.preview((state) => patchOverlay(state, box.id, { x: drag.x + dx, y: drag.y - dy }))
-  }
-
-  const onSurfacePointerUp = () => {
-    const drag = dragFrom.current
-    dragFrom.current = null
-    if (!drag) return
-    const current = store.state.overlays.find((o) => o.id === box.id)
-    if (!current || !isTextbox(current) || (current.x === drag.x && current.y === drag.y)) return
-    store.dispatch(updateOverlay(box.id, { x: drag.x, y: drag.y }, { x: current.x, y: current.y }))
-  }
-
-  const left = box.x * zoom
-  const top = (pageHeightPts - box.y) * zoom - box.fontSize * zoom
+  const left = position.x * zoom
+  const top = (pageSize.height - position.y) * zoom - box.fontSize * zoom
 
   return (
     <div
@@ -433,8 +422,7 @@ export function TextboxView({ box, zoom, pageHeightPts, selected, tool, store, o
           className="drag-surface"
           title="Ziehen zum Verschieben, Doppelklick zum Bearbeiten"
           onPointerDown={onSurfacePointerDown}
-          onPointerMove={onSurfacePointerMove}
-          onPointerUp={onSurfacePointerUp}
+          {...drag.pointer}
           onDoubleClick={() => {
             if (!isSymbol) textareaRef.current?.focus()
           }}

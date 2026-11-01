@@ -1,4 +1,4 @@
-import { useRef, useState } from 'react'
+import { useRef } from 'react'
 import { nudgeOverlay, updateOverlay, type ShapeKeyboardAction } from '../core/commands'
 import type { EditorStore } from '../core/editorStore'
 import type { Bounds, Corner } from '../core/images/geometry'
@@ -16,7 +16,9 @@ import {
 import { strokeToSvgPath } from '../core/drawing'
 import { RotationIcon } from './ImageView'
 import type { ShapeOverlay } from '../core/model'
+import { arrowStep, arrowTurn, pointerAngle, type GestureStep } from '../core/overlayGesture'
 import type { Tool } from './tools'
+import { useOverlayGesture } from './useOverlayGesture'
 
 interface Props {
   shape: ShapeOverlay
@@ -28,18 +30,11 @@ interface Props {
   onSelect: (id: string | null) => void
 }
 interface Gesture {
-  tool: Tool
-  pointerId: number
-  x: number
-  y: number
-  zoom: number
-  version: number
   before: ShapeChanges
   endpoint?: 'start' | 'end'
   corner?: Corner
   rotating: boolean
-  centerX: number
-  centerY: number
+  center: { x: number; y: number }
   startAngle: number
 }
 const cornerNames: Record<Corner, string> = {
@@ -51,21 +46,7 @@ const cornerNames: Record<Corner, string> = {
 
 export function ShapeView({ shape, zoom, pageSize, selected, tool, store, onSelect }: Props) {
   const anchor = useRef<HTMLDivElement>(null)
-  const gesture = useRef<Gesture | null>(null)
-  const [preview, setPreview] = useState<{
-    geometry: ShapeChanges
-    zoom: number
-    version: number
-    tool: Tool
-  } | null>(null)
   const active = selected && (tool === 'select' || tool === shape.shape)
-  const validGesture =
-    preview &&
-    preview.tool === tool &&
-    preview.zoom === zoom &&
-    preview.version === store.getVersion() &&
-    active
-  const geometry = validGesture && preview ? preview.geometry : shapeGeometry(shape)
   const commit = (next: ShapeChanges, keyboardAction?: ShapeKeyboardAction) => {
     const before = shapeGeometry(shape)
     if (JSON.stringify(before) !== JSON.stringify(next))
@@ -75,88 +56,39 @@ export function ShapeView({ shape, zoom, pageSize, selected, tool, store, onSele
           : updateOverlay(shape.id, before, next),
       )
   }
-  const cancel = () => {
-    gesture.current = null
-    setPreview(null)
+  const nextGeometry = ({ data, dx, dy, sample }: GestureStep<Gesture>) => {
+    if (data.rotating)
+      return rotateShape(
+        data.before,
+        (data.before.rotation ?? 0) + pointerAngle(data.center, sample) - data.startAngle,
+        pageSize,
+        sample.shiftKey,
+      )
+    if (data.endpoint) {
+      const initial = shapeWorldPoints(shape)[data.endpoint === 'start' ? 0 : 1]
+      return setShapeEndpoint(shape, data.endpoint, { x: initial.x + dx, y: initial.y + dy }, pageSize)
+    }
+    return data.corner
+      ? resizeShape(data.before, data.corner, dx, dy, pageSize)
+      : moveShape(data.before, dx, dy, pageSize)
   }
+  const gesture = useOverlayGesture<Gesture, ShapeChanges>(
+    () => ({ zoom, version: store.getVersion(), tool, active }),
+    nextGeometry,
+    (next) => commit(next),
+  )
+  const geometry = gesture.shown ?? shapeGeometry(shape)
   const onShapePointerDown = (event: React.PointerEvent<HTMLElement>) => {
     const corner = event.currentTarget.dataset.corner as Corner | undefined
     const endpoint = event.currentTarget.dataset.endpoint as 'start' | 'end' | undefined
     const rotating = event.currentTarget.dataset.rotate === 'true'
     // Creation stays active on the page; only explicit grips edit the selected source.
-    const canEdit = tool === 'select' || (active && !!(corner || endpoint || rotating))
-    if (!canEdit || !event.isPrimary || event.button !== 0 || gesture.current) return
-    event.stopPropagation()
-    event.preventDefault()
+    if (tool !== 'select' && !(active && (corner || endpoint || rotating))) return
+    const rect = anchor.current!.getBoundingClientRect()
+    const center = { x: rect.left + rect.width / 2, y: rect.top + rect.height / 2 }
+    if (!gesture.begin(event, { before: shapeGeometry(shape), corner, endpoint, rotating, center, startAngle: pointerAngle(center, event) })) return
     onSelect(shape.id)
     ;(corner || endpoint || rotating ? event.currentTarget : anchor.current)?.focus({ preventScroll: true })
-    const rect = anchor.current!.getBoundingClientRect()
-    const centerX = rect.left + rect.width / 2
-    const centerY = rect.top + rect.height / 2
-    gesture.current = {
-      tool,
-      pointerId: event.pointerId,
-      x: event.clientX,
-      y: event.clientY,
-      zoom,
-      version: store.getVersion(),
-      before: shapeGeometry(shape),
-      corner,
-      endpoint,
-      rotating,
-      centerX,
-      centerY,
-      startAngle: (Math.atan2(event.clientY - centerY, event.clientX - centerX) * 180) / Math.PI,
-    }
-    event.currentTarget.setPointerCapture(event.pointerId)
-  }
-  const nextGeometry = (event: React.PointerEvent, current: Gesture) => {
-    if (current.rotating) {
-      const pointerAngle =
-        (Math.atan2(event.clientY - current.centerY, event.clientX - current.centerX) * 180) / Math.PI
-      return rotateShape(
-        current.before,
-        (current.before.rotation ?? 0) + pointerAngle - current.startAngle,
-        pageSize,
-        event.shiftKey,
-      )
-    }
-    const dx = (event.clientX - current.x) / current.zoom
-    const dy = (current.y - event.clientY) / current.zoom
-    if (current.endpoint) {
-      const initial = shapeWorldPoints(shape)[current.endpoint === 'start' ? 0 : 1]
-      return setShapeEndpoint(shape, current.endpoint, { x: initial.x + dx, y: initial.y + dy }, pageSize)
-    }
-    return current.corner
-      ? resizeShape(current.before, current.corner, dx, dy, pageSize)
-      : moveShape(current.before, dx, dy, pageSize)
-  }
-  const move = (event: React.PointerEvent) => {
-    const current = gesture.current
-    if (!current || current.pointerId !== event.pointerId) return
-    event.stopPropagation()
-    if (current.tool !== tool || current.zoom !== zoom || current.version !== store.getVersion() || !active) {
-      cancel()
-      return
-    }
-    setPreview({
-      geometry: nextGeometry(event, current),
-      zoom: current.zoom,
-      version: current.version,
-      tool: current.tool,
-    })
-  }
-  const finish = (event: React.PointerEvent) => {
-    const current = gesture.current
-    if (!current || current.pointerId !== event.pointerId) return
-    event.stopPropagation()
-    const valid =
-      current.tool === tool && current.zoom === zoom && current.version === store.getVersion() && active
-    const next = nextGeometry(event, current)
-    cancel()
-    if (event.currentTarget.hasPointerCapture(event.pointerId))
-      event.currentTarget.releasePointerCapture(event.pointerId)
-    if (valid) commit(next)
   }
   const display = { ...shape, ...geometry }
   const line = shape.shape === 'line' || shape.shape === 'arrow'
@@ -198,10 +130,7 @@ export function ShapeView({ shape, zoom, pageSize, selected, tool, store, onSele
           if (tool === 'select') onSelect(shape.id)
         }}
         onPointerDown={onShapePointerDown}
-        onPointerMove={move}
-        onPointerUp={finish}
-        onPointerCancel={cancel}
-        onLostPointerCapture={cancel}
+        {...gesture.pointer}
       >
         {shape.shape !== 'marker' && (
           <svg
@@ -251,25 +180,12 @@ export function ShapeView({ shape, zoom, pageSize, selected, tool, store, onSele
                 aria-label={`Form-Endpunkt: ${first ? 'Anfang' : 'Ende'}`}
                 onPointerDown={onShapePointerDown}
                 onKeyDown={(event) => {
-                  if (!event.key.startsWith('Arrow')) return
+                  const step = arrowStep(event)
+                  if (!step) return
                   event.preventDefault()
                   event.stopPropagation()
-                  const step = event.shiftKey ? 10 : 1,
-                    point = shapeWorldPoints(shape)[first ? 0 : 1]
-                  commit(
-                    setShapeEndpoint(
-                      shape,
-                      end,
-                      {
-                        x:
-                          point.x +
-                          (event.key === 'ArrowLeft' ? -step : event.key === 'ArrowRight' ? step : 0),
-                        y: point.y + (event.key === 'ArrowUp' ? step : event.key === 'ArrowDown' ? -step : 0),
-                      },
-                      pageSize,
-                    ),
-                    `endpoint:${end}`,
-                  )
+                  const point = shapeWorldPoints(shape)[first ? 0 : 1]
+                  commit(setShapeEndpoint(shape, end, { x: point.x + step.dx, y: point.y + step.dy }, pageSize), `endpoint:${end}`)
                 }}
               >
                 <span />
@@ -288,20 +204,11 @@ export function ShapeView({ shape, zoom, pageSize, selected, tool, store, onSele
               data-corner={corner}
               onPointerDown={onShapePointerDown}
               onKeyDown={(event) => {
-                if (!event.key.startsWith('Arrow')) return
+                const step = arrowStep(event)
+                if (!step) return
                 event.preventDefault()
                 event.stopPropagation()
-                const step = event.shiftKey ? 10 : 1
-                commit(
-                  resizeShape(
-                    shapeGeometry(shape),
-                    corner,
-                    event.key === 'ArrowLeft' ? -step : event.key === 'ArrowRight' ? step : 0,
-                    event.key === 'ArrowUp' ? step : event.key === 'ArrowDown' ? -step : 0,
-                    pageSize,
-                  ),
-                  `resize:${corner}`,
-                )
+                commit(resizeShape(shapeGeometry(shape), corner, step.dx, step.dy, pageSize), `resize:${corner}`)
               }}
             >
               <span />
@@ -316,18 +223,11 @@ export function ShapeView({ shape, zoom, pageSize, selected, tool, store, onSele
             title="Ziehen zum Drehen · Shift: 15°-Schritte · Pfeiltasten: 1°"
             onPointerDown={onShapePointerDown}
             onKeyDown={(event) => {
-              if (!event.key.startsWith('Arrow')) return
+              const turn = arrowTurn(event)
+              if (turn === null) return
               event.preventDefault()
               event.stopPropagation()
-              const direction = event.key === 'ArrowLeft' || event.key === 'ArrowDown' ? -1 : 1
-              commit(
-                rotateShape(
-                  shapeGeometry(shape),
-                  (shape.rotation ?? 0) + direction * (event.shiftKey ? 15 : 1),
-                  pageSize,
-                ),
-                'rotate',
-              )
+              commit(rotateShape(shapeGeometry(shape), (shape.rotation ?? 0) + turn, pageSize), 'rotate')
             }}
           >
             <span>

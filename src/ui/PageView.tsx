@@ -312,7 +312,7 @@ export function PageView({
             <ShapeView key={overlay.id} shape={overlay} zoom={zoom} pageSize={pageSize}
               selected={overlay.id === selectedId} tool={tool} store={store} onSelect={onSelect} />
           ) : (
-            <TextboxView key={overlay.id} box={overlay} zoom={zoom} pageHeightPts={pageSize.height}
+            <TextboxView key={overlay.id} box={overlay} zoom={zoom} pageSize={pageSize}
               selected={overlay.id === selectedId} tool={tool} store={store} onSelect={onSelect} />
           )
             return resolvedOverlayClips(overlay).reduceRight<ReactNode>((child, polygon, clipIndex) => (

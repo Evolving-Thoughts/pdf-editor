@@ -16,15 +16,15 @@ import { RedactionBar } from './RedactionBar'
 import type { NativeWidget } from '../core/forms'
 import { inspectNativeForms, needsNativeFormInspection } from '../core/pdf/acroForm'
 import { useCallback, useEffect, useRef, useState, useSyncExternalStore } from 'react'
-import { addOverlay, clearDrawing, nudgeOverlay, removeOverlay } from '../core/commands'
+import { addOverlay, clearDrawing, removeOverlay } from '../core/commands'
 import { EditorStore } from '../core/editorStore'
 import { DocumentSession } from '../core/documentSession'
 import { createId, isImage, isMarker, isShape, isStroke, isTextbox, overlayPageIndex } from '../core/model'
 import { deleteDraft, DRAFT_SIZE_WARN_BYTES, loadDraft } from '../core/persistence/drafts'
 import { loadPdf, type PdfHandle } from '../core/pdf/loadPdf'
 import { importImage } from '../core/images/importImage'
-import { imageGeometry, initialImageGeometry, moveImage } from '../core/images/geometry'
-import { shapeGeometry, moveShape, type ShapeStyle } from '../core/shapes'
+import { initialImageGeometry } from '../core/images/geometry'
+import type { ShapeStyle } from '../core/shapes'
 import { ShapeToolbar } from './ShapeToolbar'
 import { isShapeTool } from './tools'
 import { zoomIn, zoomOut } from '../core/viewerState'
@@ -37,6 +37,7 @@ import { TablePanel } from './TablePanel'
 import { DrawingToolbar } from './DrawingToolbar'
 import { PageView } from './PageView'
 import { VirtualPage } from './VirtualPage'
+import { arrowStep, nudgeCommand } from '../core/overlayGesture'
 import { PagesManager } from './PagesManager'
 import { pageSize, type DocumentPage } from '../core/pages'
 import type { ChosenStamp } from './StampPicker'
@@ -328,32 +329,14 @@ export default function App() {
         }
         return
       }
-      if (selectedId && event.key.startsWith('Arrow')) {
+      const step = selectedId ? arrowStep(event) : null
+      if (step) {
         const box = store.state.overlays.find((o) => o.id === selectedId)
         if (!box || isStroke(box)) return
         event.preventDefault()
-        if (isImage(box) || isShape(box)) {
-          const step = event.shiftKey ? 10 : 1
-          const element = workspaceRef.current?.querySelector<HTMLElement>(`[data-page-index="${overlayPageIndex(store.state, box)}"]`)
-          if (!element) return
-          const stepX = event.key === 'ArrowLeft' ? -step : event.key === 'ArrowRight' ? step : 0
-          const stepY = event.key === 'ArrowUp' ? step : event.key === 'ArrowDown' ? -step : 0
-          const page = {width:element.clientWidth/zoom,height:element.clientHeight/zoom}
-          if(isImage(box)) {
-            const before=imageGeometry(box), next=moveImage(before,stepX,stepY,page)
-            if(next.x!==box.x || next.y!==box.y) store.dispatch(nudgeOverlay(box.id,before,next))
-          } else {
-            const before=shapeGeometry(box), next=moveShape(before,stepX,stepY,page)
-            if(next.x!==box.x || next.y!==box.y) store.dispatch(nudgeOverlay(box.id,before,next))
-          }
-          return
-        }
-        const step = event.shiftKey ? 10 : 1
-        const dx = event.key === 'ArrowLeft' ? -step : event.key === 'ArrowRight' ? step : 0
-        const dy = event.key === 'ArrowUp' ? step : event.key === 'ArrowDown' ? -step : 0
-        store.dispatch(
-          nudgeOverlay(box.id, { x: box.x, y: box.y }, { x: Math.max(0, box.x + dx), y: Math.max(0, box.y + dy) }),
-        )
+        const page = store.state.pages?.find((candidate) => candidate.id === box.pageId)
+        const command = page && nudgeCommand(box, step, pageSize(page))
+        if (command) store.dispatch(command)
         return
       }
       if (!(event.ctrlKey || event.metaKey)) return
@@ -371,7 +354,7 @@ export default function App() {
     }
     window.addEventListener('keydown', onKeyDown)
     return () => window.removeEventListener('keydown', onKeyDown)
-  }, [sourceTextOpen, store, selectedId, zoom, pageBusy, pageManagerOpen, cropActive, busy, pdf])
+  }, [sourceTextOpen, store, selectedId, pageBusy, pageManagerOpen, cropActive, busy, pdf])
 
   const placeStamp = useCallback((pageId: string, point: { x: number; y: number }, page: { width: number; height: number }) => {
     if (!stamp) return

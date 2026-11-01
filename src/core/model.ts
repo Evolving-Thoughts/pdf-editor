@@ -162,8 +162,3 @@ export function createId(): string {
   return `ov-${Date.now().toString(36)}-${counter}`
 }
 
-/** Mutates one overlay in place; used by commands and previews alike. */
-export function patchOverlay(state: EditorState, id: string, changes: Partial<Textbox>): void {
-  const box = state.overlays.find((o) => o.id === id)
-  if (box && isTextbox(box)) Object.assign(box, changes)
-}
