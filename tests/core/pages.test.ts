@@ -6,7 +6,9 @@ import {
   insertPages,
   insertionPageSize,
   rotatePage,
+  cropFits,
   cropPage,
+  dragCropCorner,
   pageSize,
   pagePreviewSize,
   commonPreviewScale,
@@ -205,3 +207,24 @@ for (const rotation of [0, 90, 180, 270] as const) {
     expect(pageSize(store.state.pages![0]).height).toBeCloseTo(before.height * 2 / 3, 7)
   })
 }
+
+const CROP_ZERO = { left: 0, top: 0, right: 0, bottom: 0 }
+const CROP_PAGE = { width: 200, height: 300 }
+
+test('dragging a corner moves only its two edges', () => {
+  expect(dragCropCorner(CROP_ZERO, CROP_PAGE, 'tl', { x: 20, y: 30 })).toEqual({ left: 20, top: 30, right: 0, bottom: 0 })
+  expect(dragCropCorner(CROP_ZERO, CROP_PAGE, 'br', { x: 180, y: 250 })).toEqual({ left: 0, top: 0, right: 20, bottom: 50 })
+})
+
+test('a dragged crop stays on the page and never gets too small', () => {
+  const outside = dragCropCorner(CROP_ZERO, CROP_PAGE, 'tl', { x: -50, y: -50 })
+  expect(outside).toEqual(CROP_ZERO)
+  const across = dragCropCorner(CROP_ZERO, CROP_PAGE, 'tl', { x: 900, y: 900 })
+  expect(cropFits(CROP_PAGE, across)).toBe(true)
+  expect(cropFits(CROP_PAGE, { ...across, left: across.left + 1 })).toBe(false)
+})
+
+test('invalid margins do not fit', () => {
+  expect(cropFits(CROP_PAGE, { ...CROP_ZERO, left: -1 })).toBe(false)
+  expect(cropFits(CROP_PAGE, { ...CROP_ZERO, left: NaN })).toBe(false)
+})

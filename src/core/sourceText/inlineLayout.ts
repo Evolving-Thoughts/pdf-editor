@@ -2,8 +2,9 @@
  * placeholders for missing characters, caret/selection geometry, hit tests
  * and the fit status. Everything is in PDF page space (y up). The worker's
  * preview of the real PDF still decides whether a change is applied. */
-import { SOFT_HYPHEN, hidden, inkBox, layoutEdit, placeLine } from './mixedBlocks'
-import { blockedBy, slotBox } from './space'
+import { draftSpace, modelSpace, type EditModel } from './editModel'
+import { SOFT_HYPHEN, glyphBox, hidden, inkBox, layoutEdit, placeLine } from './mixedBlocks'
+import { blockedBy, slotBox, union } from './space'
 import type { BlockSpace, Box } from './space'
 import type { BlockGlyph, PlacedLine, SourceBlock } from './mixedBlocks'
 import { supportedSourceText } from './encoding'
@@ -166,4 +167,39 @@ export function selectionRects(view: InlineView, stops: ReturnType<typeof caretS
     rects.push({ left, right: Math.max(left + 0.5, right), bottom: l.baseline - 0.25 * size, top: l.baseline + 0.9 * size })
   })
   return rects
+}
+
+export const modelLimits = (m: EditModel, rects: readonly Box[]): BlockLimits =>
+  ({ room: m.room, pinned: m.pinned, slots: m.slots, space: modelSpace(m, rects) })
+
+/** Ink of a laid-out paragraph per line, as the worker sees it after the edit. */
+export function lineBoxes(view: InlineView): Box[] {
+  const out = new Map<number, Box>()
+  for (const p of paintedGlyphs(view)) {
+    if (!p.glyph.char.trim()) continue
+    const box = glyphBox(p.glyph, p.x, p.baseline), line = out.get(p.line)
+    out.set(p.line, line ? union(line, box) : box)
+  }
+  return [...out.values()]
+}
+
+/** Each shown paragraph against the page as it would be with the other drafts. */
+export function draftLayouts(
+  shown: Iterable<string>,
+  drafted: readonly string[],
+  of: (id: string) => { model: EditModel; block: SourceBlock; text: string },
+  rects: readonly Box[],
+) {
+  const alone = (id: string) => { const { model, block, text } = of(id); return inlineLayout(block, text, modelLimits(model, rects)) }
+  const base = new Map(drafted.map(id => [id, alone(id)]))
+  const out = new Map<string, InlineView | null>()
+  for (const id of shown) {
+    const others = drafted.filter(other => other !== id)
+    if (!others.length) { out.set(id, base.has(id) ? base.get(id)! : alone(id)); continue }
+    const { model, block, text } = of(id)
+    const removed = new Set(others.flatMap(other => of(other).model.space.own))
+    const extra = others.flatMap(other => { const view = base.get(other); return view ? lineBoxes(view) : [] })
+    out.set(id, inlineLayout(block, text, { room: model.room, pinned: model.pinned, slots: model.slots, space: draftSpace(model, rects, removed, extra) }))
+  }
+  return out
 }
