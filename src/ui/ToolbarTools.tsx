@@ -80,12 +80,13 @@ export function ToolbarTools({ tool, symbol, imageInputRef, onTool, onClearSelec
             className="tool"
             aria-pressed={tool === 'comment'}
             title="Kommentar-Werkzeug: Klick auf die Seite setzt eine Notiz"
+            aria-label="💬 Kommentar"
             onClick={() => {
               onClearSelection()
               onTool('comment')
             }}
           >
-            💬 Kommentar
+            💬
           </button>
           <button
             type="button"
@@ -94,7 +95,7 @@ export function ToolbarTools({ tool, symbol, imageInputRef, onTool, onClearSelec
             title="Alle Kommentare am Rand anzeigen"
             onClick={onToggleComments}
           >
-            Kommentare <span className="comment-count">{commentCount}</span>
+            ☰ <span className="comment-count">{commentCount}</span>
           </button>
           <button
             type="button"
