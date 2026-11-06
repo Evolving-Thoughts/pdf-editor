@@ -1,15 +1,16 @@
 // Core module: export a PDF (pdf-lib). Overlays are written as real,
 // selectable PDF text objects (see ADR-001 and the spec).
 import {
-  BlendMode, LineCapStyle, LineJoinStyle, PDFDocument, PDFName, PDFNumber, popGraphicsState, pushGraphicsState,
+  BlendMode, LineCapStyle, LineJoinStyle, PDFDocument, PDFHexString, PDFName, PDFNumber, PDFString, popGraphicsState, pushGraphicsState,
   clip, endPath, moveTo, lineTo, closePath, degrees, rgb, setLineJoin, StandardFonts, type Color, type PDFFont, type PDFImage, type PDFPage,
 } from 'pdf-lib'
 import { bundledFontUrl, isBundledFont, loadBundledFont, type BundledFont } from '../fonts'
 import { resolvedOverlayClips } from '../overlayClipping'
+import { COMMENT_PIN_SIZE } from '../comments'
 import { TEXT_LINE_HEIGHT } from '../textLayout'
 import { strokeToSvgPath } from '../drawing'
 import { MARKER_OPACITY, shapeToSvgPath } from '../shapes'
-import { isImage, isShape, isStroke, type Overlay, type OverlayFont, type ShapeOverlay, type Stroke, type Textbox } from '../model'
+import { isComment, isImage, isShape, isStroke, type CommentOverlay, type Overlay, type OverlayFont, type ShapeOverlay, type Stroke, type Textbox } from '../model'
 
 // Bold/italic map to the matching PDF standard font; underline has no font
 // variant and is drawn as a line below the text.
@@ -97,6 +98,10 @@ export async function exportPdf(bytes: Uint8Array, overlays: Overlay[], pageIds:
   const images = new Map<string, PDFImage>()
   for (const overlay of overlays) {
     const page = doc.getPage(pageIds.indexOf(overlay.pageId))
+    if (isComment(overlay)) {
+      addCommentAnnotation(doc, page, overlay)
+      continue
+    }
     const polygons = resolvedOverlayClips(overlay)
     if (polygons.length) {
       page.pushOperators(pushGraphicsState())
@@ -167,6 +172,37 @@ export async function exportPdf(bytes: Uint8Array, overlays: Overlay[], pageIds:
     } finally { if (polygons.length) page.pushOperators(popGraphicsState()) }
   }
   return doc.save()
+}
+
+/**
+ * Writes a comment as a standard PDF text annotation (sticky note): every
+ * viewer shows the note icon and its text in a popup, nothing is burned into
+ * the page content.
+ */
+function addCommentAnnotation(doc: PDFDocument, page: PDFPage, comment: CommentOverlay): void {
+  const note = comment.note.replace(/\r\n?/g, '\n').trim()
+  if (!note) return
+  const space = displayedPageSpace(page)
+  const corners = [space.toPdf(comment.x, comment.y), space.toPdf(comment.x + COMMENT_PIN_SIZE, comment.y - COMMENT_PIN_SIZE)]
+  const rect = [
+    Math.min(corners[0].x, corners[1].x), Math.min(corners[0].y, corners[1].y),
+    Math.max(corners[0].x, corners[1].x), Math.max(corners[0].y, corners[1].y),
+  ]
+  const date = new Date(Number.isFinite(comment.createdAt) ? comment.createdAt : Date.now())
+  const annotation = doc.context.obj({
+    Type: 'Annot',
+    Subtype: 'Text',
+    Rect: rect,
+    Contents: PDFHexString.fromText(note),
+    NM: PDFHexString.fromText(comment.id),
+    M: PDFString.fromDate(date),
+    Name: 'Comment',
+    Open: false,
+    // Print + NoZoom + NoRotate: the icon keeps its size and stays upright.
+    F: 4 | 8 | 16,
+    C: [1, 0.82, 0.2],
+  })
+  page.node.addAnnot(doc.context.register(annotation))
 }
 
 function colorFromHex(hex: string): Color {

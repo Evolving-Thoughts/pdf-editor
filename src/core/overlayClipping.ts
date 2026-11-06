@@ -1,6 +1,6 @@
-import { isStroke, isTextbox, type Overlay, type StrokePoint } from './model'
+import { isComment, isStroke, isTextbox, type CommentOverlay, type Overlay, type StrokePoint } from './model'
 
-function frame(overlay: Exclude<Overlay, { points: StrokePoint[] }>) {
+function frame(overlay: Exclude<Overlay, { points: StrokePoint[] } | CommentOverlay>) {
   const text = isTextbox(overlay)
   const width = Math.max(1e-9, text ? overlay.fontSize : overlay.width || overlay.height)
   const height = Math.max(1e-9, text ? overlay.fontSize : overlay.height || overlay.width)
@@ -11,11 +11,14 @@ function frame(overlay: Exclude<Overlay, { points: StrokePoint[] }>) {
 }
 /** Capture the visible old page, without freezing future element movement/rotation. */
 export function capturePageClip(overlay: Overlay, size: { width: number; height: number }) {
+  // Comments are notes about the page, not page content: a crop never hides them.
+  if (isComment(overlay)) return
   const points = [{ x: 0, y: 0 }, { x: size.width, y: 0 }, { x: size.width, y: size.height }, { x: 0, y: size.height }]
   overlay.clips = [...(overlay.clips ?? []), localizeOverlayClip(overlay, points)]
 }
 /** Re-anchor an existing world-space clip when an editable element is split. */
 export function localizeOverlayClip(overlay: Overlay, points: StrokePoint[]): StrokePoint[] {
+  if (isComment(overlay)) return points.map(p => ({ ...p }))
   return isStroke(overlay) ? points.map(p => ({ ...p })) : points.map(p => {
     const f = frame(overlay), dx = p.x - f.x, dy = p.y - f.y
     return { x: (f.cos * dx - f.sin * dy) / f.width, y: (f.sin * dx + f.cos * dy) / f.height }
@@ -23,6 +26,7 @@ export function localizeOverlayClip(overlay: Overlay, points: StrokePoint[]): St
 }
 export function resolvedOverlayClips(overlay: Overlay): StrokePoint[][] {
   if (isStroke(overlay)) return overlay.clips ?? []
+  if (isComment(overlay)) return []
   const f = frame(overlay)
   return (overlay.clips ?? []).map(polygon => polygon.map(p => ({
     x: f.x + f.cos * p.x * f.width + f.sin * p.y * f.height,

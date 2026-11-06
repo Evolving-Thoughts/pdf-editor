@@ -23,3 +23,21 @@ export function barKeyTarget({ key, shiftKey }: { key: string; shiftKey: boolean
   if (key === 'ArrowDown') return { ...from, y: from.y + step }
   return null
 }
+
+export interface Rect { left: number; top: number; right: number; bottom: number }
+const GAP = 6
+
+/**
+ * Where an element's own toolbar goes: above the element, below when there is
+ * no room above, always inside the visible area. Hidden once the element has
+ * left that area, so the bar never floats over unrelated content.
+ */
+export function floatingBarPosition(element: Rect, bar: Size, area: Rect): { left: number; top: number; hidden: boolean } {
+  const hidden = element.bottom < area.top || element.top > area.bottom || element.right < area.left || element.left > area.right
+  let top = element.top - bar.height - GAP
+  if (top < area.top) top = element.bottom + GAP
+  if (top + bar.height > area.bottom) top = area.bottom - bar.height
+  top = Math.max(area.top, top)
+  const left = Math.max(area.left, Math.min(element.left, area.right - bar.width))
+  return { left, top, hidden }
+}

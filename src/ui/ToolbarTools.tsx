@@ -4,7 +4,7 @@ import { StampPicker, type ChosenStamp } from './StampPicker'
 import { SHAPE_TOOLS, type Tool } from './tools'
 
 /** The second toolbar row: tools for adding to the page. */
-export function ToolbarTools({ tool, symbol, imageInputRef, onTool, onClearSelection, onSymbol, onStamp }: {
+export function ToolbarTools({ tool, symbol, imageInputRef, onTool, onClearSelection, onSymbol, onStamp, commentCount, commentsOpen, onToggleComments }: {
   tool: Tool
   symbol: string
   imageInputRef: RefObject<HTMLInputElement | null>
@@ -12,6 +12,9 @@ export function ToolbarTools({ tool, symbol, imageInputRef, onTool, onClearSelec
   onClearSelection: () => void
   onSymbol: (symbol: string) => void
   onStamp: (stamp: ChosenStamp) => void
+  commentCount: number
+  commentsOpen: boolean
+  onToggleComments: () => void
 }) {
   const shapeToolButton = (option: (typeof SHAPE_TOOLS)[number]) => (
     <button
@@ -71,6 +74,27 @@ export function ToolbarTools({ tool, symbol, imageInputRef, onTool, onClearSelec
             onClick={() => onTool('text')}
           >
             T Text
+          </button>
+          <button
+            type="button"
+            className="tool"
+            aria-pressed={tool === 'comment'}
+            title="Kommentar-Werkzeug: Klick auf die Seite setzt eine Notiz"
+            onClick={() => {
+              onClearSelection()
+              onTool('comment')
+            }}
+          >
+            💬 Kommentar
+          </button>
+          <button
+            type="button"
+            aria-pressed={commentsOpen}
+            aria-label={`Kommentarliste (${commentCount})`}
+            title="Alle Kommentare am Rand anzeigen"
+            onClick={onToggleComments}
+          >
+            Kommentare <span className="comment-count">{commentCount}</span>
           </button>
           <button
             type="button"

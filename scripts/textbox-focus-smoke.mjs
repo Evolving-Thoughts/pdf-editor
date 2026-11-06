@@ -11,7 +11,7 @@ async function place(pageIndex, x, y) {
 async function activeBox() {
   const box = p.locator('.textbox.selected')
   assert.equal(await box.count(), 1, 'Exactly the newly created/focused textbox stays selected')
-  assert.equal(await box.locator('.minibar').count(), 1, 'Formatting bar is present immediately')
+  assert.equal(await p.locator('.minibar').count(), 1, 'Formatting bar is present immediately')
   assert.equal(await box.locator('textarea').evaluate(el => el === document.activeElement), true, 'Textbox has typing focus')
   return box
 }
@@ -32,20 +32,20 @@ try {
   assert.equal(await p.locator('.textbox').count(), 2, 'Completed textbox remains')
   assert.equal(await p.locator('.textbox textarea').first().inputValue(), 'Erster Text')
   // A font change in an empty textbox must keep it alive and return typing focus.
-  await box.getByRole('combobox', { name: 'Schriftart', exact: true }).selectOption('carlito')
+  await p.locator('.minibar').getByRole('combobox', { name: 'Schriftart', exact: true }).selectOption('carlito')
   box = await activeBox(); await p.keyboard.type('Carlito direkt tippen')
   assert.equal(await box.locator('textarea').inputValue(), 'Carlito direkt tippen')
   // Changing an existing text preserves the insertion point, rather than replacing content.
   await box.locator('textarea').press('Home')
-  await box.getByRole('combobox', { name: 'Schriftart', exact: true }).selectOption('lato')
+  await p.locator('.minibar').getByRole('combobox', { name: 'Schriftart', exact: true }).selectOption('lato')
   box = await activeBox(); await p.keyboard.type('Neu: ')
   assert.equal(await box.locator('textarea').inputValue(), 'Neu: Carlito direkt tippen')
   // Keyboard selection also restores text focus; Caveat retains its native-style rules.
-  const font = box.getByRole('combobox', { name: 'Schriftart', exact: true })
+  const font = p.locator('.minibar').getByRole('combobox', { name: 'Schriftart', exact: true })
   await font.focus(); await p.keyboard.press('Home'); await p.keyboard.press('ArrowDown')
   box = await activeBox()
-  await box.getByRole('combobox', { name: 'Schriftart', exact: true }).selectOption('caveat')
-  box = await activeBox(); assert.equal(await box.getByRole('button', { name: 'Kursiv', exact: true }).isDisabled(), true)
+  await p.locator('.minibar').getByRole('combobox', { name: 'Schriftart', exact: true }).selectOption('caveat')
+  box = await activeBox(); assert.equal(await p.locator('.minibar').getByRole('button', { name: 'Kursiv', exact: true }).isDisabled(), true)
   await p.keyboard.type('!')
   assert.ok((await box.locator('textarea').inputValue()).includes('!'))
   await place(1, 120, 220); await activeBox()
@@ -57,7 +57,7 @@ try {
   await button('T Text').click()
   await p.locator('.pages .page').first().tap({ position: { x: 80, y: 320 } })
   box = await activeBox()
-  await box.getByRole('combobox', { name: 'Schriftart', exact: true }).selectOption('eb-garamond')
+  await p.locator('.minibar').getByRole('combobox', { name: 'Schriftart', exact: true }).selectOption('eb-garamond')
   box = await activeBox(); await p.keyboard.type('Mobil')
   assert.equal(await box.locator('textarea').inputValue(), 'Mobil')
   await p.locator('.pages .page').first().tap({ position: { x: 80, y: 420 } })

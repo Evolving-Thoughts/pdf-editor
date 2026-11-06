@@ -92,7 +92,24 @@ export interface ShapeOverlay extends OverlayClipping {
   markerPoints?: StrokePoint[]
 }
 
-export type Overlay = Textbox | Stroke | ImageOverlay | ShapeOverlay
+/** A note pinned to a page point (displayed page points, bottom-left origin); exported as a PDF text annotation. */
+export interface CommentOverlay extends OverlayClipping {
+  kind: 'comment'
+  id: string
+  pageId: string
+  /** The pin's tip on the page. */
+  x: number
+  y: number
+  note: string
+  /** Milliseconds since epoch, for ordering and the annotation date. */
+  createdAt: number
+}
+
+export type Overlay = Textbox | Stroke | ImageOverlay | ShapeOverlay | CommentOverlay
+
+export function isComment(overlay: Overlay): overlay is CommentOverlay {
+  return 'kind' in overlay && overlay.kind === 'comment'
+}
 
 export function isShape(overlay: Overlay): overlay is ShapeOverlay {
   return 'kind' in overlay && overlay.kind === 'shape'

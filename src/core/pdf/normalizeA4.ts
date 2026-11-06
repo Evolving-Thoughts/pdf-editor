@@ -2,7 +2,7 @@ import { PDFArray, PDFDict, PDFDocument, PDFName, PDFNumber, PDFString, PDFHexSt
   clip, concatTransformationMatrix, endPath, popGraphicsState, pushGraphicsState, rectangle,
 } from 'pdf-lib'
 import { a4Size, pageSize, XFA_UNSUPPORTED } from '../pages'
-import { cloneOverlay, isShape, isStroke, isTextbox } from '../model'
+import { cloneOverlay, isComment, isShape, isStroke, isTextbox } from '../model'
 import { capturePageClip } from '../overlayClipping'
 import { clipAnnotation } from './clipAnnotation'
 import { carriesXfa } from './acroForm'
@@ -59,6 +59,7 @@ export async function normalizeA4({ original, state }: DocumentSnapshot) {
         overlay.clips = overlay.clips?.map(polygon => polygon.map(p => ({ x: p.x * factor + dx, y: p.y * factor + dy })))
       } else {
         overlay.x = overlay.x * factor + dx; overlay.y = overlay.y * factor + dy
+        if (isComment(overlay)) continue
         if (isTextbox(overlay)) overlay.fontSize *= factor
         else { overlay.width *= factor; overlay.height *= factor; if (isShape(overlay)) overlay.strokeWidth *= factor }
       }

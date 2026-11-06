@@ -1,5 +1,5 @@
 import type { Command } from './commands'
-import { assignEditorState, cloneOverlay, copyEditorState, isStroke, isTextbox, type Overlay, type EditorState } from './model'
+import { assignEditorState, cloneOverlay, copyEditorState, isComment, isStroke, isTextbox, type Overlay, type EditorState } from './model'
 import { assertPageBudget, assertSourceBudget } from './pdf/documentBudget'
 import { renumberLabels } from './labelNumbers'
 
@@ -142,6 +142,10 @@ function transformOverlay(
   if (isStroke(overlay)) {
     overlay.points = overlay.points.map((p) => point(p.x, p.y))
     if (overlay.clips) overlay.clips = overlay.clips.map(polygon => polygon.map(p => point(p.x, p.y)))
+    return
+  }
+  if (isComment(overlay)) {
+    Object.assign(overlay, point(overlay.x, overlay.y))
     return
   }
   if (isTextbox(overlay)) {

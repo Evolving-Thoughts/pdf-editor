@@ -33,7 +33,7 @@ check('Esc ohne Tippen räumt leere Box weg', (await page.locator('.textbox').co
 
 // 0b. Blurring into the minibar keeps the empty box (e.g. set size first)
 await page.locator('.page').first().click({ position: { x: 500, y: 500 } })
-await page.locator('.textbox button[aria-label="Schriftgröße"]').click()
+await page.locator('.minibar button[aria-label="Schriftgröße"]').click()
 check('Leere Box bleibt bei Minibar-Klick', (await page.locator('.textbox').count()) === 1)
 check('Größen-Popover offen ohne Tippen', await page.locator('.font-size-popover').isVisible())
 await page.keyboard.press('Escape') // close picker
@@ -79,25 +79,25 @@ check('Original-PDF-Bytes im Entwurf enthalten', saved.length === 1 && saved[0].
 await page.locator('.textbox textarea').click({ force: true })
 await page.keyboard.press('Escape')
 const box = page.locator('.textbox')
-check('Minibar sichtbar nach Auswahl', await box.locator('.minibar').isVisible())
+check('Minibar sichtbar nach Auswahl', await page.locator('.minibar').isVisible())
 
 // 3. Font select offers ten text families; symbols are not formatting
-check('10 Einträge im Schriftart-Select', (await box.locator('select[aria-label="Schriftart"] option').count()) === 10)
-check('Kein Symbol-Picker in der Textbox-Leiste', (await box.locator('button[aria-label="Symbol auswählen"]').count()) === 0)
+check('10 Einträge im Schriftart-Select', (await page.locator('.minibar').locator('select[aria-label="Schriftart"] option').count()) === 10)
+check('Kein Symbol-Picker in der Textbox-Leiste', (await page.locator('.minibar').locator('button[aria-label="Symbol auswählen"]').count()) === 0)
 
 // 4. B/I/U toggle buttons switch styles on AND off again
-const boldBtn = box.locator('button[aria-label="Fett"]')
+const boldBtn = page.locator('.minibar').locator('button[aria-label="Fett"]')
 await boldBtn.click()
 check('B aktiviert Fett', (await box.evaluate((el) => getComputedStyle(el).fontWeight)) === '700')
 await boldBtn.click()
 check('B erneut deaktiviert Fett', (await box.evaluate((el) => getComputedStyle(el).fontWeight)) === '400')
-const italicBtn = box.locator('button[aria-label="Kursiv"]')
+const italicBtn = page.locator('.minibar').locator('button[aria-label="Kursiv"]')
 await italicBtn.click()
 check('I aktiviert Kursiv', (await box.evaluate((el) => getComputedStyle(el).fontStyle)) === 'italic')
 await italicBtn.click()
 check('I erneut deaktiviert Kursiv', (await box.evaluate((el) => getComputedStyle(el).fontStyle)) === 'normal')
 await italicBtn.click()
-const fontSelect = box.getByRole('combobox', { name: 'Schriftart', exact: true })
+const fontSelect = page.locator('.minibar').getByRole('combobox', { name: 'Schriftart', exact: true })
 await fontSelect.selectOption('caveat')
 check('Caveat deaktiviert nicht vorhandenes Kursiv', await italicBtn.isDisabled() && await italicBtn.getAttribute('aria-pressed') === 'false')
 check('Caveat verwendet keinen synthetischen Kursivstil', (await box.evaluate(el => getComputedStyle(el).fontStyle)) === 'normal')
@@ -107,7 +107,7 @@ await page.getByRole('button', { name: 'Wiederholen', exact: true }).click()
 check('Redo stellt Caveat ohne Kursiv wieder her', await fontSelect.inputValue() === 'caveat' && await italicBtn.isDisabled())
 await fontSelect.selectOption('helvetica')
 
-const underlineBtn = box.locator('button[aria-label="Unterstrichen"]')
+const underlineBtn = page.locator('.minibar').locator('button[aria-label="Unterstrichen"]')
 const ta = box.locator('textarea')
 await underlineBtn.click()
 check('U aktiviert Unterstrichen (im Text)', ((await ta.evaluate((el) => getComputedStyle(el).textDecorationLine))).includes('underline'))
@@ -115,9 +115,9 @@ await underlineBtn.click()
 check('U erneut deaktiviert Unterstrichen', !((await ta.evaluate((el) => getComputedStyle(el).textDecorationLine))).includes('underline'))
 
 // 5. Font-size picker: opens with input + all 7 presets visible
-const sizeButton = box.locator('button[aria-label="Schriftgröße"]')
+const sizeButton = page.locator('.minibar').locator('button[aria-label="Schriftgröße"]')
 await sizeButton.click()
-const popover = box.locator('.font-size-popover')
+const popover = page.locator('.minibar').locator('.font-size-popover')
 check('Größen-Popover geht auf', await popover.isVisible())
 check('Alle 7 Vorschläge sichtbar', (await popover.locator('button').count()) === 7)
 
@@ -128,7 +128,7 @@ check('Popover nach Preset-Klick zu', (await popover.count()) === 0)
 
 // 7. Free input: 13.5
 await sizeButton.click()
-const sizeInput = box.locator('input[aria-label="Schriftgröße eingeben"]')
+const sizeInput = page.locator('.minibar').locator('input[aria-label="Schriftgröße eingeben"]')
 await sizeInput.fill('13.5')
 await sizeInput.press('Enter')
 check('Freie Schriftgröße 13.5 übernommen', (await box.evaluate((el) => getComputedStyle(el).fontSize)) === '13.5px')
@@ -154,7 +154,7 @@ await sizeButton.click()
 await sizeInput.fill('10')
 await sizeInput.press('Escape')
 check('Esc im Picker verwirft', (await sizeButton.textContent()).includes('200'))
-await box.locator('button[aria-label="Schriftgröße"]').click() // reopen
+await page.locator('.minibar').locator('button[aria-label="Schriftgröße"]').click() // reopen
 await sizeInput.fill('13.5')
 await sizeInput.press('Enter')
 
@@ -194,7 +194,7 @@ await symbolBox.locator('textarea').click({ force: true })
 await page.keyboard.type('abc')
 check('Symbol lässt sich nicht mit Text mischen', (await symbolBox.locator('textarea').inputValue()) === '✓')
 check('Symbolbox zeigt keine B/I/U-Buttons', (await symbolBox.locator('button[aria-label="Fett"]').count()) === 0)
-await symbolBox.locator('button[aria-label="Textbox löschen"]').click()
+await page.locator('.minibar button[aria-label="Textbox löschen"]').click()
 check('Symbolbox wieder gelöscht', (await page.locator('.textbox').count()) === 1)
 await page.waitForTimeout(900)
 
