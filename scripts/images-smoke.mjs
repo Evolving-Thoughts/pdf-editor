@@ -211,7 +211,7 @@ try {
   const rect = await mobile.locator('.image-overlay').boundingBox()
   const hit = await mobile.evaluate(({ x, y }) => Boolean(document.elementFromPoint(x, y)?.closest('.image-overlay')),
     { x: rect.x + rect.width / 2, y: rect.y + rect.height / 2 })
-  assert.ok(hit, 'The selected image remains reachable for touch drag, not covered by its options')
+  assert.ok(hit, `The selected image remains reachable for touch drag, not covered by its options ${JSON.stringify({ rect, options: await mobile.locator('.image-options').boundingBox(), workspace: await mobile.locator('.workspace').boundingBox(), pages: await mobile.locator('.pages').evaluate(el => ({ top: el.getBoundingClientRect().top, scrollTop: el.scrollTop })) })}`)
   const session = await mobile.context().newCDPSession(mobile)
   await session.send('Input.dispatchTouchEvent', { type: 'touchStart', touchPoints: [{ x: rect.x + rect.width / 2, y: rect.y + rect.height / 2 }] })
   await session.send('Input.dispatchTouchEvent', { type: 'touchMove', touchPoints: [{ x: rect.x + rect.width / 2 + 25, y: rect.y + rect.height / 2 + 25 }] })
