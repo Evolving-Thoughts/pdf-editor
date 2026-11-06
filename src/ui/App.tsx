@@ -693,9 +693,6 @@ export default function App() {
             onClearSelection={() => setSelectedId(null)}
             onSymbol={setSymbol}
             onStamp={setStamp}
-            commentCount={comments.length}
-            commentsOpen={commentsOpen}
-            onToggleComments={() => setCommentsOpen(open => !open)}
           />
         )}
       </header>
@@ -737,6 +734,8 @@ export default function App() {
           key={activeDraftId} workspaceRef={workspaceRef} shape={selectedShape} pageSize={pageSize(shapePage)} store={store} onSelect={setSelectedId}
           onStyle={shape=>{const next={fill:shape.fill,strokeColor:shape.strokeColor,strokeWidth:shape.strokeWidth};if(shape.shape==='marker')setMarkerStyle(next);else setShapeStyle(next)}} />}
         {formInfo?.pages === documentPages && !!formInfo?.unsupported.length && <p className="hint" role="status">Nicht unterstützte Formularfelder bleiben unverändert: {formInfo.unsupported.join(', ')}. Signaturen, XFA und PDF-JavaScript werden nicht ausgeführt oder neu erstellt.</p>}
+        {pdf && !pageBusy && !commentsOpen && comments.length > 0 && <button type="button" className="comments-toggle" aria-label={`Kommentarliste (${comments.length})`}
+          title="Alle Kommentare am Rand anzeigen" onClick={() => setCommentsOpen(true)}>💬 {comments.length}</button>}
         {pdf && !pageBusy && commentsOpen && <CommentsPanel comments={comments} selectedId={selectedId} store={store}
           pageNumber={(comment: CommentOverlay) => (documentPages?.findIndex(page => page.id === comment.pageId) ?? -1) + 1}
           onJump={jumpToComment} onClose={() => setCommentsOpen(false)} />}

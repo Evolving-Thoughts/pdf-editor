@@ -651,6 +651,15 @@
 }
 .comment-popover textarea { font: inherit; font-size: 13px; min-height: 72px; resize: vertical; }
 .comment-popover .comment-actions { display: flex; justify-content: space-between; gap: 6px; }
+.comments-toggle {
+  position: absolute;
+  top: 8px;
+  right: 8px;
+  z-index: 26;
+  min-width: 44px;
+  min-height: 44px;
+  box-shadow: var(--shadow);
+}
 .comments-panel {
   position: absolute;
   top: 8px;
