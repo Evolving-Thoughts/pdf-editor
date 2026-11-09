@@ -78,3 +78,15 @@ test('the settings bar sits above its element, below when there is no room, and 
   // Element scrolled out of view: no floating bar over other content.
   expect(floatingBarPosition({ left: 50, top: 20, right: 150, bottom: 40 }, bar, area).hidden).toBe(true)
 })
+
+test('undoing a keyboard rotation of an unrotated box removes the rotation again', async () => {
+  const { nudgeOverlay } = await import('../../src/core/commands')
+  const state: EditorState = { overlays: [] }
+  const stack = new CommandStack(state)
+  stack.execute(addOverlay(box()))
+  stack.execute(nudgeOverlay('b', { rotation: undefined }, { rotation: 1 }, 'rotate'))
+  stack.execute(nudgeOverlay('b', { rotation: 1 }, { rotation: 2 }, 'rotate'))
+  expect((state.overlays[0] as Textbox).rotation).toBe(2)
+  stack.undo()
+  expect('rotation' in state.overlays[0] && (state.overlays[0] as Textbox).rotation !== undefined).toBe(false)
+})

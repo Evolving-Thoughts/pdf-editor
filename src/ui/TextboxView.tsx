@@ -288,7 +288,7 @@ export function TextboxView({ box, zoom, pageSize, selected, tool, store, onSele
   const rotation = position.rotation
   const turnBy = (degrees: number) => {
     const next = rotateTextbox((box.rotation ?? 0) + degrees)
-    if (next !== (box.rotation ?? 0)) store.dispatch(nudgeOverlay(box.id, { rotation: box.rotation ?? 0 }, { rotation: next }, 'rotate'))
+    if (next !== (box.rotation ?? 0)) store.dispatch(nudgeOverlay(box.id, { rotation: box.rotation }, { rotation: next }, 'rotate'))
   }
 
   const left = position.x * zoom
