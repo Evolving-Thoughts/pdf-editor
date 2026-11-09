@@ -184,7 +184,9 @@ export function TextboxView({ box, zoom, pageSize, selected, tool, store, onSele
       : { ...data.before, ...moveTextbox(data.before, dx, dy, pageSize) },
     (next) => {
       if (next.x === box.x && next.y === box.y && next.rotation === (box.rotation ?? 0)) return
-      store.dispatch(updateOverlay(box.id, { x: box.x, y: box.y, rotation: box.rotation }, next))
+      // Only a real turn writes a rotation; a plain move keeps an absent one absent.
+      const rotation = next.rotation === (box.rotation ?? 0) ? box.rotation : next.rotation
+      store.dispatch(updateOverlay(box.id, { x: box.x, y: box.y, rotation: box.rotation }, { x: next.x, y: next.y, rotation }))
     },
   )
   const position = drag.shown ?? placement

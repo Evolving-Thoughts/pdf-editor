@@ -97,7 +97,7 @@ export interface CommentOverlay extends OverlayClipping {
   kind: 'comment'
   id: string
   pageId: string
-  /** The pin's tip on the page. */
+  /** The pin's top-left corner on the page (PDF points, y upwards); the pin extends right and down. */
   x: number
   y: number
   note: string
