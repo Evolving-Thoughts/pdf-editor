@@ -2,7 +2,7 @@
 // Every state change goes through a reversible Command; no direct mutations
 // from the UI. A running gesture is only a preview in its view.
 // Commands replace the overlay list and changed overlays: views compare by reference.
-import type { EditorState, ImageOverlay, Overlay, Textbox } from './model'
+import type { CommentOverlay, EditorState, ImageOverlay, Overlay, Textbox } from './model'
 import type { ShapeChanges } from './shapes'
 import { cloneOverlay, isMarker, isStroke } from './model'
 
@@ -118,7 +118,7 @@ export function removeOverlay(overlay: Overlay): Command {
 
 /** Source data is immutable; edits only change geometry and proportion locking. */
 export type ImageChanges = Pick<ImageOverlay, 'x' | 'y' | 'width' | 'height' | 'lockAspectRatio' | 'rotation'>
-type OverlayChanges = Partial<Textbox> | ImageChanges | ShapeChanges
+type OverlayChanges = Partial<Textbox> | ImageChanges | ShapeChanges | Partial<Pick<CommentOverlay, 'x' | 'y' | 'note'>>
 
 export function updateOverlay(id: string, before: OverlayChanges, after: OverlayChanges): Command {
   const from = { ...before }, to = { ...after }

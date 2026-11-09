@@ -1,11 +1,14 @@
 import './fonts.css'
 import { fontSupportsItalic } from '../core/fonts'
 import { useCallback, useEffect, useLayoutEffect, useRef, useState, type Dispatch, type SetStateAction } from 'react'
-import { updateOverlay, removeOverlay } from '../core/commands'
+import { nudgeOverlay, updateOverlay, removeOverlay } from '../core/commands'
 import type { EditorStore } from '../core/editorStore'
 import type { Bounds } from '../core/images/geometry'
 import type { OverlayFont, Textbox } from '../core/model'
-import { moveTextbox, type GestureStep } from '../core/overlayGesture'
+import { arrowTurn, moveTextbox, pointerAngle } from '../core/overlayGesture'
+import { rotateTextbox, textStyleOf, type TextStyle } from '../core/textboxes'
+import { FloatingBar } from './FloatingBar'
+import { RotationIcon } from './ImageView'
 import { useOverlayGesture } from './useOverlayGesture'
 import { TEXT_LINE_HEIGHT as LINE_HEIGHT } from '../core/textLayout'
 import { FONT_CSS } from './fontStacks'
@@ -157,11 +160,14 @@ interface TextboxViewProps {
   tool: Tool
   store: EditorStore
   onSelect: Dispatch<SetStateAction<string | null>>
+  /** Called with the box's settings after the user changes them: the next textbox takes them over. */
+  onStyle?: (style: TextStyle) => void
 }
 
-interface Point { x: number; y: number }
+interface Placement { x: number; y: number; rotation: number }
+interface Gesture { before: Placement; rotating: boolean; center: { x: number; y: number }; startAngle: number }
 
-export function TextboxView({ box, zoom, pageSize, selected, tool, store, onSelect }: TextboxViewProps) {
+export function TextboxView({ box, zoom, pageSize, selected, tool, store, onSelect, onStyle }: TextboxViewProps) {
   const [draft, setDraft] = useState(box.text)
   const [focused, setFocused] = useState(false)
   const beforeEdit = useRef(box.text)
@@ -169,12 +175,35 @@ export function TextboxView({ box, zoom, pageSize, selected, tool, store, onSele
   const baselineLineRef = useRef<HTMLSpanElement>(null)
   const baselineMarkerRef = useRef<HTMLSpanElement>(null)
   const anchorRef = useRef<HTMLDivElement>(null)
-  const drag = useOverlayGesture(
+  const barRef = useRef<HTMLDivElement>(null)
+  const placement: Placement = { x: box.x, y: box.y, rotation: box.rotation ?? 0 }
+  const drag = useOverlayGesture<Gesture, Placement>(
     () => ({ zoom, version: store.getVersion(), tool, active: true }),
-    ({ data, dx, dy }: GestureStep<Point>) => moveTextbox(data, dx, dy, pageSize),
-    (next) => { if (next.x !== box.x || next.y !== box.y) store.dispatch(updateOverlay(box.id, { x: box.x, y: box.y }, next)) },
+    ({ data, dx, dy, sample }) => data.rotating
+      ? { ...data.before, rotation: rotateTextbox(data.before.rotation + pointerAngle(data.center, sample) - data.startAngle, sample.shiftKey) }
+      : { ...data.before, ...moveTextbox(data.before, dx, dy, pageSize) },
+    (next) => {
+      if (next.x === box.x && next.y === box.y && next.rotation === (box.rotation ?? 0)) return
+      // Only a real turn writes a rotation; a plain move keeps an absent one absent.
+      const rotation = next.rotation === (box.rotation ?? 0) ? box.rotation : next.rotation
+      store.dispatch(updateOverlay(box.id, { x: box.x, y: box.y, rotation: box.rotation }, { x: next.x, y: next.y, rotation }))
+    },
   )
-  const position = drag.shown ?? box
+  const position = drag.shown ?? placement
+  /** The baseline origin on screen: the textbox turns around this point. */
+  const origin = () => {
+    const page = anchorRef.current?.closest('.page')?.getBoundingClientRect()
+    return page ? { x: page.left + box.x * zoom, y: page.top + (pageSize.height - box.y) * zoom } : { x: 0, y: 0 }
+  }
+  const beginGesture = (event: React.PointerEvent<HTMLElement>, rotating: boolean) => {
+    const center = origin()
+    if (drag.begin(event, { before: placement, rotating, center, startAngle: pointerAngle(center, event) })) onSelect(box.id)
+  }
+  const changeStyle = (before: Partial<Textbox>, after: Partial<Textbox>) => {
+    store.dispatch(updateOverlay(box.id, before, after))
+    const style = textStyleOf({ ...box, ...after })
+    if (style) onStyle?.(style)
+  }
 
   const displayText = focused ? draft : box.text
   const isSymbol = box.font === 'zapfdingbats'
@@ -227,9 +256,9 @@ export function TextboxView({ box, zoom, pageSize, selected, tool, store, onSele
       anchorRef.current.style.left = `${position.x * zoom - insetX}px`
       anchorRef.current.style.top = `${(pageSize.height - position.y) * zoom - baseline - insetY}px`
       anchorRef.current.style.transformOrigin = `${insetX}px ${baseline + insetY}px`
-      anchorRef.current.style.transform = `rotate(${box.rotation ?? 0}deg)`
+      anchorRef.current.style.transform = `rotate(${position.rotation}deg)`
     }
-  }, [fontRevision, displayText, box.font, box.bold, box.italic, box.fontSize, position.x, position.y, box.rotation, pageSize.height, zoom])
+  }, [fontRevision, displayText, box.font, box.bold, box.italic, box.fontSize, position.x, position.y, position.rotation, pageSize.height, zoom])
 
   // Focus the textarea when a new (still empty) box gets selected.
   useEffect(() => {
@@ -258,10 +287,10 @@ export function TextboxView({ box, zoom, pageSize, selected, tool, store, onSele
     store.dispatch(updateOverlay(box.id, { text: beforeEdit.current }, { text: draft }))
   }
 
-  // Selection tool: a surface over the text makes the whole frame draggable;
-  // double-click enters text editing. Text tool: the textarea is directly editable.
-  const onSurfacePointerDown = (event: React.PointerEvent<HTMLDivElement>) => {
-    if (drag.begin(event, { x: box.x, y: box.y })) onSelect(box.id)
+  const rotation = position.rotation
+  const turnBy = (degrees: number) => {
+    const next = rotateTextbox((box.rotation ?? 0) + degrees)
+    if (next !== (box.rotation ?? 0)) store.dispatch(nudgeOverlay(box.id, { rotation: box.rotation }, { rotation: next }, 'rotate'))
   }
 
   const left = position.x * zoom
@@ -271,6 +300,7 @@ export function TextboxView({ box, zoom, pageSize, selected, tool, store, onSele
     <div
       ref={anchorRef}
       className={`textbox${selected ? ' selected' : ''}`}
+      data-textbox-id={box.id}
       style={{ left, top, ...fontCss, fontSize: box.fontSize * zoom }}
       onPointerDown={(event) => {
         event.stopPropagation()
@@ -291,14 +321,14 @@ export function TextboxView({ box, zoom, pageSize, selected, tool, store, onSele
         />
       </span>
       {selected && (
-        <div className="minibar">
+        <FloatingBar anchor={anchorRef} barRef={barRef} className="minibar" label="Texteinstellungen">
           {!isSymbol && (
             <select
               aria-label="Schriftart"
               value={box.font}
               onChange={(event) => {
                 const font = event.target.value as OverlayFont
-                store.dispatch(updateOverlay(box.id, { font: box.font, italic: box.italic }, { font, italic: box.italic && fontSupportsItalic(font) }))
+                changeStyle({ font: box.font, italic: box.italic }, { font, italic: box.italic && fontSupportsItalic(font) })
                 // Continue typing at the existing caret after committing the font choice.
                 textareaRef.current?.focus({ preventScroll: true })
               }}
@@ -319,7 +349,7 @@ export function TextboxView({ box, zoom, pageSize, selected, tool, store, onSele
                 aria-label="Fett"
                 aria-pressed={box.bold}
                 title="Fett"
-                onClick={() => store.dispatch(updateOverlay(box.id, { bold: box.bold }, { bold: !box.bold }))}
+                onClick={() => changeStyle({ bold: box.bold }, { bold: !box.bold })}
               >
                 <b>B</b>
               </button>
@@ -330,7 +360,7 @@ export function TextboxView({ box, zoom, pageSize, selected, tool, store, onSele
                 aria-pressed={box.italic && fontSupportsItalic(box.font)}
                 disabled={!fontSupportsItalic(box.font)}
                 title={fontSupportsItalic(box.font) ? 'Kursiv' : 'Caveat bietet keinen kursiven Schnitt'}
-                onClick={() => store.dispatch(updateOverlay(box.id, { italic: box.italic }, { italic: !box.italic }))}
+                onClick={() => changeStyle({ italic: box.italic }, { italic: !box.italic })}
               >
                 <i>I</i>
               </button>
@@ -340,9 +370,7 @@ export function TextboxView({ box, zoom, pageSize, selected, tool, store, onSele
                 aria-label="Unterstrichen"
                 aria-pressed={box.underline}
                 title="Unterstrichen"
-                onClick={() =>
-                  store.dispatch(updateOverlay(box.id, { underline: box.underline }, { underline: !box.underline }))
-                }
+                onClick={() => changeStyle({ underline: box.underline }, { underline: !box.underline })}
               >
                 <u>U</u>
               </button>
@@ -351,11 +379,19 @@ export function TextboxView({ box, zoom, pageSize, selected, tool, store, onSele
           <FontSizePicker
             value={box.fontSize}
             onCommit={(size) => {
-              if (size !== box.fontSize) {
-                store.dispatch(updateOverlay(box.id, { fontSize: box.fontSize }, { fontSize: size }))
-              }
+              if (size !== box.fontSize) changeStyle({ fontSize: box.fontSize }, { fontSize: size })
             }}
           />
+          {(box.rotation ?? 0) !== 0 && (
+            <button
+              type="button"
+              aria-label="Drehung zurücksetzen"
+              title={`Gedreht um ${Math.round(box.rotation ?? 0)}° · zurück auf 0°`}
+              onClick={() => store.dispatch(updateOverlay(box.id, { rotation: box.rotation }, { rotation: 0 }))}
+            >
+              {Math.round(box.rotation ?? 0)}°
+            </button>
+          )}
           <button
             type="button"
             aria-label="Textbox löschen"
@@ -366,7 +402,7 @@ export function TextboxView({ box, zoom, pageSize, selected, tool, store, onSele
           >
             🗑
           </button>
-        </div>
+        </FloatingBar>
       )}
       <textarea
         ref={textareaRef}
@@ -396,9 +432,11 @@ export function TextboxView({ box, zoom, pageSize, selected, tool, store, onSele
         }}
         onBlur={(event) => {
           setFocused(false)
+          // The settings bar lives in a portal, outside the textbox element.
           const staysInside =
             event.relatedTarget instanceof Node &&
-            event.currentTarget.closest('.textbox')?.contains(event.relatedTarget) === true
+            (event.currentTarget.closest('.textbox')?.contains(event.relatedTarget) === true ||
+              barRef.current?.contains(event.relatedTarget) === true)
           commitText(!staysInside)
         }}
       />
@@ -406,12 +444,46 @@ export function TextboxView({ box, zoom, pageSize, selected, tool, store, onSele
         <div
           className="drag-surface"
           title="Ziehen zum Verschieben, Doppelklick zum Bearbeiten"
-          onPointerDown={onSurfacePointerDown}
+          onPointerDown={(event) => beginGesture(event, false)}
           {...drag.pointer}
           onDoubleClick={() => {
             if (!isSymbol) textareaRef.current?.focus()
           }}
         />
+      )}
+      {selected && (
+        <>
+          {/* Moving works with every tool, also while typing: no switch to the selection tool. */}
+          <button
+            type="button"
+            className="textbox-grip"
+            aria-label="Textbox verschieben"
+            title="Ziehen zum Verschieben · Pfeiltasten: 1 pt, Shift: 10 pt"
+            style={{ left: -28, top: 0 }}
+            onPointerDown={(event) => beginGesture(event, false)}
+            {...drag.pointer}
+          >
+            ✥
+          </button>
+          <button
+            type="button"
+            className="textbox-rotate"
+            aria-label="Textbox drehen"
+            title={`Ziehen zum Drehen · Shift: 15°-Schritte · Pfeiltasten: 1° · jetzt ${Math.round(rotation)}°`}
+            style={{ right: -28, top: 0 }}
+            onPointerDown={(event) => beginGesture(event, true)}
+            {...drag.pointer}
+            onKeyDown={(event) => {
+              const turn = arrowTurn(event)
+              if (turn === null) return
+              event.preventDefault()
+              event.stopPropagation()
+              turnBy(turn)
+            }}
+          >
+            <RotationIcon clockwise />
+          </button>
+        </>
       )}
     </div>
   )

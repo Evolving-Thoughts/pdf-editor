@@ -95,7 +95,7 @@ const cases = [
 ]
 // The machine's spell checker paints squiggles a moment later, and the glyph comparison would see them.
 const hideEditorChrome = (page) => page.addStyleTag({
-  content: '.minibar { visibility: hidden; } .textbox textarea::spelling-error, .textbox textarea::grammar-error { text-decoration: none; }',
+  content: '.minibar, .textbox-grip, .textbox-rotate { visibility: hidden; } .textbox textarea::spelling-error, .textbox textarea::grammar-error { text-decoration: none; }',
 })
 async function runCase(page, test) {
   const pdf = await PDFDocument.create()

@@ -2,7 +2,8 @@
 // the scene it started in still holds, and arrow keys mean the same on every overlay.
 import { nudgeOverlay, type Command } from './commands'
 import { imageGeometry, moveImage, type Bounds } from './images/geometry'
-import { isImage, isShape, isTextbox, type Overlay } from './model'
+import { isComment, isImage, isShape, isTextbox, type Overlay } from './model'
+import { moveComment } from './comments'
 import { moveShape, shapeGeometry } from './shapes'
 
 export interface GestureScene {
@@ -99,5 +100,6 @@ export function nudgeCommand(overlay: Overlay, { dx, dy }: { dx: number; dy: num
     const before = shapeGeometry(overlay)
     return moved(before, moveShape(before, dx, dy, page))
   }
+  if (isComment(overlay)) return moved({ x: overlay.x, y: overlay.y }, moveComment(overlay, dx, dy, page))
   return isTextbox(overlay) ? moved({ x: overlay.x, y: overlay.y }, moveTextbox(overlay, dx, dy, page)) : null
 }

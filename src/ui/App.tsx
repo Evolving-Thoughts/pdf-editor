@@ -17,11 +17,14 @@ import { prepareRedaction } from '../core/pdf/redactDocument'
 import { RedactionBar } from './RedactionBar'
 import type { NativeWidget } from '../core/forms'
 import { inspectNativeForms, needsNativeFormInspection } from '../core/pdf/acroForm'
-import { useCallback, useEffect, useRef, useState, useSyncExternalStore } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react'
 import { addOverlay, clearDrawing, removeOverlay } from '../core/commands'
 import { EditorStore } from '../core/editorStore'
 import { DocumentSession } from '../core/documentSession'
-import { createId, isImage, isMarker, isShape, isStroke, isTextbox } from '../core/model'
+import { cloneOverlay, createId, isComment, isImage, isMarker, isShape, isStroke, isTextbox, type CommentOverlay, type Textbox } from '../core/model'
+import { documentComments } from '../core/comments'
+import { DEFAULT_TEXT_STYLE, pastedTextbox, type TextStyle } from '../core/textboxes'
+import { CommentsPanel } from './CommentsPanel'
 import { deleteDraft, DRAFT_SIZE_WARN_BYTES, loadDraft } from '../core/persistence/drafts'
 import { loadPdf } from '../core/pdf/loadPdf'
 import { importImage } from '../core/images/importImage'
@@ -94,6 +97,11 @@ export default function App() {
   const [eraserRadius, setEraserRadius] = useState(8)
   const [error, setError] = useState<string | null>(null)
   const [selectedId, setSelectedId] = useState<string | null>(null)
+  // The next textbox takes over the settings last chosen in this document.
+  const [textStyle, setTextStyle] = useState<TextStyle>(DEFAULT_TEXT_STYLE)
+  const [commentsOpen, setCommentsOpen] = useState(false)
+  /** In-app clipboard for Strg+C / Strg+V of textboxes. */
+  const textboxClipboard = useRef<Textbox | null>(null)
   const fileInputRef = useRef<HTMLInputElement>(null)
   const imageInputRef = useRef<HTMLInputElement>(null)
   const imageImportRef = useRef(0)
@@ -151,12 +159,16 @@ export default function App() {
     setError(problem instanceof Error ? problem.message : 'Die Seiten konnten nicht aktualisiert werden.')
   }), [documentPages, session])
   const selectedShape = overlays.find(o=>o.id===selectedId && isShape(o))
+  const comments = useMemo(() => documentComments({ overlays, pages: documentPages }), [overlays, documentPages])
+  const commentNumbers = useMemo(() => new Map(comments.map((comment, index) => [comment.id, index + 1])), [comments])
   const shapePage = selectedShape ? documentPages?.find(page => page.id === selectedShape.pageId) : undefined
 
   const resetView = useCallback(() => {
     views.reset()
     setSelectedId(null)
     setTool('select')
+    setTextStyle(DEFAULT_TEXT_STYLE)
+    textboxClipboard.current = null
     setRedactionFill('black')
     setCropActive(false)
   }, [views])
@@ -293,6 +305,32 @@ export default function App() {
       if (pdf && (event.ctrlKey || event.metaKey) && event.key.toLowerCase()==='f') {
         event.preventDefault();views.openSearch(visiblePageIndex());setSelectedId(null);return
       }
+      const shortcut = (event.ctrlKey || event.metaKey) && !event.altKey && !event.shiftKey ? event.key.toLowerCase() : null
+      if (shortcut === 'c' && selectedId) {
+        const box = store.state.overlays.find(o => o.id === selectedId)
+        // Inside the box's own text field, a text selection keeps the normal text copy.
+        const field = target instanceof HTMLTextAreaElement && target.closest('.textbox') ? target : null
+        if (box && isTextbox(box) && (!target.closest('textarea, input, select, [contenteditable]') || (field && field.selectionStart === field.selectionEnd))) {
+          event.preventDefault()
+          textboxClipboard.current = { ...(cloneOverlay(box) as Textbox), text: field ? field.value : box.text }
+          return
+        }
+      }
+      if (shortcut === 'v' && textboxClipboard.current && !target.closest('textarea, input, select, [contenteditable]')) {
+        const copied = textboxClipboard.current
+        const pages = store.state.pages ?? []
+        const page = pages.find(candidate => candidate.id === copied.pageId) ?? pages[visiblePageIndex()]
+        if (page) {
+          event.preventDefault()
+          const pasted = pastedTextbox(copied, pageSize(page), page.id)
+          store.dispatch(addOverlay(pasted))
+          // The next paste lands one step further, not on top of this copy.
+          textboxClipboard.current = pasted
+          setTool(current => current === 'text' ? current : 'select')
+          setSelectedId(pasted.id)
+        }
+        return
+      }
       if (target.closest('textarea, input, select, [contenteditable]')) return
       if (event.key === 'Escape') {
         setSelectedId(null)
@@ -304,7 +342,7 @@ export default function App() {
         const mark=store.state.redactions?.find(m=>m.id===selectedId)
         if(mark){event.preventDefault();store.dispatch(replaceRedactions(store.state,store.state.redactions!.filter(m=>m.id!==mark.id)));setSelectedId(null);return}
         const box = store.state.overlays.find((o) => o.id === selectedId)
-        if (box && (isTextbox(box) || isImage(box) || isShape(box))) {
+        if (box && (isTextbox(box) || isImage(box) || isShape(box) || isComment(box))) {
           event.preventDefault()
           store.dispatch(removeOverlay(box))
           setSelectedId(null)
@@ -386,6 +424,21 @@ export default function App() {
     setSelectedId(issue.overlayId)
     requestAnimationFrame(() => pageElement(issue.pageIndex)?.scrollIntoView({ block: 'center' }))
   }, [pageElement, views])
+  const jumpToComment = useCallback((comment: CommentOverlay) => {
+    const index = store.state.pages?.findIndex(page => page.id === comment.pageId) ?? -1
+    if (index < 0) return
+    setTool(current => current === 'comment' ? current : 'select')
+    setSelectedId(comment.id)
+    const scroll = (tries: number) => {
+      const pin = pageElement(index)?.querySelector<HTMLElement>(`[data-comment-id="${comment.id}"]`)
+      if (pin) pin.scrollIntoView({ block: 'center', inline: 'nearest' })
+      else {
+        pageElement(index)?.scrollIntoView({ block: 'center' })
+        if (tries < 20) requestAnimationFrame(() => scroll(tries + 1))
+      }
+    }
+    requestAnimationFrame(() => scroll(0))
+  }, [pageElement, store])
   const onApplyRedactions = async () => {
     const draft=session.draft
     if(!draft||redactionBusy||pageBusy||!store.state.redactions?.length)return
@@ -681,6 +734,11 @@ export default function App() {
           key={activeDraftId} workspaceRef={workspaceRef} shape={selectedShape} pageSize={pageSize(shapePage)} store={store} onSelect={setSelectedId}
           onStyle={shape=>{const next={fill:shape.fill,strokeColor:shape.strokeColor,strokeWidth:shape.strokeWidth};if(shape.shape==='marker')setMarkerStyle(next);else setShapeStyle(next)}} />}
         {formInfo?.pages === documentPages && !!formInfo?.unsupported.length && <p className="hint" role="status">Nicht unterstützte Formularfelder bleiben unverändert: {formInfo.unsupported.join(', ')}. Signaturen, XFA und PDF-JavaScript werden nicht ausgeführt oder neu erstellt.</p>}
+        {pdf && !pageBusy && !commentsOpen && comments.length > 0 && <button type="button" className="comments-toggle" aria-label={`Kommentarliste (${comments.length})`}
+          title="Alle Kommentare am Rand anzeigen" onClick={() => setCommentsOpen(true)}>💬 {comments.length}</button>}
+        {pdf && !pageBusy && commentsOpen && <CommentsPanel comments={comments} selectedId={selectedId} store={store}
+          pageNumber={(comment: CommentOverlay) => (documentPages?.findIndex(page => page.id === comment.pageId) ?? -1) + 1}
+          onJump={jumpToComment} onClose={() => setCommentsOpen(false)} />}
         <div className="pages">
         {pdf && !pageBusy &&
           (documentPages ?? Array.from({length:pdf.pageCount},(_,index)=>({id:String(index)}))).map((page,index) => (
@@ -715,6 +773,9 @@ export default function App() {
               onSelect={setSelectedId}
               onImageDrop={(file, pageIndex, point) => void onImportImage(file, pageIndex, point)}
               onPlaceStamp={placeStamp}
+              textStyle={textStyle}
+              onTextStyle={setTextStyle}
+              commentNumbers={commentNumbers}
             />
             </VirtualPage>
           ))}

@@ -74,6 +74,19 @@ export function ToolbarTools({ tool, symbol, imageInputRef, onTool, onClearSelec
           </button>
           <button
             type="button"
+            className="tool"
+            aria-pressed={tool === 'comment'}
+            title="Kommentar-Werkzeug: Klick auf die Seite setzt eine Notiz"
+            aria-label="💬 Kommentar"
+            onClick={() => {
+              onClearSelection()
+              onTool('comment')
+            }}
+          >
+            💬
+          </button>
+          <button
+            type="button"
             onClick={() => imageInputRef.current?.click()}
             aria-label="Bild einfügen"
             title="PNG- oder JPG-Bild einfügen · auch per Drag & Drop"

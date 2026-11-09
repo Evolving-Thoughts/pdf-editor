@@ -8,7 +8,10 @@ import { resolvedOverlayClips } from '../core/overlayClipping'
 import { addOverlay, replaceOverlays } from '../core/commands'
 import { eraseStrokes, strokeToSvgPath } from '../core/drawing'
 import type { EditorStore } from '../core/editorStore'
-import { createId, isImage, isShape, isStroke, type Overlay, type StrokePoint, type Textbox } from '../core/model'
+import { createId, isComment, isImage, isShape, isStroke, type Overlay, type StrokePoint } from '../core/model'
+import { createComment } from '../core/comments'
+import { createSymbolBox, createTextbox, DEFAULT_TEXT_STYLE, type TextStyle } from '../core/textboxes'
+import { CommentView } from './CommentView'
 import type { PageSize, PdfHandle } from '../core/pdf/loadPdf'
 import { ImageView } from './ImageView'
 import { createShape, MARKER_OPACITY, shapeToSvgPath, type ShapeStyle } from '../core/shapes'
@@ -43,6 +46,11 @@ interface PageViewProps {
   shapeStyle: ShapeStyle
   markerStyle: ShapeStyle
   eraserRadius?: number
+  /** Settings for the next new textbox. */
+  textStyle?: TextStyle
+  onTextStyle?: (style: TextStyle) => void
+  /** Reading-order numbers of the document's comments. */
+  commentNumbers?: ReadonlyMap<string, number>
 }
 
 interface DrawingGesture {
@@ -62,6 +70,7 @@ export function PageView({
   searchHits = [], activeSearchHit, redactionFill = 'black', nativeWidgets = [], highlightFields = false, onFormError,
   pdf, readOnly = false, pageIndex, pageId, zoom, tool, symbol, overlays, store, selectedId, onSelect,
   shapeStyle, markerStyle, onImageDrop, onPlaceStamp, strokeColor = '#111111', strokeWidth = 3, eraserRadius = 8,
+  textStyle = DEFAULT_TEXT_STYLE, onTextStyle, commentNumbers,
 }: PageViewProps) {
   const canvasRef = useRef<HTMLCanvasElement>(null)
   const wrapperRef = useRef<HTMLDivElement>(null)
@@ -145,7 +154,7 @@ export function PageView({
   const onPagePointerDown = (event: React.PointerEvent<HTMLDivElement>) => {
     if (readOnly) return
     if (!event.isPrimary || event.button !== 0 || gestureRef.current) return
-    if ((event.target as HTMLElement).closest('.textbox, .image-overlay, .shape-overlay, .native-widget, .redaction-overlay')) return
+    if ((event.target as HTMLElement).closest('.textbox, .image-overlay, .shape-overlay, .native-widget, .redaction-overlay, .comment-pin')) return
     if (tool === 'select') {
       onSelect(null)
       return
@@ -174,19 +183,14 @@ export function PageView({
       onPlaceStamp?.(pageId, pointFrom(event.clientX, event.clientY), pageSize)
       return
     }
-    const placingSymbol = tool === 'symbol'
-    const box: Textbox = {
-      id: createId(),
-      pageId,
-      x: cssX / zoom,
-      y: pageSize.height - cssY / zoom,
-      text: placingSymbol ? symbol : '',
-      font: placingSymbol ? 'zapfdingbats' : 'helvetica',
-      fontSize: 14,
-      bold: false,
-      italic: false,
-      underline: false,
+    const point = { x: cssX / zoom, y: pageSize.height - cssY / zoom }
+    if (tool === 'comment') {
+      const comment = createComment(pageId, point, pageSize)
+      store.dispatch(addOverlay(comment))
+      onSelect(comment.id)
+      return
     }
+    const box = tool === 'symbol' ? createSymbolBox(pageId, point, symbol) : createTextbox(pageId, point, textStyle)
     store.dispatch(addOverlay(box))
     onSelect(box.id)
   }
@@ -251,7 +255,7 @@ export function PageView({
   const shapePreview = isShapeTool(tool) && previewPoints.length > 0 ? createShape(tool, previewPoints, pageId, preview!.style) : null
   return (
     <div
-      className={`page${tool==='redact'?' redact-tool':''}${tool === 'text' ? ' text-tool' : ''}${tool === 'symbol' || tool === 'stamp' ? ' symbol-tool' : ''}${drawing ? ' drawing-tool' : ''}`}
+      className={`page${tool==='redact'?' redact-tool':''}${tool === 'text' ? ' text-tool' : ''}${tool === 'comment' ? ' comment-tool' : ''}${tool === 'symbol' || tool === 'stamp' ? ' symbol-tool' : ''}${drawing ? ' drawing-tool' : ''}`}
       ref={wrapperRef}
       data-page-index={pageIndex}
       inert={readOnly}
@@ -311,9 +315,12 @@ export function PageView({
           ) : isShape(overlay) ? (
             <ShapeView key={overlay.id} shape={overlay} zoom={zoom} pageSize={pageSize}
               selected={overlay.id === selectedId} tool={tool} store={store} onSelect={onSelect} />
+          ) : isComment(overlay) ? (
+            <CommentView key={overlay.id} comment={overlay} number={commentNumbers?.get(overlay.id) ?? 0} zoom={zoom} pageSize={pageSize}
+              selected={overlay.id === selectedId} tool={tool} store={store} onSelect={onSelect} />
           ) : (
             <TextboxView key={overlay.id} box={overlay} zoom={zoom} pageSize={pageSize}
-              selected={overlay.id === selectedId} tool={tool} store={store} onSelect={onSelect} />
+              selected={overlay.id === selectedId} tool={tool} store={store} onSelect={onSelect} onStyle={onTextStyle} />
           )
             return resolvedOverlayClips(overlay).reduceRight<ReactNode>((child, polygon, clipIndex) => (
               <div key={`${overlay.id}-clip-${clipIndex}`} className="overlay-clip" style={{ clipPath: `polygon(${polygon.map(p => `${p.x * zoom}px ${(pageSize.height - p.y) * zoom}px`).join(',')})` }}>{child}</div>
