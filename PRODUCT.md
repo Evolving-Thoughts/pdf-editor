@@ -47,6 +47,6 @@ Ein PDF-Editor, der PDFs vollständig im Browser bearbeitet: Text, Formen, Bilde
 
 ## Accessibility & Inclusion
 
-- Sprachen: Deutsch und Englisch.
+- Sprachen: Deutsch und Englisch sind gefordert; derzeit gibt es nur Deutsch (siehe „Capabilities and Constraints“).
 - Muss auf dem Handy nutzbar sein (bis 390 px Breite).
 - Tastaturbedienung und Screenreader-Unterstützung sind Pflicht.
