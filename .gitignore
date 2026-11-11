@@ -31,3 +31,7 @@ public/ocr/
 
 # Local QA evidence and downloaded public forms
 qa-artifacts/
+
+# impeccable: lokale Engine-Binaries und Hook-Einstellungen
+.claude/skills/impeccable/scripts/bin/
+.claude/settings.local.json
